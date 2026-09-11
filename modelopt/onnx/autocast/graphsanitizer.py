@@ -118,13 +118,19 @@ class GraphSanitizer:
             node.op_type for node in self.model.graph.node if node.op_type not in self.standard_ops
         }
         if self.custom_ops:
-            from modelopt.onnx.trt_utils import infer_types_shapes_tensorrt, set_trt_plugin_domain
+            from modelopt.onnx import trt_utils
+
+            if not trt_utils.TRT_PYTHON_AVAILABLE:
+                logger.warning(
+                    "TensorRT Python bindings are not available; skipping custom-layer introspection."
+                )
+                return
 
             # Set TensorRT plugin domain info in the graph for ORT compatibility
-            self.model = set_trt_plugin_domain(self.model, self.custom_ops)
+            self.model = trt_utils.set_trt_plugin_domain(self.model, self.custom_ops)
 
             # Infer types and shapes in the graph for ORT compatibility
-            self.model = infer_types_shapes_tensorrt(self.model, self.trt_plugins)
+            self.model = trt_utils.infer_types_shapes_tensorrt(self.model, self.trt_plugins)
 
     def remove_disconnected_outputs(self) -> None:
         """Remove disconnected outputs from the model."""

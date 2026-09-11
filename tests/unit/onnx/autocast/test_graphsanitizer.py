@@ -17,7 +17,38 @@ import numpy as np
 import pytest
 from onnx import TensorProto, helper, numpy_helper
 
+import modelopt.onnx.trt_utils as trt_utils
 from modelopt.onnx.autocast.graphsanitizer import GraphSanitizer
+
+
+def test_find_custom_nodes_without_tensorrt(monkeypatch):
+    """Custom-op discovery should not require the optional TensorRT Python bindings."""
+    x = helper.make_tensor_value_info("X", TensorProto.FLOAT, [1, 4])
+    y = helper.make_tensor_value_info("Y", TensorProto.FLOAT, [1, 4])
+    node = helper.make_node(
+        "SimplifiedLayerNormalization",
+        ["X"],
+        ["Y"],
+        name="layer_norm",
+        domain="com.microsoft",
+    )
+    graph = helper.make_graph([node], "custom_op_test", [x], [y])
+    model = helper.make_model(
+        graph,
+        opset_imports=[
+            helper.make_opsetid("", 18),
+            helper.make_opsetid("com.microsoft", 1),
+        ],
+    )
+    sanitizer = GraphSanitizer(model)
+
+    monkeypatch.setattr(trt_utils, "TRT_PYTHON_AVAILABLE", False)
+
+    sanitizer.find_custom_nodes()
+
+    assert sanitizer.custom_ops == {"SimplifiedLayerNormalization"}
+    assert sanitizer.model.graph.node[0].domain == "com.microsoft"
+    assert all(opset.domain != "trt.plugins" for opset in sanitizer.model.opset_import)
 
 
 def create_layernorm_model(input_shape, epsilon=1e-5, axis=-1, add_scale=True, add_bias=True):
