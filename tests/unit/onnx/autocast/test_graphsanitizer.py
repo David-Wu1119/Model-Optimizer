@@ -26,18 +26,18 @@ def test_find_custom_nodes_without_tensorrt(monkeypatch):
     x = helper.make_tensor_value_info("X", TensorProto.FLOAT, [1, 4])
     y = helper.make_tensor_value_info("Y", TensorProto.FLOAT, [1, 4])
     node = helper.make_node(
-        "SimplifiedLayerNormalization",
+        "FakeTensorRTPlugin",
         ["X"],
         ["Y"],
-        name="layer_norm",
-        domain="com.microsoft",
+        name="plugin",
+        domain="test.plugins",
     )
     graph = helper.make_graph([node], "custom_op_test", [x], [y])
     model = helper.make_model(
         graph,
         opset_imports=[
             helper.make_opsetid("", 18),
-            helper.make_opsetid("com.microsoft", 1),
+            helper.make_opsetid("test.plugins", 1),
         ],
     )
     sanitizer = GraphSanitizer(model)
@@ -46,8 +46,36 @@ def test_find_custom_nodes_without_tensorrt(monkeypatch):
 
     sanitizer.find_custom_nodes()
 
-    assert sanitizer.custom_ops == {"SimplifiedLayerNormalization"}
-    assert sanitizer.model.graph.node[0].domain == "com.microsoft"
+    assert sanitizer.custom_ops == {"FakeTensorRTPlugin"}
+    assert sanitizer.model.graph.node[0].domain == "test.plugins"
+    assert all(opset.domain != "trt.plugins" for opset in sanitizer.model.opset_import)
+
+
+def test_find_custom_nodes_treats_ort_legacy_op_as_known(monkeypatch):
+    """ORT legacy operators should not be treated as TensorRT plugins."""
+    x = helper.make_tensor_value_info("X", TensorProto.FLOAT, [1, 4])
+    y = helper.make_tensor_value_info("Y", TensorProto.FLOAT, [1, 4])
+    scale = numpy_helper.from_array(np.ones(4, dtype=np.float32), name="scale")
+    node = helper.make_node(
+        "SimplifiedLayerNormalization",
+        ["X", "scale"],
+        ["Y"],
+        name="layer_norm",
+    )
+    graph = helper.make_graph([node], "legacy_op_test", [x], [y], [scale])
+    model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 21)])
+    sanitizer = GraphSanitizer(model)
+
+    monkeypatch.setattr(trt_utils, "TRT_PYTHON_AVAILABLE", True)
+
+    def fail_if_called(*args, **kwargs):
+        pytest.fail("ORT legacy operator entered TensorRT plugin handling")
+
+    monkeypatch.setattr(trt_utils, "set_trt_plugin_domain", fail_if_called)
+    sanitizer.find_custom_nodes()
+
+    assert sanitizer.custom_ops == set()
+    assert sanitizer.model.graph.node[0].domain == ""
     assert all(opset.domain != "trt.plugins" for opset in sanitizer.model.opset_import)
 
 

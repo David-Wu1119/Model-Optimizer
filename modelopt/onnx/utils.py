@@ -34,7 +34,7 @@ from modelopt.onnx.logging_config import logger
 # Base minimum opset for quantization (opset 19 is the first to support fp16 scales)
 BASE_MIN_OPSET = 19
 
-# Populated permanently by the first call to check_model.
+# Populated permanently by the first legacy-schema registration.
 _ORT_LEGACY_ONNX_DOMAIN_OPS: frozenset[str] | None = None
 
 
@@ -88,8 +88,8 @@ def _convert_ort_schema(ort_schema: Any) -> onnx.defs.OpSchema:
     )
 
 
-def _register_ort_legacy_schemas() -> frozenset[str]:
-    """Register ORT-only default-domain schemas on the first model check."""
+def register_ort_legacy_schemas() -> frozenset[str]:
+    """Register ORT-only default-domain schemas and return their operator names."""
     global _ORT_LEGACY_ONNX_DOMAIN_OPS
     if _ORT_LEGACY_ONNX_DOMAIN_OPS is not None:
         return _ORT_LEGACY_ONNX_DOMAIN_OPS
@@ -652,7 +652,7 @@ def check_model(model: onnx.ModelProto, model_path: str | None = None) -> None:
         model_path: Optional file-backed copy to validate. Use this for models
             with external data or models too large for protobuf serialization.
     """
-    ort_legacy_ops = _register_ort_legacy_schemas()
+    ort_legacy_ops = register_ort_legacy_schemas()
     legacy_ops = sorted(
         {
             node.op_type
