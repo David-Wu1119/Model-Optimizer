@@ -34,6 +34,89 @@ from modelopt.onnx.logging_config import logger
 # Base minimum opset for quantization (opset 19 is the first to support fp16 scales)
 BASE_MIN_OPSET = 19
 
+# Populated permanently by the first call to check_model.
+_ORT_LEGACY_ONNX_DOMAIN_OPS: frozenset[str] | None = None
+
+
+def _convert_ort_parameter(parameter: Any) -> onnx.defs.OpSchema.FormalParameter:
+    """Rebuild an ORT formal parameter using ONNX's separate pybind type."""
+    schema_type = onnx.defs.OpSchema
+    # The two bindings define equivalent enums but do not share Python types, so
+    # translate by stable enum name instead of relying on their numeric values.
+    return schema_type.FormalParameter(
+        parameter.name,
+        parameter.typeStr,
+        parameter.description or "",
+        param_option=getattr(schema_type.FormalParameterOption, parameter.option.name),
+        is_homogeneous=parameter.isHomogeneous,
+    )
+
+
+def _convert_ort_schema(ort_schema: Any) -> onnx.defs.OpSchema:
+    """Rebuild an ORT operator schema in ONNX's independent schema type.
+
+    ORT vendors its own ONNX C++ library, so its pybind objects and registry are
+    not visible to the separately installed ONNX package.
+    """
+    schema_type = onnx.defs.OpSchema
+    # This is the metadata used by check_model(full_check=False). Native ORT
+    # shape-inference functions cannot cross the binary boundary between wheels.
+    return schema_type(
+        ort_schema.name,
+        ort_schema.domain,
+        ort_schema.since_version,
+        ort_schema.doc or "",
+        inputs=[_convert_ort_parameter(parameter) for parameter in ort_schema.inputs],
+        outputs=[_convert_ort_parameter(parameter) for parameter in ort_schema.outputs],
+        type_constraints=[
+            (
+                constraint.type_param_str,
+                list(constraint.allowed_type_strs),
+                constraint.description or "",
+            )
+            for constraint in ort_schema.type_constraints
+        ],
+        attributes=[
+            schema_type.Attribute(
+                attribute.name,
+                getattr(schema_type.AttrType, attribute.type.name),
+                attribute.description or "",
+                required=attribute.required,
+            )
+            for attribute in ort_schema.attributes.values()
+        ],
+    )
+
+
+def _register_ort_legacy_schemas() -> frozenset[str]:
+    """Register ORT-only default-domain schemas on the first model check."""
+    global _ORT_LEGACY_ONNX_DOMAIN_OPS
+    if _ORT_LEGACY_ONNX_DOMAIN_OPS is not None:
+        return _ORT_LEGACY_ONNX_DOMAIN_OPS
+
+    # ORT exposes its independently compiled schema registry only through this
+    # private binding. Import it lazily with schema registration.
+    from onnxruntime.capi._pybind_state import get_all_operator_schema
+
+    onnx_standard_ops = {
+        schema.name for schema in onnx.defs.get_all_schemas_with_history() if not schema.domain
+    }
+    # Filter by name so ORT cannot add alternate schema histories for operators
+    # that ONNX already owns; only genuinely missing default-domain ops are added.
+    legacy_schemas = sorted(
+        (
+            schema
+            for schema in get_all_operator_schema()
+            if not schema.domain and schema.name not in onnx_standard_ops
+        ),
+        key=lambda schema: (schema.name, schema.since_version),
+    )
+    for schema in legacy_schemas:
+        onnx.defs.register_schema(_convert_ort_schema(schema))
+
+    _ORT_LEGACY_ONNX_DOMAIN_OPS = frozenset(schema.name for schema in legacy_schemas)
+    return _ORT_LEGACY_ONNX_DOMAIN_OPS
+
 
 def get_input_names_from_bytes(model_bytes: bytes, external_inputs_only: bool = True) -> list[str]:
     """This function returns the inputs names of the given onnx model in bytes.
@@ -556,8 +639,38 @@ def duplicate_shared_constants(onnx_model: onnx.ModelProto) -> tuple[onnx.ModelP
     return onnx_model, is_modified
 
 
-def check_model(model: onnx.ModelProto) -> None:
-    """Checks if the given model is valid."""
+def check_model(model: onnx.ModelProto, model_path: str | None = None) -> None:
+    """Check whether a model is structurally valid.
+
+    ONNX Runtime legacy operators registered in the default ONNX domain are
+    accepted by this initial guard. Whether they can execute remains the
+    responsibility of the selected backend.
+
+    Args:
+        model: Loaded in-memory ONNX model. Used for validation unless
+            model_path is supplied and for detecting legacy operators.
+        model_path: Optional file-backed copy to validate. Use this for models
+            with external data or models too large for protobuf serialization.
+    """
+    ort_legacy_ops = _register_ort_legacy_schemas()
+    legacy_ops = sorted(
+        {
+            node.op_type
+            for node in model.graph.node
+            if not node.domain and node.op_type in ort_legacy_ops
+        }
+    )
+    if legacy_ops:
+        logger.warning(
+            "Model uses ONNX Runtime legacy operator(s) in the default ONNX domain: %s. "
+            "Execution support is delegated to the selected backend.",
+            legacy_ops,
+        )
+
+    if model_path is not None:
+        onnx.checker.check_model(model_path)
+        return
+
     save_as_external_data = False
     try:
         model_size = model.ByteSize()
