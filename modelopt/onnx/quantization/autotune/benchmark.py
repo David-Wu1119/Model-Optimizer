@@ -392,6 +392,10 @@ class TrtExecBenchmark(Benchmark):
         )
         self.remote_bin_path: str = "trtexec"
         self.remote_lib_path: str = ""
+        # Probed once on the first run() call: True → use trtexec_safe, False → trtexec --safe.
+        # None means not yet probed.  All candidates in an autotune run use the same binary so
+        # latency measurements remain comparable.
+        self._remote_use_trtexec_safe: bool | None = None
 
         remote_value = _extract_remote_config_value(self.trtexec_args, log=self.logger)
         if remote_value is not None:
@@ -428,6 +432,48 @@ class TrtExecBenchmark(Benchmark):
                 self.logger.debug(f"Cleaned up temporary directory: {self.temp_dir}")
             except Exception as e:
                 self.logger.warning(f"Failed to cleanup temporary directory: {e}")
+
+    def _probe_remote_trtexec_safe(self) -> bool:
+        """Return True if ``trtexec_safe`` exists and is executable on the remote host.
+
+        Called at most once per benchmark instance (result is cached in
+        ``self._remote_use_trtexec_safe``).  All candidates in an autotune run
+        therefore use the same binary and produce comparable latency numbers.
+
+        If the SSH probe itself raises an exception the method logs a warning and
+        returns ``False`` so the caller falls back to ``trtexec --safe``.
+        """
+        safe_binary = os.path.join(self.remote_bin_path, "trtexec_safe")
+        probe_cmd = [
+            "ssh",
+            "-oStrictHostKeyChecking=accept-new",
+            "-p",
+            str(self.remote_port),
+            f"{self.remote_user}@{self.remote_ip}",
+            f"test -x {shlex.quote(safe_binary)}",
+        ]
+        try:
+            result = subprocess.run(
+                probe_cmd,
+                capture_output=True,
+                text=True,
+                timeout=self.network_timeout_seconds,
+            )  # nosec B603 — list-form, no shell=True; user/host validated against leading -
+            if result.returncode == 0:
+                self.logger.debug(f"trtexec_safe found at {safe_binary!r} on remote host")
+                return True
+            self.logger.warning(
+                f"trtexec_safe not found at {safe_binary!r} on remote host "
+                f"(probe exit {result.returncode}); "
+                "will use 'trtexec --safe' for all candidates in this run"
+            )
+            return False
+        except Exception as e:
+            self.logger.warning(
+                f"Remote binary probe failed ({e}); "
+                "will use 'trtexec --safe' for all candidates in this run"
+            )
+            return False
 
     def run(
         self,
@@ -506,46 +552,33 @@ class TrtExecBenchmark(Benchmark):
                     ld_path = (
                         f"LD_LIBRARY_PATH={shlex.quote(self.remote_lib_path)}:$LD_LIBRARY_PATH"
                     )
-                    trt_path = f"{os.path.join(self.remote_bin_path, 'trtexec_safe')}"
-                    trtexec_safe_cmd = [
+                    # Probe the remote binary once per instance so all candidates use the same
+                    # binary and latency measurements stay comparable across the autotune run.
+                    if self._remote_use_trtexec_safe is None:
+                        self._remote_use_trtexec_safe = self._probe_remote_trtexec_safe()
+                    if self._remote_use_trtexec_safe:
+                        trt_path = os.path.join(self.remote_bin_path, "trtexec_safe")
+                        extra_flags = ""
+                    else:
+                        trt_path = os.path.join(self.remote_bin_path, "trtexec")
+                        extra_flags = "--safe "
+                    remote_run_cmd = [
                         "ssh",
                         "-oStrictHostKeyChecking=accept-new",
                         "-p",
                         f"{self.remote_port}",
                         f"{self.remote_user}@{self.remote_ip}",
-                        f"{ld_path} {shlex.quote(trt_path)} --useCudaGraph "
+                        f"{ld_path} {shlex.quote(trt_path)} {extra_flags}--useCudaGraph "
                         f"--warmUp={self.warmup_runs} --iterations={self.timing_runs} "
                         f"--avgRuns={self.timing_runs} --duration=0 "
                         f"--loadEngine={shlex.quote(self.remote_engine_path)}",
                     ]
-
                     result = subprocess.run(
-                        trtexec_safe_cmd,
+                        remote_run_cmd,
                         capture_output=True,
                         text=True,
                         timeout=self.network_timeout_seconds,
                     )  # nosec B603 — list-form, no shell=True; user/host validated against leading -
-                    if result.returncode != 0:
-                        # fallback and try trtexec with "--safe" in case this is a safety proxy target
-                        trt_path = f"{os.path.join(self.remote_bin_path, 'trtexec')}"
-                        trtexec_safe_cmd = [
-                            "ssh",
-                            "-oStrictHostKeyChecking=accept-new",
-                            "-p",
-                            f"{self.remote_port}",
-                            f"{self.remote_user}@{self.remote_ip}",
-                            f"{ld_path} {shlex.quote(trt_path)} --safe --useCudaGraph "
-                            f"--warmUp={self.warmup_runs} --iterations={self.timing_runs} "
-                            f"--avgRuns={self.timing_runs} --duration=0 "
-                            f"--loadEngine={shlex.quote(self.remote_engine_path)}",
-                        ]
-
-                        result = subprocess.run(
-                            trtexec_safe_cmd,
-                            capture_output=True,
-                            text=True,
-                            timeout=self.network_timeout_seconds,
-                        )  # nosec B603 — list-form, no shell=True; user/host validated against leading -
                 finally:
                     # Cleanup remote engine file after benchmarking to avoid disk filling up
                     cleanup_cmd = [
@@ -567,8 +600,13 @@ class TrtExecBenchmark(Benchmark):
                         self.logger.warning(f"Error during remote engine cleanup: {e}")
 
             if result.returncode != 0:
+                binary_name = (
+                    ("trtexec_safe" if self._remote_use_trtexec_safe else "trtexec --safe")
+                    if self.has_remote_config
+                    else "trtexec"
+                )
                 self.logger.error(
-                    f"Failed to run trtexec_safe or trtexec with '--safe'\n"
+                    f"{binary_name} failed (exit {result.returncode}):\n"
                     f"{_redact_url_password(result.stdout)}\n{_redact_url_password(result.stderr)}"
                 )
                 return float("inf")

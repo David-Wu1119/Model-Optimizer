@@ -23,13 +23,17 @@ invoked. They cover:
   ``--key value`` forms) and the validation errors it raises.
 - Auto-injection of ``--safe`` and ``--skipInference`` for remote autotuning.
 - The ``run()`` pipeline: standard local invocation; remote scp + ssh
-  ``trtexec_safe`` invocation; fallback to ``trtexec --safe`` when
-  ``trtexec_safe`` is absent.
+  invocation using the binary chosen by the one-time probe.
+- Binary probe (``ssh test -x``): probed once per instance on the first
+  ``run()`` call; ``trtexec_safe`` is used when found, ``trtexec --safe``
+  otherwise.  All candidates in an autotune run use the same binary so
+  latency measurements are comparable.
 - SSH key-based auth only: no sshpass prefixes in any subprocess command.
-- Latency parsing via ``_STD_PATTERN`` (``[I] GPU Compute Time: … median``),
-  which is used for both local and remote paths.
+- Latency parsing via ``[I] GPU Compute Time: … median``, used for both
+  local and remote paths.
 - Error paths: non-zero trtexec returncode, scp failure, missing trtexec
-  binary, unparseable stdout.
+  binary, unparseable stdout, ssh failure (stderr logged, not silently
+  retried with a different binary).
 """
 
 import sys
@@ -582,12 +586,184 @@ def remote_bench(tmp_path, trtexec_version_ok):
 
     Requires ``trtexec_version_ok`` so ``_check_for_trtexec`` is patched during
     ``TrtExecBenchmark.__init__``.
+
+    The probe result is pre-set to ``True`` (trtexec_safe found) so individual
+    tests that exercise the ``run()`` pipeline do not need to mock the one-time
+    ``ssh test -x`` probe call.  Tests that specifically test probe behaviour
+    should reset ``remote_bench._remote_use_trtexec_safe`` (or ``None``) and
+    mock ``subprocess.run`` themselves.
     """
     del trtexec_version_ok  # consumed via pytest fixture injection
-    return TrtExecBenchmark(
+    b = TrtExecBenchmark(
         timing_cache_file=str(tmp_path / "cache.bin"),
         trtexec_args=[f"--remoteAutoTuningConfig={_REMOTE_URL}"],
     )
+    b._remote_use_trtexec_safe = True
+    return b
+
+
+# --- _probe_remote_trtexec_safe ---
+
+
+@pytest.mark.usefixtures("trtexec_version_ok")
+def test_probe_uses_ssh_test_x_command(tmp_path):
+    """The probe issues ``ssh ... test -x <path>/trtexec_safe``."""
+    b = TrtExecBenchmark(
+        timing_cache_file=str(tmp_path / "cache.bin"),
+        trtexec_args=[f"--remoteAutoTuningConfig={_REMOTE_URL}"],
+    )
+    probe_proc = _make_proc(returncode=0)
+    with patch("subprocess.run", return_value=probe_proc) as run_mock:
+        b._probe_remote_trtexec_safe()
+
+    cmd = run_mock.call_args.args[0]
+    assert cmd[0] == "ssh"
+    assert "test -x" in cmd[-1]
+    assert "trtexec_safe" in cmd[-1]
+
+
+@pytest.mark.usefixtures("trtexec_version_ok")
+def test_probe_found_sets_use_trtexec_safe_true(tmp_path):
+    """When the probe succeeds (exit 0), ``_remote_use_trtexec_safe`` is True."""
+    b = TrtExecBenchmark(
+        timing_cache_file=str(tmp_path / "cache.bin"),
+        trtexec_args=[f"--remoteAutoTuningConfig={_REMOTE_URL}"],
+    )
+    with patch("subprocess.run", return_value=_make_proc(returncode=0)):
+        assert b._probe_remote_trtexec_safe() is True
+
+
+@pytest.mark.usefixtures("trtexec_version_ok")
+def test_probe_absent_sets_use_trtexec_safe_false(tmp_path):
+    """When the probe fails (non-zero exit), ``_probe_remote_trtexec_safe`` returns False."""
+    b = TrtExecBenchmark(
+        timing_cache_file=str(tmp_path / "cache.bin"),
+        trtexec_args=[f"--remoteAutoTuningConfig={_REMOTE_URL}"],
+    )
+    with patch("subprocess.run", return_value=_make_proc(returncode=1)):
+        assert b._probe_remote_trtexec_safe() is False
+
+
+@pytest.mark.usefixtures("trtexec_version_ok")
+def test_probe_exception_returns_false(tmp_path):
+    """If the probe raises (e.g. timeout or FileNotFoundError), it returns False (use --safe)."""
+    import subprocess
+
+    b = TrtExecBenchmark(
+        timing_cache_file=str(tmp_path / "cache.bin"),
+        trtexec_args=[f"--remoteAutoTuningConfig={_REMOTE_URL}"],
+    )
+    with patch(
+        "subprocess.run",
+        side_effect=subprocess.TimeoutExpired(cmd=["ssh"], timeout=5.0),
+    ):
+        assert b._probe_remote_trtexec_safe() is False
+
+
+@pytest.mark.usefixtures("trtexec_version_ok")
+def test_probe_uses_network_timeout(tmp_path):
+    """The probe subprocess call passes ``network_timeout_seconds`` as the timeout."""
+    timeout = 42.0
+    b = TrtExecBenchmark(
+        timing_cache_file=str(tmp_path / "cache.bin"),
+        trtexec_args=[f"--remoteAutoTuningConfig={_REMOTE_URL}"],
+        network_timeout_seconds=timeout,
+    )
+    with patch("subprocess.run", return_value=_make_proc(returncode=0)) as run_mock:
+        b._probe_remote_trtexec_safe()
+
+    assert run_mock.call_args.kwargs.get("timeout") == timeout
+
+
+@pytest.mark.usefixtures("trtexec_version_ok")
+def test_probe_is_cached_across_multiple_runs(tmp_path):
+    """The probe runs exactly once regardless of how many times ``run()`` is called."""
+    b = TrtExecBenchmark(
+        timing_cache_file=str(tmp_path / "cache.bin"),
+        trtexec_args=[f"--remoteAutoTuningConfig={_REMOTE_URL}"],
+    )
+    safe_stdout = "[I] GPU Compute Time: median = 1.0 ms"
+    trtexec_proc = _make_proc(stdout="")
+    scp_proc = _make_proc()
+    probe_proc = _make_proc(returncode=0)
+    ssh_proc = _make_proc(stdout=safe_stdout)
+    cleanup_proc = _make_proc()
+
+    # Two run() calls: probe appears only once (after first scp), then cached.
+    with patch(
+        "subprocess.run",
+        side_effect=[
+            trtexec_proc,
+            scp_proc,
+            probe_proc,
+            ssh_proc,
+            cleanup_proc,  # first run
+            trtexec_proc,
+            scp_proc,
+            ssh_proc,
+            cleanup_proc,  # second run (no probe)
+        ],
+    ) as run_mock:
+        b.run(str(tmp_path / "m.onnx"))
+        b.run(str(tmp_path / "m.onnx"))
+
+    assert run_mock.call_count == 9  # 5 + 4; probe only in first run
+    probe_call = run_mock.call_args_list[2].args[0]
+    assert "test -x" in probe_call[-1]
+
+
+@pytest.mark.usefixtures("trtexec_version_ok")
+def test_probe_found_uses_trtexec_safe_binary(tmp_path):
+    """When probe finds trtexec_safe, the ssh command uses ``trtexec_safe`` (no ``--safe``)."""
+    b = TrtExecBenchmark(
+        timing_cache_file=str(tmp_path / "cache.bin"),
+        trtexec_args=[f"--remoteAutoTuningConfig={_REMOTE_URL}"],
+    )
+    safe_stdout = "[I] GPU Compute Time: median = 2.5 ms"
+    with patch(
+        "subprocess.run",
+        side_effect=[
+            _make_proc(stdout=""),  # trtexec (local build)
+            _make_proc(),  # scp
+            _make_proc(returncode=0),  # probe: trtexec_safe found
+            _make_proc(stdout=safe_stdout),  # ssh
+            _make_proc(),  # cleanup
+        ],
+    ) as run_mock:
+        latency = b.run(str(tmp_path / "m.onnx"))
+
+    assert latency == pytest.approx(2.5)
+    ssh_cmd = run_mock.call_args_list[3].args[0]
+    remote_cmd_str = ssh_cmd[-1]
+    assert "trtexec_safe" in remote_cmd_str
+    assert "--safe " not in remote_cmd_str  # --safe flag not injected
+
+
+@pytest.mark.usefixtures("trtexec_version_ok")
+def test_probe_absent_uses_trtexec_safe_flag(tmp_path):
+    """When probe finds no trtexec_safe, the ssh command uses ``trtexec --safe``."""
+    b = TrtExecBenchmark(
+        timing_cache_file=str(tmp_path / "cache.bin"),
+        trtexec_args=[f"--remoteAutoTuningConfig={_REMOTE_URL}"],
+    )
+    std_stdout = "[I] GPU Compute Time: median = 3.5 ms"
+    with patch(
+        "subprocess.run",
+        side_effect=[
+            _make_proc(stdout=""),  # trtexec (local build)
+            _make_proc(),  # scp
+            _make_proc(returncode=127),  # probe: trtexec_safe not found
+            _make_proc(stdout=std_stdout),  # ssh (trtexec --safe)
+            _make_proc(),  # cleanup
+        ],
+    ) as run_mock:
+        latency = b.run(str(tmp_path / "m.onnx"))
+
+    assert latency == pytest.approx(3.5)
+    ssh_cmd = run_mock.call_args_list[3].args[0]
+    remote_cmd_str = ssh_cmd[-1]
+    assert "trtexec_safe" not in remote_cmd_str
+    assert "--safe " in remote_cmd_str
 
 
 def test_remote_run_scp_then_ssh_trtexec_safe(remote_bench, tmp_path):
@@ -641,23 +817,24 @@ def test_remote_run_scp_failure_returns_inf(remote_bench, tmp_path):
     assert run_mock.call_count == 3  # trtexec, scp, cleanup (no main ssh call)
 
 
-def test_remote_run_falls_back_to_trtexec_safe_flag(remote_bench, tmp_path):
-    """If ``trtexec_safe`` errors, fall back to ``trtexec --safe`` and parse _STD_PATTERN."""
+def test_remote_run_uses_safe_flag_when_probe_absent(remote_bench, tmp_path):
+    """When the probe determined ``trtexec_safe`` is absent, ``trtexec --safe`` is used."""
+    remote_bench._remote_use_trtexec_safe = False  # probe already decided: use --safe
     trtexec_proc = _make_proc(stdout="")
     scp_proc = _make_proc()
-    safe_bin_fail = _make_proc(returncode=127, stderr="trtexec_safe: not found")
-    fallback_stdout = "[I] GPU Compute Time: median = 5.55 ms"
-    fallback_proc = _make_proc(stdout=fallback_stdout)
+    std_stdout = "[I] GPU Compute Time: median = 5.55 ms"
+    std_proc = _make_proc(stdout=std_stdout)
+    cleanup_proc = _make_proc()
 
     with patch(
         "subprocess.run",
-        side_effect=[trtexec_proc, scp_proc, safe_bin_fail, fallback_proc],
+        side_effect=[trtexec_proc, scp_proc, std_proc, cleanup_proc],
     ) as run_mock:
         latency = remote_bench.run(str(tmp_path / "m.onnx"))
 
     assert latency == pytest.approx(5.55)
-    fallback_cmd = run_mock.call_args_list[-2].args[0]
-    remote_cmd_str = fallback_cmd[-1]
+    ssh_cmd = run_mock.call_args_list[2].args[0]
+    remote_cmd_str = ssh_cmd[-1]
     assert "trtexec --safe" in remote_cmd_str
     assert "trtexec_safe" not in remote_cmd_str
     assert "--useCudaGraph" in remote_cmd_str
@@ -665,19 +842,26 @@ def test_remote_run_falls_back_to_trtexec_safe_flag(remote_bench, tmp_path):
     assert "--duration=0" in remote_cmd_str
 
 
-def test_remote_run_both_safe_paths_fail_returns_inf(remote_bench, tmp_path):
-    """If both ``trtexec_safe`` and the ``trtexec --safe`` fallback fail, return ``inf``."""
+def test_remote_run_ssh_failure_returns_inf_and_logs_stderr(remote_bench, tmp_path, caplog):
+    """A non-zero exit from the remote binary returns ``inf``; its stderr is logged, not silently
+    discarded.  No second attempt with a different binary is made."""
     trtexec_proc = _make_proc(stdout="")
     scp_proc = _make_proc()
-    safe_bin_fail = _make_proc(returncode=127, stderr="not found")
-    fallback_fail = _make_proc(returncode=1, stderr="also failed")
+    ssh_fail = _make_proc(returncode=1, stderr="engine load failed: driver version mismatch")
     cleanup_proc = _make_proc()
 
-    with patch(
-        "subprocess.run",
-        side_effect=[trtexec_proc, scp_proc, safe_bin_fail, fallback_fail, cleanup_proc],
+    with (
+        caplog.at_level("ERROR", logger="modelopt.onnx"),
+        patch(
+            "subprocess.run",
+            side_effect=[trtexec_proc, scp_proc, ssh_fail, cleanup_proc],
+        ) as run_mock,
     ):
-        assert remote_bench.run(str(tmp_path / "m.onnx")) == float("inf")
+        result = remote_bench.run(str(tmp_path / "m.onnx"))
+
+    assert result == float("inf")
+    assert run_mock.call_count == 4  # trtexec, scp, ssh, cleanup — no second ssh attempt
+    assert any("engine load failed" in r.getMessage() for r in caplog.records)
 
 
 @pytest.mark.usefixtures("trtexec_version_ok")
@@ -738,29 +922,29 @@ def test_local_trtexec_call_uses_no_timeout(bench, tmp_path):
 
 @pytest.mark.usefixtures("trtexec_version_ok")
 def test_remote_pipeline_passes_timeout_to_scp_and_ssh(tmp_path):
-    """scp, ssh trtexec_safe, and the ssh fallback all receive ``network_timeout_seconds``."""
+    """scp, ssh (remote binary), and cleanup ssh all receive ``network_timeout_seconds``."""
     timeout = 7.0
     b = TrtExecBenchmark(
         timing_cache_file=str(tmp_path / "cache.bin"),
         trtexec_args=[f"--remoteAutoTuningConfig={_REMOTE_URL}"],
         network_timeout_seconds=timeout,
     )
+    b._remote_use_trtexec_safe = True  # skip probe; exercise scp + ssh + cleanup
 
     trtexec_proc = _make_proc(stdout="")
     scp_proc = _make_proc()
-    safe_fail = _make_proc(returncode=1, stderr="trtexec_safe not found")
-    fallback_proc = _make_proc(stdout="[I] GPU Compute Time: median = 4.0 ms")
+    ssh_proc = _make_proc(stdout="[I] GPU Compute Time: median = 4.0 ms")
     cleanup_proc = _make_proc()
 
     with patch(
         "subprocess.run",
-        side_effect=[trtexec_proc, scp_proc, safe_fail, fallback_proc, cleanup_proc],
+        side_effect=[trtexec_proc, scp_proc, ssh_proc, cleanup_proc],
     ) as run_mock:
         b.run(str(tmp_path / "m.onnx"))
 
-    # Engine build (call 0) has no timeout; the four remote calls all use it.
+    # Engine build (call 0) has no timeout; the three remote calls all use it.
     assert run_mock.call_args_list[0].kwargs.get("timeout") is None
-    for idx in (1, 2, 3, 4):  # scp, ssh trtexec_safe, ssh fallback, cleanup ssh
+    for idx in (1, 2, 3):  # scp, ssh, cleanup ssh
         assert run_mock.call_args_list[idx].kwargs.get("timeout") == timeout, (
             f"call {idx} did not receive timeout={timeout}"
         )
@@ -798,6 +982,7 @@ def test_ssh_trtexec_safe_timeout_returns_inf(tmp_path):
         trtexec_args=[f"--remoteAutoTuningConfig={_REMOTE_URL}"],
         network_timeout_seconds=1.0,
     )
+    b._remote_use_trtexec_safe = True  # skip probe
     trtexec_proc = _make_proc(stdout="")
     scp_proc = _make_proc()
     timeout_exc = subprocess.TimeoutExpired(cmd=["ssh"], timeout=1.0)
@@ -811,8 +996,8 @@ def test_ssh_trtexec_safe_timeout_returns_inf(tmp_path):
 
 
 @pytest.mark.usefixtures("trtexec_version_ok")
-def test_ssh_fallback_timeout_returns_inf(tmp_path):
-    """A timeout on the ``trtexec --safe`` fallback ssh call returns ``inf``."""
+def test_ssh_std_timeout_returns_inf(tmp_path):
+    """A timeout on the ``trtexec --safe`` ssh call (when probe chose std binary) returns ``inf``."""
     import subprocess
 
     b = TrtExecBenchmark(
@@ -820,15 +1005,15 @@ def test_ssh_fallback_timeout_returns_inf(tmp_path):
         trtexec_args=[f"--remoteAutoTuningConfig={_REMOTE_URL}"],
         network_timeout_seconds=1.0,
     )
+    b._remote_use_trtexec_safe = False  # probe determined: use trtexec --safe
     trtexec_proc = _make_proc(stdout="")
     scp_proc = _make_proc()
-    safe_fail = _make_proc(returncode=1, stderr="trtexec_safe failed")
     timeout_exc = subprocess.TimeoutExpired(cmd=["ssh"], timeout=1.0)
     cleanup_proc = _make_proc()
 
     with patch(
         "subprocess.run",
-        side_effect=[trtexec_proc, scp_proc, safe_fail, timeout_exc, cleanup_proc],
+        side_effect=[trtexec_proc, scp_proc, timeout_exc, cleanup_proc],
     ):
         assert b.run(str(tmp_path / "m.onnx")) == float("inf")
 
@@ -845,6 +1030,7 @@ def test_remote_scp_and_ssh_commands_contain_no_sshpass(tmp_path):
         timing_cache_file=str(tmp_path / "cache.bin"),
         trtexec_args=[f"--remoteAutoTuningConfig={_REMOTE_URL}"],
     )
+    b._remote_use_trtexec_safe = True  # skip probe
     trtexec_proc = _make_proc(stdout="")
     scp_proc = _make_proc()
     safe_stdout = (
@@ -880,6 +1066,7 @@ def test_remote_config_url_with_password_is_ignored(tmp_path):
         timing_cache_file=str(tmp_path / "cache.bin"),
         trtexec_args=[f"--remoteAutoTuningConfig={url_with_password}"],
     )
+    b._remote_use_trtexec_safe = True  # skip probe
     # Parsed fields must not expose the password.
     assert not hasattr(b, "remote_password")
     assert b.remote_user == "alice"
