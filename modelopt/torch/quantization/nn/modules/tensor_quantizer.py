@@ -179,7 +179,7 @@ class TensorQuantizer(nn.Module):
         "ds_grads_remaining",
         "ds_id",
         "pre_bwd_fn",
-        # quantizer cache for custom backends, like luts
+        # Quantizer cache for registered format-specific backends.
         "_quantizer_cache",
         # Runtime-only set of storage attributes tied to shared state. The tied
         # aliases are rebuilt from calibration config and tensor state during restore.

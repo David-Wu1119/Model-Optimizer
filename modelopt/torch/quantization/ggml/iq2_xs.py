@@ -40,8 +40,8 @@
 
 """IQ2_XS fake quantization and GGML-compatible block packing.
 
-The encoder follows the PSX-LUTS search_impl="auto" search. Every 256
-logical values become one 74-byte block_iq2_xs payload:
+The encoder follows the canonical GGML-compatible search_impl="auto" search. Every complete or
+right-padded 256-value row segment becomes one 74-byte block_iq2_xs payload:
 
 * bytes 0..1: little-endian FP16 super-block scale d
 * bytes 2..65: 32 little-endian uint16 codes (9-bit grid + 7-bit sign)
@@ -56,7 +56,13 @@ from functools import cache
 
 import torch
 
-from .common import GGML_BLOCK_SIZE, validate_packed_weights, validate_weight
+from .common import (
+    GGML_BLOCK_SIZE,
+    pad_weight_rows,
+    padded_weight_shape,
+    validate_packed_weights,
+    validate_weight,
+)
 
 __all__ = [
     "IQ2_XS_BLOCK_BYTES",
@@ -218,15 +224,18 @@ def quantize_iq2_xs(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Pack a floating-point weight into GGML-compatible IQ2_XS blocks.
 
-    Returned shapes are ``[*weight.shape[:-1], weight.shape[-1] // 256, 74]``
-    and ``[weight.ndim]``. Both tensors remain on the weight's device.
+    Each logical row is right-padded to a multiple of 256. Returned shapes are
+    ``[*weight.shape[:-1], ceil(weight.shape[-1] / 256), 74]`` and ``[weight.ndim]``.
+    Both tensors remain on the weight's device.
     """
     validate_weight(weight, "IQ2_XS")
     if block_chunk_size <= 0:
         raise ValueError(f"block_chunk_size must be positive, got {block_chunk_size}")
 
     logical_shape = torch.tensor(weight.shape, dtype=torch.int64, device=weight.device)
-    blocks = weight.contiguous().reshape(-1, IQ2_XS_BLOCK_SIZE)
+    padded_weight = pad_weight_rows(weight)
+    blocks = padded_weight.reshape(-1, IQ2_XS_BLOCK_SIZE)
+    blocks_per_row = padded_weight.shape[-1] // IQ2_XS_BLOCK_SIZE
     grid = iq2_xs_grid(weight.device)
     if weight.is_cuda:
         from ..extensions import get_cuda_ext_iq2_xs
@@ -236,7 +245,7 @@ def quantize_iq2_xs(
             packed = extension.pack(blocks, grid)
             packed_shape = (
                 *weight.shape[:-1],
-                weight.shape[-1] // IQ2_XS_BLOCK_SIZE,
+                blocks_per_row,
                 IQ2_XS_BLOCK_BYTES,
             )
             return packed.reshape(packed_shape), logical_shape
@@ -247,7 +256,7 @@ def quantize_iq2_xs(
     ]
     packed_shape = (
         *weight.shape[:-1],
-        weight.shape[-1] // IQ2_XS_BLOCK_SIZE,
+        blocks_per_row,
         IQ2_XS_BLOCK_BYTES,
     )
     return torch.cat(chunks).reshape(packed_shape), logical_shape
@@ -285,13 +294,14 @@ def dequantize_iq2_xs(
     scales = d.unsqueeze(-1) * (2 * local + 1).float() / 8.0
     values = iq2_xs_grid(blocks.device)[entries] * signs
     decoded = values * scales.repeat_interleave(2, dim=1).unsqueeze(-1)
-    return decoded.reshape(shape).to(dtype)
+    padded_shape = padded_weight_shape(shape)
+    return decoded.reshape(padded_shape)[..., : shape[-1]].to(dtype)
 
 
 def iq2_xs_fake_quant(inputs: torch.Tensor, quantizer) -> torch.Tensor:
     """IQ2_XS backend for TensorQuantizer, with pass-through backward."""
     if getattr(quantizer, "num_bits", None) != "iq2_xs":
-        raise ValueError("The psx_luts IQ2_XS backend requires num_bits='iq2_xs'")
+        raise ValueError("The ggml IQ2_XS backend requires num_bits='iq2_xs'")
     extra_args = getattr(quantizer, "backend_extra_args", None) or {}
     search_impl = extra_args.get("search_impl", extra_args.get("iq_search_impl", "auto"))
     if search_impl != "auto":

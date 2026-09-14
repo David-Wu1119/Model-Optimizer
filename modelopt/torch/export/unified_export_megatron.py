@@ -1157,8 +1157,15 @@ class GPTModelExporter:
     ) -> dict[str, torch.Tensor]:
         """Pack one final-layout weight into the IQ unified-checkpoint representation."""
         quantize_iq = quantize_iq1_s if qformat == QUANTIZATION_IQ1_S else quantize_iq2_xs
-        packed_weight, _ = quantize_iq(weight)
-        return {weight_key: packed_weight.detach().cpu()}
+        packed_weight, logical_shape = quantize_iq(weight)
+        padded_shape = logical_shape.clone()
+        padded_shape[-1] = packed_weight.shape[-2] * 256
+        prefix = weight_key.removesuffix("weight")
+        return {
+            weight_key: packed_weight.detach().cpu(),
+            prefix + "weight_logical_shape": logical_shape.detach().cpu(),
+            prefix + "weight_padded_shape": padded_shape.detach().cpu(),
+        }
 
     def _record_layer_quant_config(self, prefix: str, qformat: str | None, block_size: int | None):
         """Record per-HF-layer quantization metadata for mixed precision exports."""

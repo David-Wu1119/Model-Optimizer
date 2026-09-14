@@ -95,12 +95,12 @@ def _verify_model_quant_config(
 )
 def test_megatron_name_remapping_exports_iq_payload(qformat, payload_bytes, dequantize):
     """Megatron export writes the same scale-free IQ representation as HF export."""
-    linear = torch.nn.Linear(256, 2, bias=False, dtype=torch.bfloat16)
+    linear = torch.nn.Linear(257, 2, bias=False, dtype=torch.bfloat16)
     linear.weight_quantizer = TensorQuantizer(
         QuantizerAttributeConfig(
             num_bits=qformat,
             block_sizes={-1: 256},
-            backend="psx_luts",
+            backend="ggml",
             backend_extra_args={"search_impl": "auto"},
         )
     )
@@ -113,14 +113,12 @@ def test_megatron_name_remapping_exports_iq_payload(qformat, payload_bytes, dequ
     exporter._name_remapping(linear, "model.layers.0.mlp.down_proj.")
 
     packed_key = "model.layers.0.mlp.down_proj.weight"
-    assert exporter._state_dict[packed_key].shape == (2, 1, payload_bytes)
+    assert exporter._state_dict[packed_key].shape == (2, 2, payload_bytes)
     assert exporter._state_dict[packed_key].dtype == torch.uint8
-    logical_shape = torch.tensor(
-        [
-            *exporter._state_dict[packed_key].shape[:-2],
-            exporter._state_dict[packed_key].shape[-2] * 256,
-        ]
-    )
+    logical_shape = exporter._state_dict["model.layers.0.mlp.down_proj.weight_logical_shape"]
+    padded_shape = exporter._state_dict["model.layers.0.mlp.down_proj.weight_padded_shape"]
+    assert logical_shape.tolist() == [2, 257]
+    assert padded_shape.tolist() == [2, 512]
     reconstructed = dequantize(
         exporter._state_dict[packed_key],
         logical_shape,
@@ -140,7 +138,7 @@ def test_megatron_iq_export_rejects_tensor_parallelism():
         QuantizerAttributeConfig(
             num_bits="iq2_xs",
             block_sizes={-1: 256},
-            backend="psx_luts",
+            backend="ggml",
             backend_extra_args={"search_impl": "auto"},
         )
     )

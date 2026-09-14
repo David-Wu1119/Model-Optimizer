@@ -16,6 +16,8 @@
 import pytest
 import torch
 
+import modelopt.torch.quantization.ggml.iq2_xs as iq2_xs_module
+from modelopt.torch.quantization.config import QuantizerAttributeConfig
 from modelopt.torch.quantization.ggml.iq2_xs import (
     IQ2_XS_BLOCK_BYTES,
     dequantize_iq2_xs,
@@ -23,6 +25,7 @@ from modelopt.torch.quantization.ggml.iq2_xs import (
     iq2_xs_grid,
     quantize_iq2_xs,
 )
+from modelopt.torch.quantization.nn import TensorQuantizer
 
 
 def test_iq2_xs_canonical_grid():
@@ -68,9 +71,23 @@ def test_iq2_xs_round_trip_and_payload_fields():
     assert torch.all((codes >> 9) < 128)
 
 
-def test_iq2_xs_requires_complete_last_dimension_blocks():
-    with pytest.raises(ValueError, match="last weight dimension"):
-        quantize_iq2_xs(torch.ones(2, 257))
+def test_iq2_xs_right_pads_each_row_without_crossing_row_boundaries():
+    generator = torch.Generator().manual_seed(4321)
+    weight = torch.randn((2, 257), generator=generator, dtype=torch.bfloat16)
+    explicitly_padded = torch.nn.functional.pad(weight, (0, 255))
+
+    packed, shape = quantize_iq2_xs(weight, block_chunk_size=2)
+    expected, _ = quantize_iq2_xs(explicitly_padded, block_chunk_size=2)
+
+    assert packed.shape == (2, 2, IQ2_XS_BLOCK_BYTES)
+    assert shape.tolist() == [2, 257]
+    assert torch.equal(packed, expected)
+    assert dequantize_iq2_xs(packed, shape).shape == weight.shape
+
+
+def test_iq2_xs_rejects_scalar_weight():
+    with pytest.raises(ValueError, match="at least one dimension"):
+        quantize_iq2_xs(torch.tensor(1.0))
 
 
 def test_iq2_xs_fake_quant_has_pass_through_gradient():
@@ -83,3 +100,33 @@ def test_iq2_xs_fake_quant_has_pass_through_gradient():
     output.sum().backward()
 
     assert torch.equal(weight.grad, torch.ones_like(weight))
+
+
+def test_iq2_xs_tensor_quantizer_matches_row_padded_backend(monkeypatch):
+    generator = torch.Generator().manual_seed(5918)
+    weight = torch.randn((2, 257), generator=generator, dtype=torch.bfloat16)
+    quantizer = TensorQuantizer(
+        QuantizerAttributeConfig(
+            num_bits="iq2_xs",
+            block_sizes={-1: 256},
+            backend="ggml",
+            backend_extra_args={"search_impl": "auto"},
+        )
+    )
+
+    packed_by_fake_quant = []
+    original_quantize = quantize_iq2_xs
+
+    def capture_quantize(inputs):
+        packed, shape = original_quantize(inputs)
+        packed_by_fake_quant.append(packed)
+        return packed, shape
+
+    monkeypatch.setattr(iq2_xs_module, "quantize_iq2_xs", capture_quantize)
+    reconstructed = quantizer(weight)
+    packed, shape = original_quantize(weight)
+    expected = dequantize_iq2_xs(packed, shape, dtype=weight.dtype)
+
+    assert len(packed_by_fake_quant) == 1
+    assert torch.equal(packed_by_fake_quant[0].reshape_as(packed), packed)
+    torch.testing.assert_close(reconstructed, expected, rtol=0, atol=0.0078125)

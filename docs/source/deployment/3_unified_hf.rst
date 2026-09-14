@@ -64,10 +64,16 @@ IQ weight representation
 
 For IQ1_S and IQ2_XS, unified export replaces each floating-point ``<module>.weight`` with a
 ``uint8`` tensor containing byte-exact GGML blocks. Its shape is
-``[*logical_shape[:-1], logical_shape[-1] // 256, payload_bytes]``, where ``payload_bytes`` is 50
-for IQ1_S and 74 for IQ2_XS. No separate shape tensor is stored: a loader recovers the logical
-shape as ``[*weight.shape[:-2], weight.shape[-2] * 256]``. This is unambiguous because IQ export
-requires the logical last dimension to be divisible by 256.
+``[*logical_shape[:-1], ceil(logical_shape[-1] / 256), payload_bytes]``, where ``payload_bytes``
+is 50 for IQ1_S and 74 for IQ2_XS. Export right-pads each logical row with zeros to a multiple of
+256 before packing, so blocks never cross row boundaries. Two ``int64`` sidecars preserve the
+shape contract:
+
+* ``<module>.weight_logical_shape`` records the original tensor shape; and
+* ``<module>.weight_padded_shape`` records the per-row padded shape represented by the payload.
+
+Loaders use the padded shape for block addressing and the logical shape for the matrix operation.
+The padding does not add logical weights and is discarded by dequantization.
 
 Each 74-byte IQ2_XS block represents 256 logical weights:
 
@@ -79,7 +85,8 @@ Each 74-byte IQ2_XS block represents 256 logical weights:
   shared by two adjacent eight-weight groups.
 
 The canonical 512-by-8 IQ2_XS codebook is part of the implementation rather than the checkpoint.
-The complete block therefore costs ``74 * 8 / 256 = 2.3125`` bits per logical weight.
+The complete block costs ``74 * 8 / 256 = 2.3125`` bits per represented weight before any final
+row-padding overhead.
 
 Minimum Framework Versions
 --------------------------

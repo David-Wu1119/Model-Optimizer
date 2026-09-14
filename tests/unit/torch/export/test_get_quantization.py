@@ -61,7 +61,7 @@ def test_iq_quantization_config(num_bits, quantization_format, payload_bytes, ef
                     "cfg": {
                         "num_bits": num_bits,
                         "block_sizes": {-1: 256},
-                        "backend": "psx_luts",
+                        "backend": "ggml",
                         "backend_extra_args": {"search_impl": "auto"},
                     },
                 },
@@ -79,6 +79,9 @@ def test_iq_quantization_config(num_bits, quantization_format, payload_bytes, ef
     assert weights["group_size"] == 256
     assert weights["effective_bits"] == effective_bits
     assert weights["packing"] == "ggml"
+    assert weights["row_padding"] == "right"
+    assert weights["logical_shape_key"] == "weight_logical_shape"
+    assert weights["padded_shape_key"] == "weight_padded_shape"
 
 
 class _FakeKVCacheQuantizer(torch.nn.Module):

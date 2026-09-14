@@ -222,7 +222,13 @@ def _export_fused_experts(
                 proj.weight = wrapper.weight
             else:
                 proj.register_buffer("weight", wrapper.weight)
-            for attr in ("weight_scale", "weight_scale_2", "input_scale"):
+            for attr in (
+                "weight_scale",
+                "weight_scale_2",
+                "input_scale",
+                "weight_logical_shape",
+                "weight_padded_shape",
+            ):
                 if hasattr(wrapper, attr):
                     proj.register_buffer(attr, getattr(wrapper, attr))
 

@@ -2117,6 +2117,14 @@ def _reconstruct_fused_moe_linear(model: nn.Module) -> None:
                     torch.stack([getattr(experts[i], attr) for i in range(n)]),
                 )
 
+        for attr in ("weight_logical_shape", "weight_padded_shape"):
+            if not all(hasattr(experts[i], attr) for i in range(n)):
+                continue
+            expert_shape = getattr(experts[0], attr)
+            if not all(torch.equal(getattr(experts[i], attr), expert_shape) for i in range(1, n)):
+                raise ValueError(f"Cannot reconstruct fused experts with inconsistent {attr}")
+            module.register_buffer(attr, torch.cat([expert_shape.new_tensor([n]), expert_shape]))
+
         # Remove expanded experts — the reconstructed 3D tensors replace them
         del module.experts
 

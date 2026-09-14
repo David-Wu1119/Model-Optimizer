@@ -35,18 +35,25 @@ from _test_utils.torch.quantization.tied_modules import (
     wrap_in_parent_with_tied_keys,
 )
 
+import modelopt.torch.export.unified_export_hf as unified_export_hf
+import modelopt.torch.export.unified_export_hf_streaming as unified_export_hf_streaming
 import modelopt.torch.quantization as mtq
 from modelopt.torch.export.model_utils import TiedWeightMap
 from modelopt.torch.export.quant_format import KV_CACHE_FP8
 from modelopt.torch.export.quant_utils import _postprocess_single_tensor
-from modelopt.torch.export.unified_export_hf import _export_quantized_weight
+from modelopt.torch.export.unified_export_hf import (
+    _export_quantized_weight,
+    _export_transformers_checkpoint,
+)
 from modelopt.torch.export.unified_export_hf_streaming import (
+    _export_transformers_checkpoint_streaming,
     _parse_shard_size,
     _StreamingShardWriter,
     name_shards_and_write_index,
 )
 from modelopt.torch.quantization.nn.modules.quant_linear import RealQuantLinear
 from modelopt.torch.quantization.utils.core_utils import has_accelerate_offload
+from modelopt.torch.quantization.utils.layerwise_calib import LayerActivationCollector
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -69,6 +76,47 @@ def _offload_module(module):
     hook = AlignDevicesHook(execution_device="cpu", offload=True, weights_map=weights_map)
     add_hook_to_module(module, hook)
     set_module_tensor_to_device(module, "weight", "meta")
+
+
+class _ExportConfig:
+    torch_dtype = torch.bfloat16
+    tie_word_embeddings = False
+    _name_or_path = ""
+
+    def save_pretrained(self, export_dir):
+        Path(export_dir, "config.json").write_text("{}")
+
+
+class _SingleLayerModel(nn.Module):
+    def __init__(self, weight):
+        super().__init__()
+        self.layers = nn.ModuleList(
+            [nn.Linear(weight.shape[1], weight.shape[0], bias=False, dtype=weight.dtype)]
+        )
+        self.layers[0].weight.data.copy_(weight)
+        self.config = _ExportConfig()
+
+
+def _quantize_iq_weight(model, num_bits):
+    mtq.quantize(
+        model,
+        {
+            "quant_cfg": [
+                {"quantizer_name": "*", "enable": False},
+                {
+                    "quantizer_name": "*weight_quantizer",
+                    "cfg": {
+                        "num_bits": num_bits,
+                        "block_sizes": {-1: 256},
+                        "backend": "ggml",
+                        "backend_extra_args": {"search_impl": "auto"},
+                    },
+                    "enable": True,
+                },
+            ],
+            "algorithm": "max",
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -346,6 +394,57 @@ def test_postprocess_passthrough_normal_key():
     assert key == "model.layers.0.self_attn.q_proj.weight"
     assert val is not None
     assert val.shape == (4, 4)
+
+
+@pytest.mark.parametrize("suffix", ["weight_logical_shape", "weight_padded_shape"])
+def test_postprocess_preserves_iq_shape_sidecar(suffix):
+    """Streaming export keeps the shape contract for row-padded IQ payloads."""
+    shape = torch.tensor([4, 257 if suffix == "weight_logical_shape" else 512])
+    key = f"model.layers.0.mlp.up_proj.{suffix}"
+
+    exported_key, exported_shape = _postprocess_single_tensor(key, shape, 448.0, None)
+
+    assert exported_key == key
+    assert torch.equal(exported_shape, shape)
+
+
+@pytest.mark.parametrize("num_bits", ["iq1_s", "iq2_xs"])
+def test_streaming_offload_iq_payload_matches_resident_export(num_bits, tmp_path, monkeypatch):
+    """Offloaded streaming export writes the same row-padded IQ bytes as resident export."""
+    generator = torch.Generator().manual_seed(5918)
+    weight = torch.randn((2, 257), generator=generator, dtype=torch.bfloat16)
+    resident_model = _SingleLayerModel(weight)
+    streaming_model = _SingleLayerModel(weight)
+    _quantize_iq_weight(resident_model, num_bits)
+    _quantize_iq_weight(streaming_model, num_bits)
+
+    monkeypatch.setattr(
+        unified_export_hf, "requantize_resmooth_fused_llm_layers", lambda model: None
+    )
+    monkeypatch.setattr(
+        unified_export_hf_streaming,
+        "requantize_resmooth_fused_llm_layers",
+        lambda model: None,
+    )
+
+    resident_state, _ = _export_transformers_checkpoint(resident_model, torch.bfloat16)
+
+    _offload_module(streaming_model.layers[0])
+    monkeypatch.setattr(
+        LayerActivationCollector,
+        "get_decoder_layers",
+        staticmethod(lambda model: model.layers),
+    )
+    _export_transformers_checkpoint_streaming(
+        streaming_model,
+        torch.bfloat16,
+        export_dir=tmp_path,
+    )
+
+    with safe_open(str(tmp_path / "model.safetensors"), framework="pt") as exported:
+        for suffix in ("weight", "weight_logical_shape", "weight_padded_shape"):
+            key = f"layers.0.{suffix}"
+            assert torch.equal(exported.get_tensor(key), resident_state[key])
 
 
 @pytest.mark.parametrize(

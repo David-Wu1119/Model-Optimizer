@@ -90,9 +90,23 @@ def test_iq1_s_round_trip_and_payload_fields():
     assert torch.all((qh & 0xFFF) < 0x1000)
 
 
-def test_iq1_s_requires_complete_last_dimension_blocks():
-    with pytest.raises(ValueError, match="last weight dimension"):
-        quantize_iq1_s(torch.ones(2, 257))
+def test_iq1_s_right_pads_each_row_without_crossing_row_boundaries():
+    generator = torch.Generator().manual_seed(4321)
+    weight = torch.randn((2, 257), generator=generator, dtype=torch.bfloat16)
+    explicitly_padded = torch.nn.functional.pad(weight, (0, 255))
+
+    packed, shape = quantize_iq1_s(weight, block_chunk_size=1)
+    expected, _ = quantize_iq1_s(explicitly_padded, block_chunk_size=1)
+
+    assert packed.shape == (2, 2, IQ1_S_BLOCK_BYTES)
+    assert shape.tolist() == [2, 257]
+    assert torch.equal(packed, expected)
+    assert dequantize_iq1_s(packed, shape).shape == weight.shape
+
+
+def test_iq1_s_rejects_scalar_weight():
+    with pytest.raises(ValueError, match="at least one dimension"):
+        quantize_iq1_s(torch.tensor(1.0))
 
 
 def test_iq1_s_fake_quant_has_pass_through_gradient():

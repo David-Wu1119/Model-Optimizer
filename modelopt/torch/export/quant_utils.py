@@ -437,8 +437,8 @@ def get_quantization_format(module) -> str | None:
 
         # Handle individual num_bits cases
         if weight_quantizer.num_bits in (QUANTIZATION_IQ1_S, QUANTIZATION_IQ2_XS):
-            if weight_quantizer.backend != "psx_luts":
-                raise ValueError("IQ formats require the built-in 'psx_luts' quantization backend")
+            if weight_quantizer.backend != "ggml":
+                raise ValueError("IQ formats require the built-in 'ggml' quantization backend")
             return weight_quantizer.num_bits
 
         if weight_quantizer.num_bits == 4:
@@ -696,6 +696,9 @@ def process_layer_quant_config(layer_config_dict):
                 "group_size": 256,
                 "block_payload_bytes": payload_bytes,
                 "packing": "ggml",
+                "row_padding": "right",
+                "logical_shape_key": "weight_logical_shape",
+                "padded_shape_key": "weight_padded_shape",
             }
         else:
             layer_config = {"quant_algo": v}
@@ -1091,6 +1094,8 @@ def postprocess_state_dict(
         weight_suffixes = (
             "weight",
             "weight_shape",
+            "weight_logical_shape",
+            "weight_padded_shape",
             "weight_scale",
             "weight_scale_2",
             "input_scale",

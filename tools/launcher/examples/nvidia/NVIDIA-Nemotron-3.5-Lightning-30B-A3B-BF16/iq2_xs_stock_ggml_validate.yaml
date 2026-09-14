@@ -1,0 +1,50 @@
+# Validate exported IQ2_XS payloads with an unmodified pinned GGML decoder.
+
+job_name: Nemotron-3.5-Lightning-IQ2XS-stock-GGML-validate
+pipeline:
+  allow_to_fail: false
+  note: >-
+    Sample canonical 74-byte blocks from every IQ2_XS tensor, require bitwise
+    agreement with the pinned stock GGML decoder, and round-trip the payloads
+    through a test-only GGUF container without changing their bytes.
+
+  global_vars:
+    hf_model: /lustre/fsw/portfolios/coreai/projects/coreai_dlalgo_modelopt/cicd/cicd_1789316148520067000/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-IQ2XS-NVFP4/hf
+    output_dir: /scratchspace/stock-ggml-iq2-xs-validation
+
+  task_0:
+    inline: >-
+      unset HF_TOKEN GITHUB_TOKEN GH_TOKEN
+      && LLAMA_ROOT=/tmp/llama-cpp-$SLURM_JOB_ID
+      && BUILD_ROOT=/tmp/llama-cpp-build-$SLURM_JOB_ID
+      && LLAMA_COMMIT=37b3a9e0ccba261d1cc245a971deae0b18c201ab
+      && git init "$LLAMA_ROOT"
+      && git -C "$LLAMA_ROOT" remote add origin https://github.com/ggml-org/llama.cpp.git
+      && git -C "$LLAMA_ROOT" fetch --depth=1 origin "$LLAMA_COMMIT"
+      && git -C "$LLAMA_ROOT" checkout --detach FETCH_HEAD
+      && test "$(git -C "$LLAMA_ROOT" rev-parse HEAD)" = "$LLAMA_COMMIT"
+      && cmake -S "$LLAMA_ROOT" -B "$BUILD_ROOT"
+      -DGGML_CUDA=OFF -DBUILD_SHARED_LIBS=ON
+      -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_SERVER=OFF
+      && cmake --build "$BUILD_ROOT" --target ggml-cpu --parallel 8
+      && GGML_LIBRARY=$(find "$BUILD_ROOT" -type f -name 'libggml-cpu.so*' | head -n 1)
+      && test -n "$GGML_LIBRARY"
+      && mkdir -p <<global_vars.output_dir>>
+      && python modules/Model-Optimizer/examples/megatron_bridge/validate_iq2_xs_stock_ggml.py
+      --checkpoint <<global_vars.hf_model>>
+      --ggml-library "$GGML_LIBRARY"
+      --llama-source "$LLAMA_ROOT"
+      --blocks-per-tensor 3
+      --test-gguf <<global_vars.output_dir>>/sampled-iq2-xs.gguf
+      --report <<global_vars.output_dir>>/report.json
+    slurm_config:
+      _factory_: slurm_factory
+      container: nvcr.io/nvidia/nemo:26.08
+      container_mounts:
+        - /lustre:/lustre
+      modelopt_install_path: /opt/venv/lib/python3.12/site-packages/modelopt
+      nodes: 1
+      ntasks_per_node: 1
+      # This account's QoS requires four allocated GPUs; validation itself is CPU-only.
+      gpus_per_node: 4
+      time: "00:30:00"

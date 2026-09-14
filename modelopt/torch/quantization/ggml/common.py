@@ -15,22 +15,31 @@
 
 """Shared validation for GGML-compatible block quantizers."""
 
-import math
-
 import torch
 
 GGML_BLOCK_SIZE = 256
+
+
+def padded_weight_shape(shape: tuple[int, ...] | torch.Size) -> tuple[int, ...]:
+    """Return ``shape`` with its last dimension rounded up to one GGML block."""
+    if not shape:
+        raise ValueError("GGML block quantization requires a tensor with at least one dimension")
+    return (*shape[:-1], ((shape[-1] + GGML_BLOCK_SIZE - 1) // GGML_BLOCK_SIZE) * GGML_BLOCK_SIZE)
+
+
+def pad_weight_rows(weight: torch.Tensor) -> torch.Tensor:
+    """Right-pad every logical row to a complete GGML block."""
+    padded_shape = padded_weight_shape(weight.shape)
+    padding = padded_shape[-1] - weight.shape[-1]
+    return torch.nn.functional.pad(weight, (0, padding)) if padding else weight.contiguous()
 
 
 def validate_weight(weight: torch.Tensor, format_name: str) -> None:
     """Validate a weight accepted by the current GGML block encoders."""
     if weight.numel() == 0:
         raise ValueError(f"{format_name} requires a non-empty weight")
-    if weight.dim() == 0 or weight.shape[-1] % GGML_BLOCK_SIZE:
-        raise ValueError(
-            f"{format_name} requires the last weight dimension to be divisible by "
-            f"{GGML_BLOCK_SIZE}, got shape {tuple(weight.shape)}"
-        )
+    if weight.dim() == 0:
+        raise ValueError(f"{format_name} requires a tensor with at least one dimension")
     if not weight.is_floating_point():
         raise TypeError(f"{format_name} requires a floating-point weight, got {weight.dtype}")
     if not torch.isfinite(weight).all():
@@ -51,9 +60,13 @@ def validate_packed_weights(
             f"got {packed_weights.dtype} {tuple(packed_weights.shape)}"
         )
     shape = tuple(int(v) for v in weight_shape.detach().cpu().tolist())
-    if not shape or shape[-1] % GGML_BLOCK_SIZE:
+    if not shape or any(v <= 0 for v in shape):
         raise ValueError(f"invalid {format_name} logical weight shape: {shape}")
-    expected_payload_values = math.prod(shape) // GGML_BLOCK_SIZE * block_bytes
-    if packed_weights.numel() != expected_payload_values:
-        raise ValueError("packed_weights size does not match weight_shape")
+    padded_shape = padded_weight_shape(shape)
+    expected_shape = (*shape[:-1], padded_shape[-1] // GGML_BLOCK_SIZE, block_bytes)
+    if tuple(packed_weights.shape) != expected_shape:
+        raise ValueError(
+            f"packed_weights shape does not match {format_name} logical weight shape: "
+            f"expected {expected_shape}, got {tuple(packed_weights.shape)}"
+        )
     return shape

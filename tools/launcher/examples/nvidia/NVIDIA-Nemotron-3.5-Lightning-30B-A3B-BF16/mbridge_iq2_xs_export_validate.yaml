@@ -1,0 +1,78 @@
+# Nemotron 3.5 Lightning mixed real-quant export and structural validation.
+#
+# The model path is expressed through /hf-local so the same YAML works with local Docker and
+# Slurm. Point hf_local (local mode) or SLURM_HF_LOCAL (Slurm) at the parent model cache.
+#
+# Slurm:
+#   uv run launch.py --yaml \
+#     examples/nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16/mbridge_iq2_xs_export_validate.yaml \
+#     --yes
+#
+# Local Docker:
+#   uv run launch.py --yaml \
+#     examples/nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16/mbridge_iq2_xs_export_validate.yaml \
+#     hf_local=/path/to/hf-local --yes
+
+job_name: Nemotron-3.5-Lightning-IQ2XS-export-validate
+pipeline:
+  allow_to_fail: false
+  note: >-
+    Calibration-free mixed IQ2_XS expert and NVFP4 Mamba quantization, unified-HF export,
+    CPU/CUDA byte-parity check, and checkpoint layout/digest validation.
+
+  global_vars:
+    hf_model: /hf-local/nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16
+    output_dir: /scratchspace/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-IQ2XS-NVFP4
+
+  # Run as one sequential task so the launcher transfers one source archive. Later commands run
+  # only when every preceding validation or export command succeeds.
+  task_0:
+    environment:
+      - LAUNCH_SCRIPT: torchrun --nproc_per_node 4
+    # Avoid stale shared-cache manifests whose compiled extension was evicted.
+    inline: >-
+      unset HF_TOKEN
+      && export TORCH_EXTENSIONS_DIR=/tmp/modelopt-torch-extensions-$SLURM_JOB_ID
+      MAX_JOBS=8
+      && if [ -z "$SLURM_LOCALID" ] || [ "$SLURM_LOCALID" -eq 0 ]; then
+      python modules/Model-Optimizer/examples/megatron_bridge/validate_iq_cuda_parity.py
+      --rows 4 --row-width 257
+      --report <<global_vars.output_dir>>/iq_cpu_cuda_parity.json
+      && touch <<global_vars.output_dir>>/.iq_parity_$SLURM_JOB_ID;
+      else for _ in $(seq 600); do
+      [ -f <<global_vars.output_dir>>/.iq_parity_$SLURM_JOB_ID ] && break; sleep 1;
+      done; [ -f <<global_vars.output_dir>>/.iq_parity_$SLURM_JOB_ID ]; fi
+      &&
+      $LAUNCH_SCRIPT modules/Model-Optimizer/examples/megatron_bridge/quantize.py
+      --hf_model_name_or_path <<global_vars.hf_model>>
+      --trust_remote_code
+      --tp_size 1
+      --recipe models/nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16/ptq/iq2_xs_experts-nvfp4_mamba
+      --skip_generate
+      --export_megatron_path <<global_vars.output_dir>>/megatron
+      &&
+      $LAUNCH_SCRIPT modules/Model-Optimizer/examples/megatron_bridge/export_quantized_megatron_to_hf.py
+      --hf_model_name_or_path <<global_vars.hf_model>>
+      --megatron_path <<global_vars.output_dir>>/megatron
+      --trust_remote_code
+      --pp_size 4
+      --export_unified_hf_path <<global_vars.output_dir>>/hf
+      &&
+      if [ -z "$SLURM_LOCALID" ] || [ "$SLURM_LOCALID" -eq 0 ]; then
+      python modules/Model-Optimizer/examples/megatron_bridge/validate_mixed_quantized_hf.py
+      --checkpoint <<global_vars.output_dir>>/hf
+      --reference-checkpoint <<global_vars.hf_model>>
+      --report <<global_vars.output_dir>>/checkpoint_validation.json; fi
+    slurm_config:
+      _factory_: "slurm_factory"
+      container: nvcr.io/nvidia/nemo:26.08
+      container_mounts:
+        - /lustre/fsw/portfolios/coreai/projects/coreai_dlalgo_modelopt/hf-local:/hf-local
+        - /lustre:/lustre
+      modelopt_install_path: /opt/venv/lib/python3.12/site-packages/modelopt
+      nodes: 1
+      # Slurm overrides LAUNCH_SCRIPT to python and supplies these four distributed ranks.
+      # Standalone validation commands above run only on rank zero.
+      ntasks_per_node: 4
+      gpus_per_node: 4
+      time: "04:00:00"

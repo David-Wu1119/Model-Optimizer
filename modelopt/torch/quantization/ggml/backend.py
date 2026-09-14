@@ -29,7 +29,7 @@ def ggml_fake_quant(inputs: torch.Tensor, quantizer) -> torch.Tensor:
         return iq1_s_fake_quant(inputs, quantizer)
     if num_bits == "iq2_xs":
         return iq2_xs_fake_quant(inputs, quantizer)
-    raise ValueError("The psx_luts backend requires num_bits='iq1_s' or 'iq2_xs'")
+    raise ValueError("The ggml backend requires num_bits='iq1_s' or 'iq2_xs'")
 
 
-register_quant_backend("psx_luts", ggml_fake_quant)
+register_quant_backend("ggml", ggml_fake_quant)

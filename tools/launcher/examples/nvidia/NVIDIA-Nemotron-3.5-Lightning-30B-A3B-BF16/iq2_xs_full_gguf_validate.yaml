@@ -1,0 +1,57 @@
+# Materialize and validate the complete mixed checkpoint with a pinned stock GGUF stack.
+
+job_name: Nemotron-3.5-Lightning-IQ2XS-full-GGUF-validate
+pipeline:
+  allow_to_fail: false
+  note: >-
+    Materialize the complete mixed checkpoint through an unmodified pinned llama.cpp
+    converter, require byte-identical IQ2_XS payloads in GGUF, and record the stock
+    loader result without treating full-model serving as a block-format requirement.
+
+  global_vars:
+    hf_model: /lustre/fsw/portfolios/coreai/projects/coreai_dlalgo_modelopt/cicd/cicd_1789316148520067000/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-IQ2XS-NVFP4/hf
+    output_dir: /lustre/fsw/portfolios/coreai/projects/coreai_dlalgo_modelopt/users/hungyuehc/omniml-5918/evidence/full-gguf
+
+  task_0:
+    inline: >-
+      unset HF_TOKEN GITHUB_TOKEN GH_TOKEN
+      && LLAMA_ROOT=/tmp/llama-cpp-$SLURM_JOB_ID
+      && BUILD_ROOT=/tmp/llama-cpp-build-$SLURM_JOB_ID
+      && LLAMA_COMMIT=37b3a9e0ccba261d1cc245a971deae0b18c201ab
+      && OUTPUT_DIR=<<global_vars.output_dir>>/$SLURM_JOB_ID
+      && GGUF_PATH=$OUTPUT_DIR/nemotron-3.5-lightning-iq2-xs.gguf
+      && mkdir -p "$OUTPUT_DIR"
+      && git init "$LLAMA_ROOT"
+      && git -C "$LLAMA_ROOT" remote add origin https://github.com/ggml-org/llama.cpp.git
+      && git -C "$LLAMA_ROOT" fetch --depth=1 origin "$LLAMA_COMMIT"
+      && git -C "$LLAMA_ROOT" checkout --detach FETCH_HEAD
+      && test "$(git -C "$LLAMA_ROOT" rev-parse HEAD)" = "$LLAMA_COMMIT"
+      && python modules/Model-Optimizer/examples/megatron_bridge/materialize_mixed_iq_gguf.py
+      --checkpoint <<global_vars.hf_model>>
+      --llama-source "$LLAMA_ROOT"
+      --outfile "$GGUF_PATH"
+      --report "$OUTPUT_DIR/payload-report.json"
+      && cmake -S "$LLAMA_ROOT" -B "$BUILD_ROOT"
+      -DGGML_CUDA=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF
+      -DLLAMA_BUILD_SERVER=ON
+      && cmake --build "$BUILD_ROOT" --target llama-cli --parallel 8
+      && if "$BUILD_ROOT/bin/llama-cli" --model "$GGUF_PATH" --check-tensors
+      --n-gpu-layers 0 --no-display-prompt --prompt "2+2=" --n-predict 1
+      >"$OUTPUT_DIR/stock-loader.log" 2>&1; then LOADER_STATUS=0;
+      else LOADER_STATUS=$?; fi
+      && export OUTPUT_DIR LLAMA_COMMIT LOADER_STATUS
+      && python -c 'import json, os, pathlib; output = pathlib.Path(os.environ["OUTPUT_DIR"]); payload = json.loads((output / "payload-report.json").read_text());
+      report = {"schema_version": 1, "llama_cpp_commit": os.environ["LLAMA_COMMIT"], "payload_validation": payload["status"], "stock_loader_exit_code":
+      int(os.environ["LOADER_STATUS"]), "stock_loader_succeeded": os.environ["LOADER_STATUS"] == "0"}; (output / "loader-report.json").write_text(json.dumps(report,
+      indent=2, sort_keys=True) + "\n")'
+    slurm_config:
+      _factory_: slurm_factory
+      container: nvcr.io/nvidia/nemo:26.08
+      container_mounts:
+        - /lustre:/lustre
+      modelopt_install_path: /opt/venv/lib/python3.12/site-packages/modelopt
+      nodes: 1
+      ntasks_per_node: 1
+      # This account's QoS requires four allocated GPUs; validation itself is CPU-only.
+      gpus_per_node: 4
+      time: "02:00:00"

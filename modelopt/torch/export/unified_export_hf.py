@@ -634,9 +634,13 @@ def _export_quantized_weight(
         quantize_iq = (
             quantize_iq1_s if quantization_format == QUANTIZATION_IQ1_S else quantize_iq2_xs
         )
-        packed_weight, _ = quantize_iq(weight.to(dtype))
+        packed_weight, logical_shape = quantize_iq(weight.to(dtype))
+        padded_shape = logical_shape.clone()
+        padded_shape[-1] = packed_weight.shape[-2] * 256
         delattr(sub_module, weight_name)
         sub_module.register_buffer("weight", packed_weight)
+        sub_module.register_buffer("weight_logical_shape", logical_shape)
+        sub_module.register_buffer("weight_padded_shape", padded_shape)
         maybe_clear_cuda_cache()
         return
 

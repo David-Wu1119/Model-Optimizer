@@ -57,8 +57,8 @@ supported combinations.
 | `int4_blockwise_weight_only` | INT4 W4A16, block 128, weights only | none | max |
 | `nvfp4_mlp_weight_only` | NVFP4 W4A16 (block 32), MLP + MoE weights only | none | max |
 | `mxfp4_mlp_weight_only` | MXFP4 W4A16, MLP + MoE weights only | none | none (no calibration) |
-| `iq1_s` | IQ1_S W1A16, all linears | none | PSX-LUTS auto search (no calibration) |
-| `iq2_xs` | IQ2_XS W2A16, all linears | none | PSX-LUTS auto search (no calibration) |
+| `iq1_s` | IQ1_S W1A16, all linears | none | GGML-compatible auto search (no calibration) |
+| `iq2_xs` | IQ2_XS W2A16, all linears | none | GGML-compatible auto search (no calibration) |
 
 </details>
 
@@ -416,6 +416,18 @@ checkpoint's** quant config verbatim:
   Four-over-Six NVFP4 W4A16 to routed experts, shared experts, and the language
   model head; Mamba `in/out_proj` weights and inputs plus the KV cache use FP8,
   while attention remains BF16.
+- **`models/nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16/ptq/iq2_xs_experts-nvfp4_mamba`**
+  applies a calibration-free mixed weight-only policy: routed and shared MoE expert
+  weights use IQ2_XS, Mamba `in_proj` and `out_proj` weights use dynamic NVFP4, and
+  attention, routers, embeddings, `lm_head`, activations, and MTP modules remain BF16. The
+  corresponding `tools/launcher/examples/nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16/`
+  `mbridge_iq2_xs_export_validate.yaml` pipeline exports a unified-HF checkpoint and records
+  CPU/CUDA packing parity, tensor-policy, packed-layout, and payload-digest evidence. To verify
+  the packed bytes independently, build an unmodified pinned llama.cpp checkout as shared
+  libraries and run `examples/megatron_bridge/validate_iq2_xs_stock_ggml.py`. The validator
+  samples every IQ2_XS tensor, calls the stock `dequantize_row_iq2_xs` symbol, requires
+  bit-identical FP32 reconstruction, and can round-trip the samples through stock `gguf-py` to
+  verify payload SHA-256 digests.
 - **`models/nvidia/NVIDIA-Nemotron-3-Nano-4B-BF16/ptq/nvfp4_w4a16`** mirrors the GGUF **Q4_K_M** bit
   allocation of the Nemotron-H hybrid, mapped onto NVFP4/FP8 **per layer**:
   Q4_K/Q5_0 linears → NVFP4 W4A4 (attention q/k/v/o kept uniform so export can

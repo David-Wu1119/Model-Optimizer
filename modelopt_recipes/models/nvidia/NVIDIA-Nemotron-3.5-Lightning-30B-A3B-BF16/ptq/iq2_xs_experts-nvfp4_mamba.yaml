@@ -1,0 +1,45 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Mixed weight-only quantization for NVIDIA Nemotron 3.5 Lightning:
+# IQ2_XS routed/shared MoE experts, dynamic NVFP4 Mamba projections, and BF16 elsewhere.
+
+imports:
+  base_disable_all: configs/ptq/units/base_disable_all
+  iq2_xs: configs/numerics/iq2_xs
+  nvfp4: configs/numerics/nvfp4
+
+metadata:
+  recipe_type: ptq
+  description: >-
+    Calibration-free mixed weight-only quantization for NVIDIA Nemotron 3.5 Lightning:
+    IQ2_XS routed and shared MoE expert weights, dynamic NVFP4 Mamba in_proj/out_proj
+    weights, and BF16 attention, routers, latent projections, embeddings, lm_head,
+    activations, and MTP modules.
+
+quantize:
+  algorithm: max
+  quant_cfg:
+    - $import: base_disable_all
+    - quantizer_name: '*mixer.experts*weight_quantizer'
+      cfg:
+        $import: iq2_xs
+    - quantizer_name: '*mixer.shared_experts*weight_quantizer'
+      cfg:
+        $import: iq2_xs
+    # Megatron Core names the same expert modules under ``mlp`` rather than ``mixer``.
+    - quantizer_name: '*mlp.experts*weight_quantizer'
+      cfg:
+        $import: iq2_xs
+    - quantizer_name: '*mlp.shared_experts*weight_quantizer'
+      cfg:
+        $import: iq2_xs
+    - quantizer_name: '*mixer.in_proj*weight_quantizer'
+      cfg:
+        $import: nvfp4
+    - quantizer_name: '*mixer.out_proj*weight_quantizer'
+      cfg:
+        $import: nvfp4
+    # Keep MTP in BF16 if its module names overlap the selectors above.
+    - quantizer_name: '*mtp*'
+      enable: false

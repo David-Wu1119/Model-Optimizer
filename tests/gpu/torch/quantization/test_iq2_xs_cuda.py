@@ -40,3 +40,15 @@ def test_iq2_xs_cuda_zero_encoding_matches_ggml_block_layout():
 
     assert not packed.any()
     assert torch.equal(dequantize_iq2_xs(packed, shape), weight)
+
+
+def test_iq2_xs_cuda_pack_is_byte_identical_to_cpu():
+    generator = torch.Generator().manual_seed(5918)
+    weight = torch.randn((8, 257), generator=generator, dtype=torch.bfloat16)
+
+    packed_cpu, shape_cpu = quantize_iq2_xs(weight)
+    packed_cuda, shape_cuda = quantize_iq2_xs(weight.cuda())
+
+    assert torch.equal(shape_cuda.cpu(), shape_cpu)
+    assert torch.equal(packed_cuda.cpu(), packed_cpu)
+    assert packed_cpu.shape == (8, 2, 74)

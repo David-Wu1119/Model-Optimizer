@@ -128,6 +128,9 @@ def _quant_algo_to_group_config(quant_algo: str, group_size: int | None = None) 
                 "group_size": 256,
                 "packing": "ggml",
                 "block_payload_bytes": payload_bytes,
+                "row_padding": "right",
+                "logical_shape_key": "weight_logical_shape",
+                "padded_shape_key": "weight_padded_shape",
             }
         }
     else:
