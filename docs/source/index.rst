@@ -25,9 +25,9 @@ Release notes, technical updates, examples, and deployment stories from the Mode
      </div>
 
    <div class="announcement-grid" id="announcement-grid">
-     <article class="announcement-card" data-date="2026-09-15" data-title="Quantizing a 1.5 TB Model on a Single GPU" data-summary="Layerwise calibration and per-layer shard export drop the memory floor for PTQ from one model to one layer." data-tags="quantization nvfp4 layerwise moe single-gpu modelopt">
+     <article class="announcement-card" data-date="2026-09-15" data-title="Quantizing a 1.5 TB Kimi-K3 Model on a Single GPU" data-summary="Layerwise calibration and per-layer shard export drop the memory floor for PTQ from one model to one layer." data-tags="quantization nvfp4 layerwise moe single-gpu modelopt">
        <div class="announcement-card-meta">September 15, 2026 &middot; Model Optimizer Team</div>
-       <h2><a href="announcements/single-gpu-ptq.html">Quantizing a 1.5 TB Model on a Single GPU</a></h2>
+       <h2><a href="announcements/single-gpu-ptq.html">Quantizing a 1.5 TB Kimi-K3 Model on a Single GPU</a></h2>
        <p>Layerwise calibration and per-layer shard export drop the memory floor for PTQ from one model to one layer.</p>
        <div class="announcement-card-tags"><span>quantization</span><span>nvfp4</span><span>layerwise</span><span>moe</span><span>single-gpu</span><span>modelopt</span></div>
      </article>

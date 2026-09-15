@@ -1,7 +1,7 @@
 :orphan:
 
-Quantizing a 1.5 TB Model on a Single GPU
-#########################################
+Quantizing a 1.5 TB Kimi-K3 Model on a Single GPU
+#################################################
 
 :Author: Model Optimizer Team
 :Date: September 15, 2026
@@ -112,6 +112,15 @@ Then the run itself:
 
 What you need on hand: one GPU, a GPU and CPU memory budget you choose, and fast scratch
 sized for the checkpoint you are writing.
+
+.. note::
+
+   **Kimi-K3 is used here to demonstrate the workflow, not as a recommended recipe.** The
+   published checkpoint stores its routed experts in MXFP4. This run dequantizes those weights
+   to BF16 and calibrates the BF16 model — hence ``<bf16_ckpt>`` above — so the end-to-end path
+   is MXFP4 → BF16 → NVFP4. Dequantizing cannot recover what the original MXFP4 quantization
+   already discarded, and the accuracy cost of that round trip is out of scope here. What is
+   being shown is that a checkpoint this size can be calibrated and exported on one GPU.
 
 A few configurations are refused *before* calibration starts, rather than producing a quietly
 different checkpoint — worth checking against your model before you spend a session:
