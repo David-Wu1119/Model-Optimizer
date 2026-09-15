@@ -55,6 +55,7 @@ dependencies = [
 onnx = [
     "cppimport",
     "cupy-cuda12x; platform_machine != 'aarch64' and platform_machine != 'ARM64' and platform_system != 'Darwin'",
+    "cupy-cuda13x>=14.2.0; python_version > '3.10' and platform_system == 'Windows' and platform_machine == 'ARM64'",
     "lief",
     "ml_dtypes",
     "onnx-graphsurgeon>=0.6.1",
