@@ -450,7 +450,7 @@ def _quantize_config_explicitly_enables_kv(quant_cfg: dict[str, Any]) -> bool:
     enabled_by_parent = {None: dict.fromkeys(names, False)}
     for entry in quant_cfg["quant_cfg"]:
         pattern = entry["quantizer_name"]
-        if pattern != "*" and "bmm_quantizer" not in pattern:
+        if pattern != "*" and not any(marker in pattern for marker in ("bmm", "attn", "attention")):
             continue
         basename_pattern = pattern.rsplit(".", 1)[-1]
         matched_names = [
@@ -924,8 +924,12 @@ def _prepare_quant_cfg(
     args: argparse.Namespace, quant_cfg: dict[str, Any], full_model: torch.nn.Module
 ) -> dict[str, Any]:
     """Apply shared checkpoint-local adjustments to a PTQ configuration."""
+    # MTP modules are speculative decoding layers and must be exported as-is. The checkpoint
+    # prefixes complement recipe name patterns by identifying these layers by index.
     mtp_layer_prefixes = getattr(full_model, "_mtp_layer_prefixes", None)
     if args.layerwise_export and not mtp_layer_prefixes:
+        # Only the FSDP2 loader discovers these before quantization; layerwise export needs the
+        # exclusions in quant_cfg before mtq.quantize converts its first layer.
         mtp_layer_prefixes = mtp_layer_prefixes_from_checkpoint(args.pyt_ckpt_path)
     if mtp_layer_prefixes:
         quant_cfg = copy.deepcopy(quant_cfg)
@@ -934,10 +938,14 @@ def _prepare_quant_cfg(
             quant_cfg["quant_cfg"].append({"quantizer_name": pattern, "enable": False})
             print(f"Excluding MTP layer from quantization: {pattern}")
 
+    # Resolve the real export directory before resolve_checkpoint_dir hashes the config; otherwise
+    # distinct --export_path values containing the placeholder would share one checkpoint path.
     if args.layerwise_export:
         assert_layerwise_export_compatible(args, full_model, quant_cfg.get("algorithm"))
         quant_cfg = set_layerwise_export_dir(quant_cfg, args.export_path)
         print(f"Layerwise export enabled: writing quantized shards to {args.export_path}")
+        # Shards are resumable only while the manifest naming their resume point remains beside
+        # them; default the calibration checkpoint directory accordingly.
         quant_cfg, moved = default_layerwise_resume_dir(quant_cfg, args.export_path)
         if moved:
             print(
@@ -971,13 +979,15 @@ def _run_auto_quantize_recipe(
     primary_is_kv = primary.constraints.cost_model == "kv_cache"
     fixed_quantize_config = recipe.quantize
 
-    if primary_is_kv and fixed_quantize_config is not None:
-        quant_cfg = _prepare_quant_cfg(args, fixed_quantize_config.model_dump(), full_model)
-        if _quantize_config_explicitly_enables_kv(quant_cfg):
+    if fixed_quantize_config is not None and (primary_is_kv or followup_kv is not None):
+        if _quantize_config_explicitly_enables_kv(fixed_quantize_config.model_dump()):
             raise ValueError(
                 "The fixed quantize stage explicitly enables K/V quantizers before KV-cache "
                 "AutoQuantize. Disable them in the fixed stage."
             )
+
+    if primary_is_kv and fixed_quantize_config is not None:
+        quant_cfg = _prepare_quant_cfg(args, fixed_quantize_config.model_dump(), full_model)
         mono_quantize(
             args,
             quant_cfg,
