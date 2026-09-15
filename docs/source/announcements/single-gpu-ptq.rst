@@ -25,36 +25,55 @@ The memory floor for calibration
 
 The constraint worth naming is not that models are large. It is that calibration has been
 *all-or-nothing*: the forward pass wants every layer resident, even though it only ever reads
-one layer at a time. Two consequences follow, and both cost hardware rather than accuracy.
+one layer at a time. The classic PTQ shape compounds it — calibrate the whole model, then
+export the whole model — so a finished calibration still owes a second full traversal before
+any checkpoint exists on disk.
 
-First, the whole checkpoint has to fit somewhere fast. Second, the classic PTQ shape —
-calibrate the whole model, then export the whole model — traverses it twice, so a completed
-calibration still owes a second full pass before there is a checkpoint on disk.
-
-Neither is inherent to the math. Calibration statistics for layer *i* depend on the
-activations entering layer *i*, which the previous layer already produced. If those
-activations are carried forward explicitly, layers can be visited strictly one at a time, and
-the resident set never has to exceed one of them.
+Neither is inherent to the math. Layer *i*'s calibration statistics depend only on the
+activations entering layer *i*, which layer *i-1* already produced.
 
 One layer at a time
 *******************
 
-Three pieces make that concrete.
+The mechanism is a loop interchange. Conventional calibration puts data on the outside and
+depth on the inside, so every layer has to be resident for every batch:
+
+.. code-block:: python
+
+   for batch in calib_data:           # outer: data
+       h = embed(batch)
+       for layer in model.layers:     # inner: depth
+           h = layer(h)               # all 93 layers live, the whole time
+
+Layerwise calibration swaps the two loops — depth outside, data inside:
+
+.. code-block:: python
+
+   acts = [embed(batch) for batch in calib_data]    # activations at the boundary
+   for layer in model.layers:                       # outer: depth
+       for i, h in enumerate(acts):                 # inner: data
+           acts[i] = layer(h)                       # one layer live at a time
+       calibrate(layer); quantize(layer); export(layer); release(layer)
+
+The interchange is what buys everything else. After the swap a layer is *finished* the moment
+its inner loop ends — every batch it will ever see has already been through it — so the four
+calls on that last line are well defined, and a shard written there is a truthful record that
+its layer is done.
+
+The price is the boundary. Instead of one activation tensor in flight per batch, the whole
+calibration set's activations are held between layers. That is a real cost, but it is bounded
+by the calibration set rather than by the model.
+
+Two pieces turn that into a run.
 
 **Weights spill to disk.** An ``accelerate`` device map with explicit GPU and CPU budgets
 keeps the bulk of the checkpoint on disk or in host RAM and materializes only what the
 current step touches.
 
-**Calibration walks layer by layer.** ``layerwise`` calibration runs the forward pass one
-decoder layer at a time, caching the activations at each boundary so the next layer has its
-input without replaying the ones before it.
-
 **Each layer is exported the moment it is finished.** With ``layerwise.export_dir`` set, a
 layer is quantized and written to its own checkpoint shard as soon as calibration is done
-with it — and then released.
-
-That third piece is the one worth remembering, because it collapses two problems into one
-artifact:
+with it — and then released. That is the piece worth remembering, because it collapses two
+problems into one artifact:
 
 .. note::
 
@@ -124,36 +143,38 @@ Results
 
 .. warning::
 
-   **Draft:** the Kimi-K3 row is pending reconfirmation against a full run on the current
-   exporter. Figures marked ``TODO(reconfirm)`` must be replaced from that run before publish.
+   **Draft:** these figures are pending reconfirmation against a full run on the current
+   exporter. Everything marked ``TODO(reconfirm)`` must be replaced from that run before
+   publish.
 
 .. list-table::
    :header-rows: 1
 
-   * - Model
-     - Layers
-     - GPU budget
-     - Wall clock
-     - Peak GPU
-     - Output
-   * - Kimi-K3 (1.5 TB)
+   * - Kimi-K3
+     -
+   * - Layers
      - 93
+   * - GPU budget (``--max_gpu_memory_gb``)
      - 140 GB
+   * - CPU budget (``--max_cpu_memory_gb``)
+     - 1700 GB
+   * - Wall clock
      - ``TODO(reconfirm)``
+   * - Peak GPU
      - ``TODO(reconfirm)``
+   * - Peak RSS
+     - ``TODO(reconfirm)``
+   * - Output
      - 93 layer shards + tail + index
-   * - DeepSeek-R1 671B (642 GB)
-     - 61
-     - 80 GB
-     - 40 min 12 s
-     - 88.9 GB
-     - 403 GB, 40 shards
-   * - Nemotron-3-Ultra 550B (~1.1 TB)
-     - 108
-     - 80 GB
-     - 47 min 16 s
-     - 76.7 GB
-     - 365 GB, 34 shards
+
+**Those budgets are weight-placement budgets, not caps**, and it is worth knowing that before
+you size them. ``--max_gpu_memory_gb`` and ``--max_cpu_memory_gb`` feed ``accelerate``'s device
+map: they decide how much of the *checkpoint* is assigned to each device, and everything the
+run allocates on top of the weights falls outside them. So expect peak GPU to land somewhat
+above the GPU budget — activations, calibration buffers and the CUDA context are not counted
+against it — and expect a much larger transient spike in host RSS while shards are read and
+dispatched, settling to a far lower steady state once the offload folder is populated. Size
+both with headroom rather than to the exact capacity of the machine.
 
 Every Kimi-K3 expert projection — ``TODO(reconfirm)``, or 92 × 896 × 3 — carries a calibrated
 ``input_scale``, and vLLM selects the FlashInfer TRT-LLM NVFP4 MoE kernel rather than the
@@ -178,13 +199,12 @@ whether the trade fits your constraints.
 the 550–671B range on one GPU. You are trading wall clock for hardware, which is the point,
 but it is a real cost on a large model.
 
-**Calibration algorithms are restricted — for now.** ``calib_mutates_weights: false``, the
-flag that makes resume cheap, is currently whitelisted to amax-only methods: max, MSE, and
-local Hessian. Weight-mutating calibration (GPTQ, AWQ, SmoothQuant) and AutoQuantize are
-refused today. That restriction is conservative rather than fundamental — under per-layer
-export the mutated weights land in the layer's shard before the layer is released — so GPTQ in
-particular is expected to need little or no change. Gradual enablement is on the way. Formats
-today are FP8 and NVFP4.
+**Calibration algorithms are restricted — for now.** The workflow supports max, MSE and local
+Hessian calibration today, in FP8 and NVFP4. Weight-mutating calibration (GPTQ, AWQ,
+SmoothQuant) and AutoQuantize are refused. That restriction is conservative rather than
+fundamental: under per-layer export a mutated weight is already written into the layer's shard
+before the layer is released, so the machinery is in the right shape for it. A PR extending the
+workflow to GPTQ and friends is on the way.
 
 **It solves calibration memory, not serving memory.** The checkpoint this produces still has
 to be served, and whether your hardware can serve it is a separate question this workflow does
@@ -195,11 +215,3 @@ still has to hold one decoder layer, plus its activations, at once. A model with
 layers is easy; a model with one enormous layer is the boundary this design cannot move. That
 is also how to predict whether your model fits before spending a session finding out — divide,
 don't guess.
-
-Resources
-*********
-
-* `Single-GPU disk-offload PTQ (PR #2008) <https://github.com/NVIDIA/Model-Optimizer/pull/2008>`_
-* `Per-layer shard export (PR #2136) <https://github.com/NVIDIA/Model-Optimizer/pull/2136>`_
-* `Multimodal and MTP support for layerwise export (PR #2303) <https://github.com/NVIDIA/Model-Optimizer/pull/2303>`_
-* `Kimi-K3 on layerwise fused export (PR #2218) <https://github.com/NVIDIA/Model-Optimizer/pull/2218>`_
