@@ -280,16 +280,14 @@ at::Tensor iq2_xs_pack_cuda(at::Tensor input, at::Tensor grid, bool validate_gri
   TORCH_CHECK(input.get_device() == grid.get_device(), "input and grid must share a device");
   c10::cuda::CUDAGuard guard(input.device());
   if (validate_grid) {
-    // The upper bound has two independent reasons: int8 staging caps q at 127, and kNativeMax
-    // (43 * 31 / 8) assumes the canonical grid's largest magnitude is 43. Larger entries stage
-    // safely but would be scaled as if their peak were 43. The lower bound is semantic: IQ2_XS
-    // grid entries are magnitudes and signs live in the code word, so even_parity_dot assumes
-    // nonnegative q.
-    const auto valid =
-        grid.eq(grid.trunc()).logical_and(grid.ge(0.0f)).logical_and(grid.le(127.0f));
+    // kNativeMax (43 * 31 / 8) assumes the canonical grid's largest magnitude is 43. Admitting a
+    // larger entry would silently make the scale heuristic too small. The lower bound is semantic:
+    // IQ2_XS grid entries are magnitudes and signs live in the code word, so even_parity_dot
+    // assumes nonnegative q.
+    const auto valid = grid.eq(grid.trunc()).logical_and(grid.ge(0.0f)).logical_and(grid.le(43.0f));
     TORCH_CHECK(valid.all().item<bool>(),
-                "grid values must be integral and within [0, 127]: IQ2_XS grid entries are "
-                "non-negative magnitudes staged as int8");
+                "grid values must be integral and within [0, 43]: IQ2_XS scale selection "
+                "assumes the canonical maximum magnitude");
   }
   const int64_t num_blocks = input.numel() / kBlockSize;
   TORCH_CHECK(num_blocks <= std::numeric_limits<int>::max(), "IQ2_XS CUDA grid is too large");

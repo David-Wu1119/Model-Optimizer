@@ -123,6 +123,20 @@ def test_iq1_s_cuda_reference_search_bypasses_extension(monkeypatch):
     assert torch.equal(shape, torch.tensor([1, 256], device="cuda"))
 
 
+def test_iq1_s_cuda_float8_uses_reference_search(monkeypatch):
+    monkeypatch.setattr(
+        iq1_s_module.extensions,
+        "get_cuda_ext_iq1_s",
+        lambda *_args, **_kwargs: pytest.fail("float8 must bypass the CUDA extension"),
+    )
+    weight = torch.ones((1, 256), device="cuda").to(torch.float8_e4m3fn)
+
+    packed, shape = quantize_iq1_s(weight)
+
+    assert packed.shape == (1, 1, 50)
+    assert torch.equal(shape, torch.tensor([1, 256], device="cuda"))
+
+
 def test_iq1_s_cuda_zero_encoding_matches_ggml_block_layout():
     weight = torch.zeros((1, 256), device="cuda", dtype=torch.bfloat16)
     packed = _extension().pack(weight, iq1_s_grid("cuda")).reshape(1, 1, 50)

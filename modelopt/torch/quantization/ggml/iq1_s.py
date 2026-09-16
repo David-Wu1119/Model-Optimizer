@@ -65,6 +65,7 @@ import torch
 
 from .. import extensions
 from .common import (
+    _IQ_CUDA_INPUT_DTYPES,
     GGML_BLOCK_SIZE,
     _cached_grid_from_bytes,
     cached_reconstruction,
@@ -264,7 +265,12 @@ def _quantize_iq1_s_packed(
         weight.shape[-1] // IQ1_S_BLOCK_SIZE,
         IQ1_S_BLOCK_BYTES,
     )
-    if weight.is_cuda and search_impl == "auto" and detect_fake_mode(weight) is None:
+    if (
+        weight.is_cuda
+        and weight.dtype in _IQ_CUDA_INPUT_DTYPES
+        and search_impl == "auto"
+        and detect_fake_mode(weight) is None
+    ):
         extension = extensions.get_cuda_ext_iq1_s()
         if extension is not None:
             packed = extension._pack_canonical(blocks, grid)

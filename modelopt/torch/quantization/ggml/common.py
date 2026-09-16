@@ -30,6 +30,8 @@ except ImportError:  # pragma: no cover - compatibility with older PyTorch versi
     _torch_detect_fake_mode = None
 
 GGML_BLOCK_SIZE = 256
+# Matches the native extension dispatch; other floating dtypes use the reference encoder.
+_IQ_CUDA_INPUT_DTYPES = frozenset({torch.float16, torch.bfloat16, torch.float32, torch.float64})
 
 
 def detect_fake_mode(inputs: Any = None) -> Any:
