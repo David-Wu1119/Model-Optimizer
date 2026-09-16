@@ -169,6 +169,36 @@ def test_megatron_iq_packer_rejects_tensor_parallelism():
         GPTModelExporter._get_iq_weight_state("weight", weight, "iq2_xs")
 
 
+@pytest.mark.parametrize("method_name", ["_pack_name_remapping", "_pack_name_remapping_gpt_oss"])
+def test_megatron_iq_export_rejects_packed_experts(method_name):
+    """Packed expert layouts cannot preserve the calibrated IQ block axis."""
+    linear = torch.nn.Linear(256, 2, bias=False, dtype=torch.bfloat16)
+    linear.weight_quantizer = TensorQuantizer(
+        QuantizerAttributeConfig(
+            num_bits="iq2_xs",
+            block_sizes={-1: 256},
+            backend="ggml",
+            backend_extra_args={"search_impl": "auto"},
+        )
+    )
+    expert = torch.nn.Module()
+    expert.linear_fc1 = linear
+    exporter = object.__new__(GPTModelExporter)
+    exporter.dtype = torch.bfloat16
+    exporter._state_dict = {}
+    exporter.exclude_modules = []
+    exporter.layer_config_dict = {}
+
+    with pytest.raises(NotImplementedError, match="packed expert weights"):
+        getattr(exporter, method_name)(
+            torch.nn.ModuleList([expert]),
+            "model.layers.0.mlp.experts.weight",
+            layer_type="linear_fc1",
+        )
+
+    assert exporter._state_dict == {}
+
+
 def _test_unified_export_megatron(
     tmp_path,
     model_type,

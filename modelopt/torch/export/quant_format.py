@@ -24,10 +24,8 @@ from typing import Any
 from modelopt.torch.quantization.ggml import (
     IQ1_S_BLOCK_BYTES,
     IQ1_S_BLOCK_SIZE,
-    IQ1_S_EFFECTIVE_BITS,
     IQ2_XS_BLOCK_BYTES,
     IQ2_XS_BLOCK_SIZE,
-    IQ2_XS_EFFECTIVE_BITS,
 )
 
 QUANTIZATION_NONE = None
@@ -55,7 +53,6 @@ IQ_FORMAT_SPECS: dict[str, dict[str, Any]] = {
     QUANTIZATION_IQ1_S: {
         "quant_algo": "IQ1_S",
         "num_bits": 1,
-        "effective_bits": IQ1_S_EFFECTIVE_BITS,
         "group_size": IQ1_S_BLOCK_SIZE,
         "block_payload_bytes": IQ1_S_BLOCK_BYTES,
         "packing": "ggml",
@@ -63,7 +60,6 @@ IQ_FORMAT_SPECS: dict[str, dict[str, Any]] = {
     QUANTIZATION_IQ2_XS: {
         "quant_algo": "IQ2_XS",
         "num_bits": 2,
-        "effective_bits": IQ2_XS_EFFECTIVE_BITS,
         "group_size": IQ2_XS_BLOCK_SIZE,
         "block_payload_bytes": IQ2_XS_BLOCK_BYTES,
         "packing": "ggml",

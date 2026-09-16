@@ -1879,6 +1879,11 @@ class GPTModelExporter:
             name_to_value, qformat, block_size = self._get_quantized_state(
                 getattr(expert, layer_type), self.dtype, prefix=prefix
             )
+            if qformat in IQ_FORMATS:
+                raise NotImplementedError(
+                    "Megatron IQ1_S/IQ2_XS export does not yet support packed expert weights "
+                    "because the HF transpose changes the 256-value block axis"
+                )
             weight = name_to_value.pop("weight")
             weight_scale, weight_scale_2 = self._get_weight_scales(name_to_value, qformat)
             input_scale = (
@@ -1917,9 +1922,7 @@ class GPTModelExporter:
             merged_input_scale = None
 
         # Save the merged weights
-        if qformat in (QUANTIZATION_IQ1_S, QUANTIZATION_IQ2_XS):
-            self._state_dict.update(self._get_iq_weight_state(prefix, merged_weight, qformat))
-        elif merged_weight_scale is None:
+        if merged_weight_scale is None:
             self._state_dict[prefix] = merged_weight
         else:
             self._state_dict[prefix] = to_quantized_weight(
@@ -1950,6 +1953,11 @@ class GPTModelExporter:
             name_to_value, qformat, block_size = self._get_quantized_state(
                 getattr(expert, layer_type), self.dtype, prefix=prefix
             )
+            if qformat in IQ_FORMATS:
+                raise NotImplementedError(
+                    "Megatron IQ1_S/IQ2_XS export does not yet support packed expert weights "
+                    "because the HF transpose changes the 256-value block axis"
+                )
             weight = name_to_value.pop("weight")
             bias = name_to_value.pop("bias", None)
             weight_scale, weight_scale_2 = self._get_weight_scales(name_to_value, qformat)
@@ -2030,9 +2038,7 @@ class GPTModelExporter:
             merged_input_scale = None
 
         # Save the merged weights
-        if qformat in (QUANTIZATION_IQ1_S, QUANTIZATION_IQ2_XS):
-            self._state_dict.update(self._get_iq_weight_state(prefix, merged_weight, qformat))
-        elif merged_weight_scale is None:
+        if merged_weight_scale is None:
             # TODO: May need to modify the key name later.
             self._state_dict[prefix] = merged_weight
         else:
