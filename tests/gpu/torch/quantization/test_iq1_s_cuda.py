@@ -29,6 +29,12 @@ def _extension():
     return extension
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _prebuild_iq1_s_extension():
+    """Compile before per-test timeout accounting begins."""
+    _extension()
+
+
 def test_iq1_s_cuda_extension_handles_multiple_scale_grid_blocks():
     generator = torch.Generator(device="cuda").manual_seed(1234)
     weight = torch.randn((257, 256), generator=generator, device="cuda", dtype=torch.bfloat16)
@@ -110,3 +116,12 @@ def test_iq1_s_cuda_zero_encoding_matches_ggml_block_layout():
 
     assert not packed.any()
     assert torch.equal(dequantize_iq1_s(packed, shape), weight)
+
+
+def test_iq1_s_cuda_rejects_grid_values_outside_staging_range():
+    weight = torch.zeros((1, 256), device="cuda", dtype=torch.bfloat16)
+    grid = iq1_s_grid("cuda").clone()
+    grid[0, 0] = 6
+
+    with pytest.raises(RuntimeError, match="grid values must be within"):
+        _extension().pack(weight, grid)

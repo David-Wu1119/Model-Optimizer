@@ -42,7 +42,7 @@ with contextlib.suppress(ImportError):
 def _prebuild_quant_cuda_extensions():
     """Prebuild quant CUDA extensions before per-test timeouts start.
 
-    First-use JIT compilation can take minutes in CI, so build the base, FP8, and MX
+    First-use JIT compilation can take minutes in CI, so build all quantization CUDA
     extensions during session setup and let tests fall back to on-demand JIT if needed.
 
     Doing it here in session setup (``pyproject`` sets ``timeout_func_only``) keeps the
