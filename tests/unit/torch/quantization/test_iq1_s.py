@@ -180,14 +180,14 @@ def test_iq1_s_cache_is_frozen_after_quantization():
 
 def test_iq1_s_fake_quant_reuses_cached_reconstruction(monkeypatch):
     calls = 0
-    original_quantize = iq1_s_module.quantize_iq1_s
+    original_quantize = iq1_s_module._quantize_iq1_s_packed
 
     def counting_quantize(weight):
         nonlocal calls
         calls += 1
         return original_quantize(weight)
 
-    monkeypatch.setattr(iq1_s_module, "quantize_iq1_s", counting_quantize)
+    monkeypatch.setattr(iq1_s_module, "_quantize_iq1_s_packed", counting_quantize)
     quantizer = TensorQuantizer(
         QuantizerAttributeConfig(
             num_bits="iq1_s",
@@ -265,14 +265,14 @@ def test_iq1_s_fake_quant_preserves_a_foreign_dict_cache():
 
 def test_iq1_s_fake_quant_abandons_cache_for_transient_inputs(monkeypatch):
     calls = 0
-    original_quantize = iq1_s_module.quantize_iq1_s
+    original_quantize = iq1_s_module._quantize_iq1_s_packed
 
     def counting_quantize(weight):
         nonlocal calls
         calls += 1
         return original_quantize(weight)
 
-    monkeypatch.setattr(iq1_s_module, "quantize_iq1_s", counting_quantize)
+    monkeypatch.setattr(iq1_s_module, "_quantize_iq1_s_packed", counting_quantize)
     quantizer = TensorQuantizer(
         QuantizerAttributeConfig(
             num_bits="iq1_s",
@@ -307,15 +307,16 @@ def test_cached_reconstruction_bypasses_storage_identity_in_fake_mode(monkeypatc
         lambda _inputs: pytest.fail("fake tensors must not use storage identity"),
     )
 
-    with FakeTensorMode() as mode:
-        inputs = mode.from_tensor(torch.randn(1, 256))
-        output = ggml_common.cached_reconstruction(
-            inputs,
-            quantizer,
-            cache_namespace="test",
-            quantize=lambda value: (value, torch.empty(0)),
-            dequantize=lambda packed, _shape, dtype: packed.to(dtype),
-        )
+    mode = FakeTensorMode()
+    inputs = mode.from_tensor(torch.randn(1, 256))
+    monkeypatch.setattr(ggml_common, "_torch_detect_fake_mode", None)
+    output = ggml_common.cached_reconstruction(
+        inputs,
+        quantizer,
+        cache_namespace="test",
+        quantize=lambda value: (value, torch.empty(0)),
+        dequantize=lambda packed, _shape, dtype: packed.to(dtype),
+    )
 
     assert isinstance(output, FakeTensor)
     assert quantizer._reconstruction_cache is existing_cache
@@ -363,14 +364,14 @@ def test_iq1_s_frozen_cache_requires_explicit_clear_after_data_write():
 
 def test_iq1_s_fake_quant_handles_inference_tensors_without_a_version(monkeypatch):
     calls = 0
-    original_quantize = iq1_s_module.quantize_iq1_s
+    original_quantize = iq1_s_module._quantize_iq1_s_packed
 
     def counting_quantize(weight):
         nonlocal calls
         calls += 1
         return original_quantize(weight)
 
-    monkeypatch.setattr(iq1_s_module, "quantize_iq1_s", counting_quantize)
+    monkeypatch.setattr(iq1_s_module, "_quantize_iq1_s_packed", counting_quantize)
     quantizer = TensorQuantizer(
         QuantizerAttributeConfig(
             num_bits="iq1_s",
@@ -415,14 +416,14 @@ def test_iq1_s_fake_quant_cache_does_not_retain_temporary_storage():
 
 def test_iq1_s_fake_quant_distinguishes_storage_offsets(monkeypatch):
     calls = 0
-    original_quantize = iq1_s_module.quantize_iq1_s
+    original_quantize = iq1_s_module._quantize_iq1_s_packed
 
     def counting_quantize(weight):
         nonlocal calls
         calls += 1
         return original_quantize(weight)
 
-    monkeypatch.setattr(iq1_s_module, "quantize_iq1_s", counting_quantize)
+    monkeypatch.setattr(iq1_s_module, "_quantize_iq1_s_packed", counting_quantize)
     quantizer = TensorQuantizer(
         QuantizerAttributeConfig(
             num_bits="iq1_s",

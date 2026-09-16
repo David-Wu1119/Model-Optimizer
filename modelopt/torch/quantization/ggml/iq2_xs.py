@@ -58,9 +58,14 @@ import hashlib
 from functools import cache
 
 import torch
-from torch._guards import detect_fake_mode
 
-from .common import GGML_BLOCK_SIZE, cached_reconstruction, validate_packed_weights, validate_weight
+from .common import (
+    GGML_BLOCK_SIZE,
+    cached_reconstruction,
+    detect_fake_mode,
+    validate_packed_weights,
+    validate_weight,
+)
 
 __all__ = [
     "IQ2_XS_BLOCK_BYTES",
@@ -230,21 +235,16 @@ def _encode_blocks(blocks: torch.Tensor, grid: torch.Tensor) -> torch.Tensor:
 
 
 @torch.no_grad()
-def quantize_iq2_xs(
+def _quantize_iq2_xs_packed(
     weight: torch.Tensor, *, block_chunk_size: int | None = None
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Pack a floating-point weight into GGML-compatible IQ2_XS blocks.
-
-    Returned shapes are ``[*weight.shape[:-1], weight.shape[-1] // 256, 74]``
-    and ``[weight.ndim]``. Both tensors remain on the weight's device.
-    """
+) -> torch.Tensor:
+    """Pack a weight without allocating the public logical-shape tensor."""
     validate_weight(weight, "IQ2_XS")
     if block_chunk_size is None:
         block_chunk_size = 1024 if weight.is_cuda else 64
     if block_chunk_size <= 0:
         raise ValueError(f"block_chunk_size must be positive, got {block_chunk_size}")
 
-    logical_shape = torch.tensor(weight.shape, dtype=torch.int64, device=weight.device)
     blocks = weight.contiguous().reshape(-1, IQ2_XS_BLOCK_SIZE)
     grid = iq2_xs_grid(weight.device)
     chunks = [
@@ -256,7 +256,21 @@ def quantize_iq2_xs(
         weight.shape[-1] // IQ2_XS_BLOCK_SIZE,
         IQ2_XS_BLOCK_BYTES,
     )
-    return torch.cat(chunks).reshape(packed_shape), logical_shape
+    return torch.cat(chunks).reshape(packed_shape)
+
+
+@torch.no_grad()
+def quantize_iq2_xs(
+    weight: torch.Tensor, *, block_chunk_size: int | None = None
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Pack a floating-point weight into GGML-compatible IQ2_XS blocks.
+
+    Returned shapes are ``[*weight.shape[:-1], weight.shape[-1] // 256, 74]``
+    and ``[weight.ndim]``. Both tensors remain on the weight's device.
+    """
+    packed = _quantize_iq2_xs_packed(weight, block_chunk_size=block_chunk_size)
+    logical_shape = torch.tensor(weight.shape, dtype=torch.int64, device=weight.device)
+    return packed, logical_shape
 
 
 @torch.no_grad()
@@ -306,7 +320,7 @@ def iq2_xs_fake_quant(inputs: torch.Tensor, quantizer) -> torch.Tensor:
         inputs,
         quantizer,
         cache_namespace="iq2_xs",
-        quantize=quantize_iq2_xs,
+        quantize=lambda weight: (_quantize_iq2_xs_packed(weight), None),
         dequantize=dequantize_iq2_xs,
     )
     return inputs + (reconstructed - inputs).detach()

@@ -168,9 +168,9 @@ def freeze_reconstruction_caches(model: nn.Module) -> None:
 class TensorQuantizerCache(Protocol):
     """A protocol for a cache interface for TensorQuantizer.
 
-    Dict-valued reconstruction caches may be dropped after calibration, configuration changes,
-    or supported in-place weight rewrites and must be rebuilt lazily. Other cache objects are
-    treated as owned by their custom backend and are preserved by the reconstruction lifecycle.
+    Objects stored in ``_quantizer_cache`` are owned by their custom backend. ModelOpt does not
+    inspect or discard them. A separate ``_reconstruction_cache`` owns ModelOpt's packed payload
+    and is cleared after calibration, configuration changes, or supported weight rewrites.
     """
 
 
@@ -336,7 +336,7 @@ class TensorQuantizer(nn.Module):
         if self.is_mx_format:
             self._pass_through_bwd = True
 
-        if hasattr(self, "_quantizer_cache"):
+        if hasattr(self, "_reconstruction_cache"):
             self.clear_quantizer_cache()
 
     def dequantize(self, inputs: BaseQuantizedTensor | QTensorWrapper):
@@ -430,7 +430,7 @@ class TensorQuantizer(nn.Module):
             self._amax.data.copy_(value.clone().detach().to(self._amax.device))
 
     def reset_amax(self):
-        """Reset amax and discard a dict-valued reconstruction cache."""
+        """Reset amax and discard the ModelOpt reconstruction cache."""
         self.unfreeze_quantizer_cache()
         if hasattr(self, "_amax"):
             delattr(self, "_amax")

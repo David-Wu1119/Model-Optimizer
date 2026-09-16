@@ -140,7 +140,9 @@ activations and tensor-core math are what deliver the throughput.
 - **`iq1_s` / `iq2_xs`** — GGML-compatible IQ1_S or IQ2_XS weights on all linear
   layers, with BF16 activations. No calibration data is required. Prefer weights whose final
   dimension is divisible by 256: the fake-quant path pads other shapes with zeros, which
-  prevents reconstruction-cache reuse and can degrade the fit in the final partial block.
+  prevents reconstruction-cache reuse and can degrade the fit in the final partial block. These
+  recipes configure simulated weight quantization only; packed checkpoint export is added
+  separately.
 
 ---
 

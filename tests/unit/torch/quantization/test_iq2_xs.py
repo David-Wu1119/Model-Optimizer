@@ -116,14 +116,14 @@ def test_iq2_xs_fake_quant_has_pass_through_gradient():
 
 def test_iq2_xs_fake_quant_reuses_cached_reconstruction(monkeypatch):
     calls = 0
-    original_quantize = iq2_xs_module.quantize_iq2_xs
+    original_quantize = iq2_xs_module._quantize_iq2_xs_packed
 
     def counting_quantize(weight):
         nonlocal calls
         calls += 1
         return original_quantize(weight)
 
-    monkeypatch.setattr(iq2_xs_module, "quantize_iq2_xs", counting_quantize)
+    monkeypatch.setattr(iq2_xs_module, "_quantize_iq2_xs_packed", counting_quantize)
     quantizer = TensorQuantizer(
         QuantizerAttributeConfig(
             num_bits="iq2_xs",
@@ -161,14 +161,14 @@ def test_iq2_xs_fake_quant_reuses_cached_reconstruction(monkeypatch):
 
 def test_iq2_xs_fake_quant_handles_inference_tensors_without_a_version(monkeypatch):
     calls = 0
-    original_quantize = iq2_xs_module.quantize_iq2_xs
+    original_quantize = iq2_xs_module._quantize_iq2_xs_packed
 
     def counting_quantize(weight):
         nonlocal calls
         calls += 1
         return original_quantize(weight)
 
-    monkeypatch.setattr(iq2_xs_module, "quantize_iq2_xs", counting_quantize)
+    monkeypatch.setattr(iq2_xs_module, "_quantize_iq2_xs_packed", counting_quantize)
     quantizer = TensorQuantizer(
         QuantizerAttributeConfig(
             num_bits="iq2_xs",

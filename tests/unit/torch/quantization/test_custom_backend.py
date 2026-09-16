@@ -116,14 +116,18 @@ def test_reconstruction_cache_lifecycle_preserves_custom_backend_cache():
     quantizer = TensorQuantizer()
     backend_cache = object()
     quantizer._quantizer_cache = backend_cache
+    quantizer._reconstruction_cache = {"payload": object()}
     quantizer.freeze_quantizer_cache()
 
     quantizer.clear_quantizer_cache()
     assert quantizer._quantizer_cache is backend_cache
+    assert quantizer._reconstruction_cache is None
     assert quantizer._reconstruction_cache_frozen
 
+    quantizer._reconstruction_cache = {"payload": object()}
     quantizer.unfreeze_quantizer_cache()
     assert quantizer._quantizer_cache is backend_cache
+    assert quantizer._reconstruction_cache is None
     assert not quantizer._reconstruction_cache_frozen
 
 

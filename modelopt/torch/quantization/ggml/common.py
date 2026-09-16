@@ -21,9 +21,20 @@ from collections.abc import Callable
 from typing import Any
 
 import torch
-from torch._guards import detect_fake_mode
+
+try:
+    from torch._guards import detect_fake_mode as _torch_detect_fake_mode
+except ImportError:  # pragma: no cover - compatibility with older PyTorch versions
+    _torch_detect_fake_mode = None
 
 GGML_BLOCK_SIZE = 256
+
+
+def detect_fake_mode(inputs: Any = None) -> Any:
+    """Return the active fake-tensor mode without requiring a private PyTorch helper."""
+    if _torch_detect_fake_mode is not None:
+        return _torch_detect_fake_mode(inputs)
+    return getattr(inputs, "fake_mode", None)
 
 
 def _cache_identity(inputs: torch.Tensor) -> tuple[Any, tuple[Any, ...]]:
@@ -66,19 +77,21 @@ def cached_reconstruction(
     rewrite a frozen weight must clear its quantizer cache before the next forward.
     """
     raw_cache = getattr(quantizer, "_reconstruction_cache", None)
-    in_fake_mode = detect_fake_mode() is not None
+    in_fake_mode = detect_fake_mode(inputs) is not None
+    assert raw_cache is None or isinstance(raw_cache, dict), (
+        "TensorQuantizer._reconstruction_cache must be a dict or None"
+    )
     cache_enabled = (
         not getattr(quantizer, "training", True)
         and getattr(quantizer, "_reconstruction_cache_frozen", False)
         and not in_fake_mode
-        and (raw_cache is None or isinstance(raw_cache, dict))
     )
     storage_key = f"{cache_namespace}_storage"
     signature_key = f"{cache_namespace}_signature"
     packed_key = f"{cache_namespace}_packed"
     shape_key = f"{cache_namespace}_shape"
 
-    cache: dict[str, Any] = raw_cache if isinstance(raw_cache, dict) else {}
+    cache: dict[str, Any] = raw_cache if raw_cache is not None else {}
     if cache_enabled and raw_cache is None:
         quantizer._reconstruction_cache = cache
     elif not cache_enabled and not in_fake_mode and raw_cache is not None:
@@ -136,7 +149,7 @@ def validate_weight(weight: torch.Tensor, format_name: str) -> None:
         )
     if not weight.is_floating_point():
         raise TypeError(f"{format_name} requires a floating-point weight, got {weight.dtype}")
-    if not torch.isfinite(weight).all():
+    if detect_fake_mode(weight) is None and not torch.isfinite(weight).all():
         raise ValueError(f"{format_name} requires finite weight values")
 
 
