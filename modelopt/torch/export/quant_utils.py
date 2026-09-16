@@ -48,7 +48,12 @@ from modelopt.torch.quantization.utils import (
 )
 from modelopt.torch.utils import clear_cuda_cache
 
-from ..quantization.nn import NVFP4StaticQuantizer, SequentialQuantizer, TensorQuantizer
+from ..quantization.nn import (
+    GroupedQuantizer,
+    NVFP4StaticQuantizer,
+    SequentialQuantizer,
+    TensorQuantizer,
+)
 from .model_utils import TiedWeightMap, get_language_model_from_vl
 from .quant_format import (
     IQ_FORMATS,
@@ -86,19 +91,36 @@ def _iq_export_weight_shape_errors(model: nn.Module) -> list[str]:
     """Return selected IQ weights whose final dimension cannot be packed."""
     incompatible: list[str] = []
     for module_name, module in model.named_modules():
-        for weight_name in weight_attr_names(module):
-            quantizer = representative_weight_quantizer(module, weight_name)
+        inspected: set[str] = set()
+
+        def inspect_weight(weight_name: str, quantizer: nn.Module | None) -> None:
+            qualified_name = f"{module_name}.{weight_name}".lstrip(".")
+            if qualified_name in inspected:
+                return
+            inspected.add(qualified_name)
             if not (
                 isinstance(quantizer, TensorQuantizer)
                 and quantizer.is_enabled
                 and quantizer.num_bits in IQ_FORMATS
             ):
-                continue
-            weight = getattr(module, weight_name)
+                return
+            weight = getattr(module, weight_name, None)
+            if not isinstance(weight, torch.Tensor):
+                return
             group_size = iq_format_spec(quantizer.num_bits)["group_size"]
             if weight.dim() == 0 or weight.shape[-1] % group_size:
-                qualified_name = f"{module_name}.{weight_name}".lstrip(".")
                 incompatible.append(f"{qualified_name}: {tuple(weight.shape)}")
+
+        for weight_name in weight_attr_names(module):
+            quantizer = representative_weight_quantizer(module, weight_name)
+            inspect_weight(weight_name, quantizer)
+
+        grouped_quantizer = getattr(module, "weight_quantizer", None)
+        if isinstance(grouped_quantizer, GroupedQuantizer) and len(grouped_quantizer) > 0:
+            num_gemms = int(getattr(module, "num_gemms", len(grouped_quantizer)))
+            for index in range(num_gemms):
+                quantizer = grouped_quantizer[min(index, len(grouped_quantizer) - 1)]
+                inspect_weight(f"weight{index}", quantizer)
     return incompatible
 
 

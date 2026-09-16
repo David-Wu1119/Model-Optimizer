@@ -31,7 +31,7 @@ from modelopt.torch.export.unified_export_hf import (
     export_hf_checkpoint,
 )
 from modelopt.torch.quantization.config import QuantizerAttributeConfig
-from modelopt.torch.quantization.nn import TensorQuantizer
+from modelopt.torch.quantization.nn import GroupedQuantizer, TensorQuantizer
 from modelopt.torch.quantization.utils import quantizer_attr_names
 
 
@@ -211,6 +211,34 @@ def test_export_iq_shape_preflight_reports_every_incompatible_weight():
     assert "0.weight: (4, 192)" in message
     assert "2.weight: (4, 320)" in message
     assert "1.weight" not in message
+
+
+def test_export_iq_shape_preflight_reports_grouped_weights():
+    class GroupedLinear(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.num_gemms = 2
+            self.weight0 = nn.Parameter(torch.ones(4, 256, dtype=torch.bfloat16))
+            self.weight1 = nn.Parameter(torch.ones(4, 192, dtype=torch.bfloat16))
+            quantizer_config = QuantizerAttributeConfig(
+                num_bits="iq2_xs",
+                block_sizes={-1: 256},
+                backend="ggml",
+            )
+            self.weight_quantizer = GroupedQuantizer(
+                TensorQuantizer(quantizer_config),
+                TensorQuantizer(quantizer_config),
+            )
+
+    model = nn.Module()
+    model.experts = GroupedLinear()
+
+    with pytest.raises(ValueError) as exc_info:
+        _validate_iq_export_weight_shapes(model)
+
+    message = str(exc_info.value)
+    assert "experts.weight1: (4, 192)" in message
+    assert "experts.weight0" not in message
 
 
 def test_export_hf_checkpoint_runs_iq_shape_preflight_before_mutation(tmp_path):
