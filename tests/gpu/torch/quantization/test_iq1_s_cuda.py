@@ -89,7 +89,7 @@ def test_iq1_s_cuda_uses_reference_fallback_when_extension_is_unavailable(monkey
         1, 2, 50
     )
 
-    packed, shape = quantize_iq1_s(weight, block_chunk_size=1)
+    packed, shape = quantize_iq1_s(weight)
     reconstructed = dequantize_iq1_s(packed, shape).float()
     reference_reconstructed = dequantize_iq1_s(reference, (1, 512)).float()
     fallback_error = (reconstructed - weight.float()).square().mean()
