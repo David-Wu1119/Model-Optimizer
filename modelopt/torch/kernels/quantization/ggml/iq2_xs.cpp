@@ -32,7 +32,11 @@ at::Tensor iq2_xs_pack_canonical(at::Tensor input, at::Tensor grid) {
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, module) {
-  module.def("pack", &iq2_xs_pack, "Pack a tensor into GGML IQ2_XS blocks");
+  module.def("pack", &iq2_xs_pack,
+             "Pack a CUDA floating-point tensor whose numel is a positive multiple of 256. "
+             "Validates a float32 [512, 8] non-negative magnitude grid. Returns uint8 [numel / "
+             "256, 74] on the input device; leading dimensions are flattened.");
   module.def("_pack_canonical", &iq2_xs_pack_canonical,
-             "Pack with the internally validated canonical grid");
+             "Same input and output contract as pack, but skips grid-value validation. Only for "
+             "the checksum-verified canonical IQ2_XS grid.");
 }

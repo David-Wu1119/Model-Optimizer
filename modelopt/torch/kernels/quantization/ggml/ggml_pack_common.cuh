@@ -26,6 +26,14 @@ template <typename scalar_t> __device__ __forceinline__ float load_float(const s
   return static_cast<float>(*input);
 }
 
+// Warp-level reductions over the full 32-lane mask.
+//
+// Preconditions:
+//   * Every lane in the warp must reach the call -- the shuffles use a full mask.
+//
+// Postconditions:
+//   * Only lane 0 receives the warp-wide result; other lanes hold a partial reduction over
+//     their suffix of the warp and must not use it.
 __device__ __forceinline__ float warp_min(float value) {
 #pragma unroll
   for (int delta = 16; delta > 0; delta >>= 1)
