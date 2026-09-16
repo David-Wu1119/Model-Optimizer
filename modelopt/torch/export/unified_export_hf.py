@@ -1280,6 +1280,10 @@ def _export_diffusers_checkpoint(
     module_components = {
         name: comp for name, comp in all_components.items() if isinstance(comp, nn.Module)
     }
+    # Validate every component before processing the first one so a later incompatible weight
+    # cannot leave earlier components partially packed.
+    for component in module_components.values():
+        _validate_iq_export_weight_shapes(component)
 
     # Best-effort diffusers pipeline check (kept for folder layout + model_index.json behavior)
     is_diffusers_pipe = False

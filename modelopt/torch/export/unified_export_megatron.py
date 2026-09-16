@@ -71,6 +71,7 @@ from .quant_format import (
     iq_format_spec,
 )
 from .quant_utils import (
+    _iq_export_weight_shape_errors,
     _pack_iq_weight,
     _validate_iq_quantizer_config,
     get_activation_scaling_factor,
@@ -275,6 +276,7 @@ class GPTModelExporter:
     ):
         """Save a EAGLE or Medusa checkpoints which can be deployed by vLLM and TensorRT-LLM."""
         self._validate_iq_tensor_parallelism()
+        self._validate_iq_weight_shapes_collectively()
         # We use the last PP rank to write the config because
         # medusa_heads and eagle_module only exist in the last stage.
         pp_rank = get_pipeline_model_parallel_rank()
@@ -334,6 +336,21 @@ class GPTModelExporter:
                 "parallel size 1"
             )
 
+    def _validate_iq_weight_shapes_collectively(self) -> None:
+        """Fail every rank before packing when any rank owns an incompatible IQ weight."""
+        if not self._packs_iq_weights:
+            return
+        local_errors = _iq_export_weight_shape_errors(self.model)
+        if not self._collective_any_iq(bool(local_errors)):
+            return
+        if local_errors:
+            details = "\n  - ".join(local_errors)
+            raise ValueError(
+                "IQ export requires every selected weight's final dimension to be divisible by "
+                f"its format group size. Incompatible weights:\n  - {details}"
+            )
+        raise ValueError("Another distributed rank owns an IQ weight that cannot be packed")
+
     def save_pretrained(
         self,
         save_directory: str | os.PathLike,
@@ -345,6 +362,7 @@ class GPTModelExporter:
             save_directory: Directory to which to save. Will be created if it doesn't exist.
         """
         self._validate_iq_tensor_parallelism()
+        self._validate_iq_weight_shapes_collectively()
 
         pp_rank = get_pipeline_model_parallel_rank()
         pp_size = get_pipeline_model_parallel_world_size()

@@ -82,8 +82,8 @@ from .quant_format import (
 logger = logging.getLogger(__name__)
 
 
-def _validate_iq_export_weight_shapes(model: nn.Module) -> None:
-    """Reject all IQ weights that cannot be packed before export mutates the model."""
+def _iq_export_weight_shape_errors(model: nn.Module) -> list[str]:
+    """Return selected IQ weights whose final dimension cannot be packed."""
     incompatible: list[str] = []
     for module_name, module in model.named_modules():
         for weight_name in weight_attr_names(module):
@@ -99,6 +99,12 @@ def _validate_iq_export_weight_shapes(model: nn.Module) -> None:
             if weight.dim() == 0 or weight.shape[-1] % group_size:
                 qualified_name = f"{module_name}.{weight_name}".lstrip(".")
                 incompatible.append(f"{qualified_name}: {tuple(weight.shape)}")
+    return incompatible
+
+
+def _validate_iq_export_weight_shapes(model: nn.Module) -> None:
+    """Reject all IQ weights that cannot be packed before export mutates the model."""
+    incompatible = _iq_export_weight_shape_errors(model)
 
     if incompatible:
         details = "\n  - ".join(incompatible)

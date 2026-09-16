@@ -213,6 +213,37 @@ def test_vllm_fakequant_export_skips_iq_packing_guard():
     collective.assert_not_called()
 
 
+def test_megatron_iq_shape_guard_fails_all_ranks_before_packing():
+    exporter = object.__new__(GPTModelExporter)
+    exporter.model = torch.nn.Linear(192, 2, bias=False, dtype=torch.bfloat16)
+    exporter.model.weight_quantizer = TensorQuantizer(
+        QuantizerAttributeConfig(
+            num_bits="iq2_xs",
+            block_sizes={-1: 256},
+            backend="ggml",
+        )
+    )
+
+    with (
+        patch.object(exporter, "_collective_any_iq", return_value=True) as collective,
+        pytest.raises(ValueError, match=r"weight: \(2, 192\)"),
+    ):
+        exporter._validate_iq_weight_shapes_collectively()
+
+    collective.assert_called_once_with(True)
+
+
+def test_megatron_iq_shape_guard_reports_another_rank():
+    exporter = object.__new__(GPTModelExporter)
+    exporter.model = torch.nn.Module()
+
+    with (
+        patch.object(exporter, "_collective_any_iq", return_value=True),
+        pytest.raises(ValueError, match="Another distributed rank"),
+    ):
+        exporter._validate_iq_weight_shapes_collectively()
+
+
 def test_megatron_iq_packer_rejects_tensor_parallelism():
     """Internal packing keeps the TP=1 guard for extra-module export paths."""
     module = torch.nn.Linear(256, 2, bias=False, dtype=torch.bfloat16)

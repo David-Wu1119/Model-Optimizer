@@ -39,6 +39,8 @@ from modelopt.torch.export.diffusers_utils import (
     hide_quantizers_from_state_dict,
 )
 from modelopt.torch.export.unified_export_hf import _postprocess_safetensors, export_hf_checkpoint
+from modelopt.torch.quantization.config import QuantizerAttributeConfig
+from modelopt.torch.quantization.nn import TensorQuantizer
 
 
 def _load_config(config_path):
@@ -125,6 +127,33 @@ def test_export_diffusers_unet_quantized_matches_llm_config(tmp_path, monkeypatc
     config_data = _load_config(config_path)
     assert "quantization_config" in config_data
     assert config_data["quantization_config"] == convert_hf_quant_config_format(dummy_quant_config)
+
+
+def test_diffusers_iq_shape_preflight_runs_before_component_mutation(tmp_path, monkeypatch):
+    component = nn.Linear(192, 4, bias=False, dtype=torch.bfloat16)
+    component.weight_quantizer = TensorQuantizer(
+        QuantizerAttributeConfig(
+            num_bits="iq2_xs",
+            block_sizes={-1: 256},
+            backend="ggml",
+        )
+    )
+    original_weight = component.weight.detach().clone()
+
+    monkeypatch.setattr(
+        unified_export_hf,
+        "get_diffusion_components",
+        lambda *_args, **_kwargs: {"transformer": component},
+    )
+    monkeypatch.setattr(unified_export_hf, "has_quantized_modules", lambda *_args: True)
+
+    with pytest.raises(ValueError, match=r"weight: \(4, 192\)"):
+        unified_export_hf._export_diffusers_checkpoint(
+            object(), torch.bfloat16, tmp_path, components=None
+        )
+
+    assert component.weight.dtype == torch.bfloat16
+    assert torch.equal(component.weight, original_weight)
 
 
 def test_flux2_dummy_inputs_shape():
