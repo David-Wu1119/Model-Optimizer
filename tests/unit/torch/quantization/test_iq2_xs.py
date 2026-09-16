@@ -132,13 +132,17 @@ def test_iq2_xs_fake_quant_reuses_cached_reconstruction(monkeypatch):
     quantizer(weight)
     assert calls == 2
 
-    weight.data.add_(1)
-    quantizer.reset_amax()
+    weight.data = torch.randn_like(weight)
     quantizer(weight)
     assert calls == 3
 
-    quantizer(weight.clone())
+    weight.data.add_(1)
+    quantizer.reset_amax()
+    quantizer(weight)
     assert calls == 4
+
+    quantizer(weight.clone())
+    assert calls == 5
 
 
 def test_iq2_xs_fake_quant_handles_inference_tensors_without_a_version(monkeypatch):
@@ -165,4 +169,4 @@ def test_iq2_xs_fake_quant_handles_inference_tensors_without_a_version(monkeypat
         quantizer(weight)
         quantizer(weight)
 
-    assert calls == 2
+    assert calls == 1

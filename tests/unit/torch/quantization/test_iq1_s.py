@@ -162,13 +162,17 @@ def test_iq1_s_fake_quant_reuses_cached_reconstruction(monkeypatch):
     quantizer(weight)
     assert calls == 2
 
-    weight.data.add_(1)
-    quantizer.reset_amax()
+    weight.data = torch.randn_like(weight)
     quantizer(weight)
     assert calls == 3
 
-    quantizer(weight.clone())
+    weight.data.add_(1)
+    quantizer.reset_amax()
+    quantizer(weight)
     assert calls == 4
+
+    quantizer(weight.clone())
+    assert calls == 5
 
 
 def test_iq1_s_fake_quant_handles_inference_tensors_without_a_version(monkeypatch):
@@ -194,5 +198,31 @@ def test_iq1_s_fake_quant_handles_inference_tensors_without_a_version(monkeypatc
         weight = torch.randn(1, 256)
         quantizer(weight)
         quantizer(weight)
+
+    assert calls == 1
+
+
+def test_iq1_s_fake_quant_distinguishes_storage_offsets(monkeypatch):
+    calls = 0
+    original_quantize = iq1_s_module.quantize_iq1_s
+
+    def counting_quantize(weight):
+        nonlocal calls
+        calls += 1
+        return original_quantize(weight)
+
+    monkeypatch.setattr(iq1_s_module, "quantize_iq1_s", counting_quantize)
+    quantizer = TensorQuantizer(
+        QuantizerAttributeConfig(
+            num_bits="iq1_s",
+            block_sizes={-1: 256},
+            backend="ggml",
+            backend_extra_args={"search_impl": "auto"},
+        )
+    ).eval()
+    storage = torch.randn(512)
+
+    quantizer(storage[:256].reshape(1, 256))
+    quantizer(storage[256:].reshape(1, 256))
 
     assert calls == 2

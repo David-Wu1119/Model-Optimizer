@@ -243,20 +243,6 @@ def quantize_iq2_xs(
     logical_shape = torch.tensor(weight.shape, dtype=torch.int64, device=weight.device)
     blocks = weight.contiguous().reshape(-1, IQ2_XS_BLOCK_SIZE)
     grid = iq2_xs_grid(weight.device)
-    if weight.is_cuda:
-        from .. import extensions
-
-        extension_loader = getattr(extensions, "get_cuda_ext_iq2_xs", None)
-        extension = extension_loader() if extension_loader is not None else None
-        if extension is not None:
-            packed = extension.pack(blocks, grid)
-            packed_shape = (
-                *weight.shape[:-1],
-                weight.shape[-1] // IQ2_XS_BLOCK_SIZE,
-                IQ2_XS_BLOCK_BYTES,
-            )
-            return packed.reshape(packed_shape), logical_shape
-
     chunks = [
         _encode_blocks(blocks[start : start + block_chunk_size], grid)
         for start in range(0, blocks.shape[0], block_chunk_size)
@@ -309,7 +295,7 @@ def iq2_xs_fake_quant(inputs: torch.Tensor, quantizer) -> torch.Tensor:
     if getattr(quantizer, "num_bits", None) != "iq2_xs":
         raise ValueError("The ggml IQ2_XS backend requires num_bits='iq2_xs'")
     extra_args = getattr(quantizer, "backend_extra_args", None) or {}
-    search_impl = extra_args.get("search_impl", extra_args.get("iq_search_impl", "auto"))
+    search_impl = extra_args.get("search_impl", "auto")
     if search_impl != "auto":
         raise NotImplementedError("Only IQ2_XS search_impl='auto' is currently supported")
     reconstructed = cached_reconstruction(

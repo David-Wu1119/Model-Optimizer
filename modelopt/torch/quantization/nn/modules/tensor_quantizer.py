@@ -391,7 +391,11 @@ class TensorQuantizer(nn.Module):
         self.reset_bias()
 
     def clear_quantizer_cache(self):
-        """Discard runtime-only data cached by a custom quantization backend."""
+        """Discard runtime-only data cached by a custom quantization backend.
+
+        Call this after rewriting a source tensor through ``.data`` because such writes can bypass
+        PyTorch version counters while reusing the same storage.
+        """
         self._quantizer_cache = None
 
     def reset_bias(self):

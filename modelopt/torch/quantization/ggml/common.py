@@ -16,7 +16,6 @@
 """Shared validation for GGML-compatible block quantizers."""
 
 import math
-import weakref
 from collections.abc import Callable
 from typing import Any
 
@@ -25,17 +24,28 @@ import torch
 GGML_BLOCK_SIZE = 256
 
 
-def _cache_anchor(inputs: torch.Tensor) -> tuple[torch.Tensor, int] | None:
-    """Return an owning tensor and version, or ``None`` when no stable key exists."""
+def _cache_identity(inputs: torch.Tensor) -> tuple[Any, tuple[Any, ...]]:
+    """Return storage ownership plus a signature that works in every grad mode."""
+    storage = inputs.untyped_storage()
     anchor = inputs
     while (base := getattr(anchor, "_base", None)) is not None:
         anchor = base
     try:
         version = anchor._version
     except RuntimeError:
-        # Tensors created in inference mode do not track a version counter.
-        return None
-    return anchor, version
+        # Tensors created in inference mode do not track a version counter. Storage identity and
+        # explicit invalidation still provide a stable cache key for frozen inference weights.
+        version = None
+    signature = (
+        version,
+        storage.data_ptr(),
+        inputs.storage_offset(),
+        tuple(inputs.shape),
+        tuple(inputs.stride()),
+        inputs.dtype,
+        inputs.device,
+    )
+    return storage, signature
 
 
 def cached_reconstruction(
@@ -59,28 +69,15 @@ def cached_reconstruction(
         cache = {}
         quantizer._quantizer_cache = cache
 
-    input_key = f"{cache_namespace}_input"
+    storage_key = f"{cache_namespace}_storage"
     signature_key = f"{cache_namespace}_signature"
     packed_key = f"{cache_namespace}_packed"
     shape_key = f"{cache_namespace}_shape"
 
-    anchor_info = _cache_anchor(inputs)
-    anchor = anchor_info[0] if anchor_info is not None else None
-    signature = None
-    if anchor_info is not None:
-        signature = (
-            anchor_info[1],
-            tuple(inputs.shape),
-            tuple(inputs.stride()),
-            inputs.dtype,
-            inputs.device,
-        )
-    input_ref = cache.get(input_key)
+    storage, signature = _cache_identity(inputs)
     cache_hit = (
-        anchor is not None
-        and not getattr(quantizer, "training", True)
-        and isinstance(input_ref, weakref.ReferenceType)
-        and input_ref() is anchor
+        not getattr(quantizer, "training", True)
+        and storage_key in cache
         and cache.get(signature_key) == signature
     )
 
@@ -91,14 +88,13 @@ def cached_reconstruction(
         # The backend receives the final logical block view, so its Python shape is the exact
         # metadata needed by the decoder and avoids a device-to-host copy on every cache hit.
         shape = tuple(inputs.shape)
-        if anchor is not None and not getattr(quantizer, "training", True):
-            cache[input_key] = weakref.ref(anchor)
+        if not getattr(quantizer, "training", True):
+            # Keep the storage alive while the signature is cached. That prevents allocator reuse
+            # from making a different tensor appear to own the same data pointer.
+            cache[storage_key] = storage
             cache[signature_key] = signature
             cache[packed_key] = packed
             cache[shape_key] = shape
-        elif not getattr(quantizer, "training", True):
-            for key in (input_key, signature_key, packed_key, shape_key):
-                cache.pop(key, None)
         else:
             quantizer._quantizer_cache = None
     reconstructed = dequantize(packed, shape, dtype=inputs.dtype)
