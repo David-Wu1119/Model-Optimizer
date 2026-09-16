@@ -1171,7 +1171,7 @@ class GPTModelExporter:
                 "Megatron IQ1_S/IQ2_XS unified export currently requires tensor model "
                 "parallel size 1"
             )
-        packed_weight = _pack_iq_weight(weight, qformat)
+        packed_weight = _pack_iq_weight(weight, qformat, weight_name=weight_key)
         return {weight_key: packed_weight.detach().cpu()}
 
     def _record_layer_quant_config(self, prefix: str, qformat: str | None, block_size: int | None):

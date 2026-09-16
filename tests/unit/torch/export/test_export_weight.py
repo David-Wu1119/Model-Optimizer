@@ -127,6 +127,36 @@ def test_export_iq_payload_as_weight(num_bits, payload_bytes):
     assert "weight_shape" not in state_dict
 
 
+def test_postprocess_state_dict_drops_legacy_weight_shape():
+    state_dict = {
+        "layer.weight": torch.ones(2, 2),
+        "layer.weight_shape": torch.tensor([2, 2]),
+    }
+
+    processed = postprocess_state_dict(state_dict, maxbound=448, quantization=None)
+
+    assert set(processed) == {"layer.weight"}
+
+
+@pytest.mark.parametrize("num_bits", ["iq1_s", "iq2_xs"])
+def test_export_iq_divisibility_error_identifies_weight(num_bits):
+    linear = nn.Linear(192, 4, bias=False, dtype=torch.bfloat16)
+    linear.weight_quantizer = TensorQuantizer(
+        QuantizerAttributeConfig(
+            num_bits=num_bits,
+            block_sizes={-1: 256},
+            backend="ggml",
+            backend_extra_args={"search_impl": "auto"},
+        )
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=rf"Failed to pack {num_bits.upper()} weight 'Linear.weight' with shape \(4, 192\)",
+    ):
+        _export_quantized_weight(linear, torch.bfloat16)
+
+
 @pytest.mark.parametrize("num_bits", ["iq1_s", "iq2_xs"])
 def test_export_iq_rejects_an_unhandled_search_impl(num_bits):
     linear = nn.Linear(256, 4, bias=False, dtype=torch.bfloat16)

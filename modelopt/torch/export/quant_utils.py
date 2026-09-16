@@ -121,12 +121,19 @@ def _pack_iq_weight(
     """Pack one IQ weight after checking any attached quantizer configuration."""
     if module is not None:
         _validate_iq_quantizer_config(module, quantization_format, weight_name)
-    if quantization_format == QUANTIZATION_IQ1_S:
-        packed_weight, _ = quantize_iq1_s(weight)
-    elif quantization_format == QUANTIZATION_IQ2_XS:
-        packed_weight, _ = quantize_iq2_xs(weight)
-    else:
-        raise ValueError(f"Unsupported IQ quantization format: {quantization_format}")
+    try:
+        if quantization_format == QUANTIZATION_IQ1_S:
+            packed_weight, _ = quantize_iq1_s(weight)
+        elif quantization_format == QUANTIZATION_IQ2_XS:
+            packed_weight, _ = quantize_iq2_xs(weight)
+        else:
+            raise ValueError(f"Unsupported IQ quantization format: {quantization_format}")
+    except ValueError as exc:
+        owner = type(module).__name__ if module is not None else "state_dict"
+        raise ValueError(
+            f"Failed to pack {quantization_format.upper()} weight "
+            f"'{owner}.{weight_name}' with shape {tuple(weight.shape)}: {exc}"
+        ) from exc
     return packed_weight
 
 
@@ -1007,6 +1014,7 @@ _BASE_SKIP_KEYS: tuple[str, ...] = (
     "_amax",
     "_bias_value",
     "input_quantizer._pre_quant_scale",
+    "weight_shape",
 )
 
 
