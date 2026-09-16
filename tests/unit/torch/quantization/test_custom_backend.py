@@ -135,15 +135,19 @@ def test_reconstruction_cache_lifecycle_preserves_custom_backend_cache():
 def test_writable_weight_access_clears_only_reconstruction_cache():
     model = torch.nn.Linear(4, 4)
     model.weight_quantizer = TensorQuantizer()
+    model.input_quantizer = TensorQuantizer()
     backend_cache = object()
+    input_cache = {"payload": object()}
     model.weight_quantizer._quantizer_cache = backend_cache
     model.weight_quantizer._reconstruction_cache = {"payload": object()}
+    model.input_quantizer._reconstruction_cache = input_cache
 
     with enable_weight_access_and_writeback(model, model, writeback=True):
         pass
 
     assert model.weight_quantizer._reconstruction_cache is None
     assert model.weight_quantizer._quantizer_cache is backend_cache
+    assert model.input_quantizer._reconstruction_cache is input_cache
 
 
 def test_freezing_reconstruction_cache_skips_activation_quantizers():

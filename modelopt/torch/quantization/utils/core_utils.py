@@ -645,12 +645,13 @@ def enable_weight_access_and_writeback(
     finally:
         if writeback:
             # Some materialization backends restore parameters through ``.data.copy_``, which
-            # bypasses the version counter used by reconstruction caches. Invalidate centrally
-            # after every writable access window so a later forward cannot reuse stale bytes.
-            from ..nn import TensorQuantizer
+            # bypasses the version counter used by reconstruction caches. Other writable windows
+            # may be no-ops, but conservatively invalidate weight quantizers after every one so a
+            # later forward cannot reuse stale bytes.
+            from ..nn import TensorQuantizer, is_weight_quantizer_path
 
-            for submodule in module.modules():
-                if isinstance(submodule, TensorQuantizer):
+            for name, submodule in module.named_modules():
+                if isinstance(submodule, TensorQuantizer) and is_weight_quantizer_path(name):
                     submodule.clear_reconstruction_cache()
 
 
