@@ -25,9 +25,38 @@ import modelopt.torch.quantization as mtq
 from modelopt.torch.quantization.nn import (
     TensorQuantizer,
     TensorQuantizerCache,
+    quant_backend_caches_reconstruction,
     register_quant_backend,
     unregister_quant_backend,
 )
+
+
+def test_backend_cache_capability_freezes_after_calibration():
+    backend_name = "reconstruction_cache_backend"
+    register_quant_backend(
+        backend_name, lambda inputs, _quantizer: inputs, caches_reconstruction=True
+    )
+    model = torch.nn.Linear(16, 16, bias=False)
+    config = {
+        "quant_cfg": [
+            {"quantizer_name": "*", "enable": False},
+            {
+                "quantizer_name": "*weight_quantizer",
+                "cfg": {"num_bits": 8, "axis": None, "backend": backend_name},
+                "enable": True,
+            },
+        ],
+        "algorithm": "max",
+    }
+
+    try:
+        assert quant_backend_caches_reconstruction(backend_name)
+        mtq.quantize(model, config)
+        assert model.weight_quantizer._quantizer_cache == {"_modelopt_cache_frozen": True}
+    finally:
+        unregister_quant_backend(backend_name)
+
+    assert not quant_backend_caches_reconstruction(backend_name)
 
 
 def test_custom_backend_via_quantize():

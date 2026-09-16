@@ -79,6 +79,7 @@ __all__ = [
     "TensorQuantizer",
     "TensorQuantizerCache",
     "is_registered_quant_backend",
+    "quant_backend_caches_reconstruction",
     "register_quant_backend",
     "unregister_quant_backend",
 ]
@@ -87,9 +88,12 @@ __all__ = [
 QuantBackendEntrypoint = Callable[[torch.Tensor, "TensorQuantizer"], torch.Tensor]
 
 _QUANT_FUNCTIONAL_BACKENDS: dict[str, QuantBackendEntrypoint] = {}
+_RECONSTRUCTION_CACHE_BACKENDS: set[str] = set()
 
 
-def register_quant_backend(name: str, entrypoint: QuantBackendEntrypoint) -> None:
+def register_quant_backend(
+    name: str, entrypoint: QuantBackendEntrypoint, *, caches_reconstruction: bool = False
+) -> None:
     """Register a custom quantization backend.
 
     Args:
@@ -99,6 +103,8 @@ def register_quant_backend(name: str, entrypoint: QuantBackendEntrypoint) -> Non
             See :class:`modelopt.torch.quantization.config.QuantizerAttributeConfig`
             for details on choosing from the registered backends via the ``backend`` and
             ``backend_extra_args`` fields.
+        caches_reconstruction: Whether the backend may cache reconstructions after calibration
+            declares source weights frozen.
     """
     if not isinstance(name, str) or not name:
         raise ValueError("Backend name must be a non-empty string.")
@@ -107,6 +113,10 @@ def register_quant_backend(name: str, entrypoint: QuantBackendEntrypoint) -> Non
     if name in _QUANT_FUNCTIONAL_BACKENDS:
         warnings.warn(f"Overwriting existing backend: {name}")
     _QUANT_FUNCTIONAL_BACKENDS[name] = entrypoint
+    if caches_reconstruction:
+        _RECONSTRUCTION_CACHE_BACKENDS.add(name)
+    else:
+        _RECONSTRUCTION_CACHE_BACKENDS.discard(name)
 
 
 def unregister_quant_backend(name: str) -> None:
@@ -118,6 +128,7 @@ def unregister_quant_backend(name: str) -> None:
     if not isinstance(name, str) or not name:
         raise ValueError("Backend name must be a non-empty string.")
     _QUANT_FUNCTIONAL_BACKENDS.pop(name, None)
+    _RECONSTRUCTION_CACHE_BACKENDS.discard(name)
 
 
 def is_registered_quant_backend(name: str) -> bool:
@@ -127,6 +138,11 @@ def is_registered_quant_backend(name: str) -> bool:
         name: The name of the backend to check.
     """
     return name in _QUANT_FUNCTIONAL_BACKENDS
+
+
+def quant_backend_caches_reconstruction(name: str | None) -> bool:
+    """Return whether a registered backend opts into frozen-weight reconstruction caching."""
+    return name in _RECONSTRUCTION_CACHE_BACKENDS if name is not None else False
 
 
 class TensorQuantizerCache(Protocol):
@@ -391,18 +407,18 @@ class TensorQuantizer(nn.Module):
         self.reset_bias()
 
     def clear_quantizer_cache(self):
-        """Discard runtime-only data cached by a custom quantization backend."""
+        """Discard cached payloads while preserving frozen-cache eligibility."""
         frozen = isinstance(self._quantizer_cache, dict) and self._quantizer_cache.get(
             "_modelopt_cache_frozen"
         )
         self._quantizer_cache = {"_modelopt_cache_frozen": True} if frozen else None
 
     def freeze_quantizer_cache(self):
-        """Allow custom backends to cache reconstructions for weights declared frozen."""
+        """Declare source weights frozen for a backend that caches reconstructions."""
         self._quantizer_cache = {"_modelopt_cache_frozen": True}
 
     def unfreeze_quantizer_cache(self):
-        """Disable reconstruction caching until the next completed calibration."""
+        """Disable reconstruction cache reuse until the next completed calibration."""
         self._quantizer_cache = None
 
     def reset_bias(self):

@@ -45,7 +45,12 @@ from .config import QuantizeAlgoCfgType
 from .kv_cache_auto_quant import AutoQuantizeKVSearcher, get_kv_cache_auto_quantize_config
 from .kv_cache_auto_quant import _validate_search_inputs as _validate_kv_cache_search_inputs
 from .mode import QuantizeModeRegistry, get_modelike_from_algo_cfg
-from .nn import QuantModule, SequentialQuantizer, TensorQuantizer
+from .nn import (
+    QuantModule,
+    SequentialQuantizer,
+    TensorQuantizer,
+    quant_backend_caches_reconstruction,
+)
 from .utils import is_quantized
 
 __all__ = [
@@ -123,7 +128,7 @@ def calibrate(
         if isinstance(module, TensorQuantizer):
             for attr_name in ["_amax", "_pre_quant_scale"]:
                 module.validate_attr(attr_name=attr_name, warn_error=True, name=name)
-            if getattr(module, "backend", None) == "ggml":
+            if quant_backend_caches_reconstruction(getattr(module, "backend", None)):
                 module.freeze_quantizer_cache()
 
     # TODO: Re-enable when the CUDA error: unspecified launch failure is fixed.

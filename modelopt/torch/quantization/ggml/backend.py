@@ -32,4 +32,4 @@ def ggml_fake_quant(inputs: torch.Tensor, quantizer) -> torch.Tensor:
     raise ValueError("The ggml backend requires num_bits='iq1_s' or 'iq2_xs'")
 
 
-register_quant_backend("ggml", ggml_fake_quant)
+register_quant_backend("ggml", ggml_fake_quant, caches_reconstruction=True)

@@ -28,11 +28,9 @@ GGML_BLOCK_SIZE = 256
 def _cache_identity(inputs: torch.Tensor) -> tuple[Any, tuple[Any, ...]]:
     """Return storage ownership plus a signature that works in every grad mode."""
     storage = inputs.untyped_storage()
-    anchor = inputs
-    while (base := getattr(anchor, "_base", None)) is not None:
-        anchor = base
     try:
-        version = anchor._version
+        # A view shares its base's version counter. Inference tensors do not expose one.
+        version = inputs._version
     except RuntimeError:
         # Tensors created in inference mode do not track a version counter. Storage identity and
         # explicit invalidation still provide a stable cache key for frozen inference weights.
@@ -60,11 +58,11 @@ def cached_reconstruction(
     """Return a reconstruction, caching only after the quantizer marks weights frozen.
 
     Static block quantization reshapes the weight before backend dispatch, so the transient
-    ``inputs`` view is not a stable cache key.  Follow its view chain to the owning tensor and
-    use that tensor's version counter.  Cache reuse also requires eval mode and an explicit
-    :meth:`TensorQuantizer.freeze_quantizer_cache` call.  A weak storage reference distinguishes
-    live allocations without retaining temporary input buffers.  Callers that rewrite a frozen
-    weight must clear its quantizer cache before the next forward.
+    ``inputs`` view is not a stable cache key.  Its version counter is a best-effort mutation
+    witness and is absent under inference mode. Cache reuse therefore also requires eval mode and
+    an explicit :meth:`TensorQuantizer.freeze_quantizer_cache` call. A weak storage reference
+    distinguishes live allocations without retaining temporary input buffers. Callers that
+    rewrite a frozen weight must clear its quantizer cache before the next forward.
     """
     raw_cache = getattr(quantizer, "_quantizer_cache", None)
     cache_enabled = (
