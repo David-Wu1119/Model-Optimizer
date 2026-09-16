@@ -49,12 +49,27 @@ def test_iq2_xs_public_grid_mutation_does_not_change_cached_grid():
 
 def test_iq2_xs_fake_grid_does_not_poison_real_grid_cache():
     iq2_xs_module._GRID_CACHE.clear()
+    iq2_xs_module._SIGN_TABLE_CACHE.clear()
     with FakeTensorMode():
         fake_grid = iq2_xs_grid()
+        fake_signs = iq2_xs_module._cached_iq2_xs_sign_table()
 
     assert isinstance(fake_grid, FakeTensor)
+    assert isinstance(fake_signs, FakeTensor)
     assert not iq2_xs_module._GRID_CACHE
+    assert not iq2_xs_module._SIGN_TABLE_CACHE
     assert not isinstance(iq2_xs_grid(), FakeTensor)
+    assert not isinstance(iq2_xs_module._cached_iq2_xs_sign_table(), FakeTensor)
+
+
+def test_iq2_xs_sign_table_derives_even_parity_bit():
+    signs = iq2_xs_module._cached_iq2_xs_sign_table()
+
+    assert signs.shape == (128, 8)
+    assert signs.dtype == torch.float32
+    assert signs[0].tolist() == [1.0] * 8
+    assert signs[1].tolist() == [-1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, -1.0]
+    assert signs[127].tolist() == [-1.0] * 8
 
 
 def test_iq2_xs_fake_mode_uses_one_default_chunk(monkeypatch):

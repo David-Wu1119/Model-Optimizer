@@ -147,6 +147,7 @@ _IQ2_XS_GRID_B64 = (
 )
 
 _GRID_CACHE: dict[torch.device, torch.Tensor] = {}
+_SIGN_TABLE_CACHE: dict[torch.device, torch.Tensor] = {}
 
 
 @cache
@@ -160,6 +161,23 @@ def _grid_bytes() -> bytes:
 def _cached_iq2_xs_grid(device: torch.device | str | None = None) -> torch.Tensor:
     """Return the private canonical grid used by pack and unpack paths."""
     return _cached_grid_from_bytes(_grid_bytes, 512, _GRID_CACHE, signed=False, device=device)
+
+
+@cache
+def _sign_table_bytes() -> bytes:
+    """Return 128 rows of eight signs with bit 7 derived for even parity."""
+    values = bytearray()
+    for sign_index in range(128):
+        sign_mask = sign_index | ((sign_index.bit_count() & 1) << 7)
+        values.extend((-1 if sign_mask & (1 << bit) else 1) & 0xFF for bit in range(8))
+    return bytes(values)
+
+
+def _cached_iq2_xs_sign_table(device: torch.device | str | None = None) -> torch.Tensor:
+    """Return the private [128, 8] sign table used by the unpack path."""
+    return _cached_grid_from_bytes(
+        _sign_table_bytes, 128, _SIGN_TABLE_CACHE, signed=True, device=device
+    )
 
 
 def iq2_xs_grid(device: torch.device | str | None = None) -> torch.Tensor:
@@ -292,12 +310,7 @@ def dequantize_iq2_xs(
     entries = codes & 0x1FF
     sign_index = codes >> 9
 
-    parity = torch.zeros_like(sign_index)
-    for bit in range(7):
-        parity ^= (sign_index >> bit) & 1
-    sign_mask = sign_index | (parity << 7)
-    bit_positions = torch.arange(8, dtype=torch.int32, device=blocks.device)
-    signs = 1.0 - 2.0 * ((sign_mask.unsqueeze(-1) >> bit_positions) & 1).float()
+    signs = _cached_iq2_xs_sign_table(blocks.device)[sign_index]
 
     scale_bytes = blocks[:, 66:].to(torch.int32)
     local = torch.empty((blocks.shape[0], 16), dtype=torch.int32, device=blocks.device)
