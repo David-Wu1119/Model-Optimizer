@@ -126,3 +126,5 @@ def precompile():
     print(get_cuda_ext())
     print(get_cuda_ext_fp8())
     print(get_cuda_ext_mx())
+    print(get_cuda_ext_iq1_s())
+    print(get_cuda_ext_iq2_xs())
