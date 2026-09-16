@@ -34,10 +34,13 @@ constexpr int kBlockSize = 256;
 constexpr int kVectorSize = 8;
 constexpr int kEntries = 512;
 constexpr int kGroups = 16;
+constexpr int kVectorsPerGroup = kBlockSize / (kGroups * kVectorSize);
+constexpr int kGroupValues = kVectorsPerGroup * kVectorSize;
 constexpr int kLocalScales = 16;
 constexpr int kPayloadBytes = 74;
 constexpr int kCodeOffset = 2;
-constexpr int kLocalScaleOffset = kCodeOffset + 4 * kGroups;
+constexpr int kCodeBytesPerGroup = 2 * kVectorsPerGroup;
+constexpr int kLocalScaleOffset = kCodeOffset + kCodeBytesPerGroup * kGroups;
 constexpr int kThreads = 256;
 constexpr int kWarpSize = 32;
 constexpr int kWarps = kThreads / kWarpSize;
@@ -52,7 +55,7 @@ static_assert(kThreads % kWarpSize == 0);
 static_assert(kWarpSize == 32, "the shuffle reductions below start at delta = 16");
 static_assert(kThreads >= kBlockSize, "shared_input is filled one value per thread");
 static_assert(kThreads >= kGroups / 2, "local-scale bytes are written one per thread");
-static_assert(kGroups * 2 * kVectorSize == kBlockSize, "group tiling must cover the block");
+static_assert(kGroups * kGroupValues == kBlockSize, "group tiling must cover the block");
 static_assert(kPayloadBytes == kLocalScaleOffset + kGroups / 2,
               "payload layout must match scale, code, and local-scale fields");
 
@@ -173,8 +176,8 @@ __global__ void encode(const scalar_t *input, int64_t num_blocks, const float *g
     __syncthreads();
 
 #pragma unroll
-    for (int vector = 0; vector < 2; ++vector) {
-      const int offset = group * 16 + vector * 8;
+    for (int vector = 0; vector < kVectorsPerGroup; ++vector) {
+      const int offset = group * kGroupValues + vector * kVectorSize;
       const int vector_index = offset / kVectorSize;
       const float *x = shared_input + offset;
       const float xnorm = vector_norm[vector_index];
@@ -229,8 +232,8 @@ __global__ void encode(const scalar_t *input, int64_t num_blocks, const float *g
     const float selected_scale = d * (2 * selected_local + 1) * 0.125f;
 
 #pragma unroll
-    for (int vector = 0; vector < 2; ++vector) {
-      const int offset = group * 16 + vector * 8;
+    for (int vector = 0; vector < kVectorsPerGroup; ++vector) {
+      const int offset = group * kGroupValues + vector * kVectorSize;
       const int vector_index = offset / kVectorSize;
       const float *x = shared_input + offset;
       const float xnorm = vector_norm[vector_index];
@@ -279,7 +282,7 @@ __global__ void encode(const scalar_t *input, int64_t num_blocks, const float *g
           sign_mask |= static_cast<int>(is_negative) << j;
         }
         const uint16_t code = static_cast<uint16_t>(entry | ((sign_mask & 0x7f) << 9));
-        const int code_offset = kCodeOffset + 2 * (group * 2 + vector);
+        const int code_offset = kCodeOffset + 2 * (group * kVectorsPerGroup + vector);
         payload[code_offset] = static_cast<uint8_t>(code);
         payload[code_offset + 1] = static_cast<uint8_t>(code >> 8);
       }

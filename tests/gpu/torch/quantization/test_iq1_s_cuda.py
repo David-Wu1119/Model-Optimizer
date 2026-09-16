@@ -32,10 +32,12 @@ def test_iq1_s_cuda_extension_handles_multiple_scale_grid_blocks():
     weight = torch.randn((257, 256), generator=generator, device="cuda", dtype=torch.bfloat16)
 
     packed = _extension().pack(weight, iq1_s_grid("cuda")).reshape(257, 1, 50)
+    reference, _ = quantize_iq1_s(weight.cpu())
     shape = torch.tensor(weight.shape, dtype=torch.int64, device="cuda")
     reconstructed = dequantize_iq1_s(packed, shape)
 
     assert packed.shape == (257, 1, 50)
+    assert torch.equal(packed.cpu()[..., :2], reference[..., :2])
     normalized_mse = (
         reconstructed.float() - weight.float()
     ).square().mean() / weight.float().square().mean()

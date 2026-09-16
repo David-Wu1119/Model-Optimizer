@@ -34,11 +34,13 @@ constexpr int kBlockSize = 256;
 constexpr int kVectorSize = 8;
 constexpr int kEntries = 2048;
 constexpr int kGroups = 8;
+constexpr int kVectorsPerGroup = kBlockSize / (kGroups * kVectorSize);
+constexpr int kGroupValues = kVectorsPerGroup * kVectorSize;
 constexpr int kLocalScales = 8;
 constexpr int kChoices = 2 * kLocalScales;
 constexpr int kPayloadBytes = 50;
 constexpr int kIndexOffset = 2;
-constexpr int kMetadataOffset = kIndexOffset + 4 * kGroups;
+constexpr int kMetadataOffset = kIndexOffset + kVectorsPerGroup * kGroups;
 constexpr int kThreads = 256;
 constexpr int kWarpSize = 32;
 constexpr int kWarps = kThreads / kWarpSize;
@@ -52,7 +54,7 @@ static_assert(kWarpSize == 32, "the shuffle reductions below start at delta = 16
 static_assert(kThreads >= kBlockSize, "shared_input is filled one value per thread");
 static_assert(kThreads >= kPayloadBytes, "the zero-block path writes one byte per thread");
 static_assert(kThreads >= kChoices, "choice reductions assign one thread per choice");
-static_assert(kGroups * 4 * kVectorSize == kBlockSize, "group tiling must cover the block");
+static_assert(kGroups * kGroupValues == kBlockSize, "group tiling must cover the block");
 static_assert(kPayloadBytes == kMetadataOffset + 2 * kGroups,
               "payload layout must match scale, index, and metadata fields");
 
@@ -71,7 +73,8 @@ __device__ __forceinline__ float quant_dot(const float *x, const int8_t *q) {
 __device__ __forceinline__ float shifted_error(float xnorm, float dot, float xsum, float qnorm,
                                                float qsum, float scale, float delta) {
   const float shifted_dot = dot + delta * xsum;
-  const float shifted_norm = qnorm + 2.0f * delta * qsum + 8.0f * delta * delta;
+  const float shifted_norm =
+      qnorm + 2.0f * delta * qsum + static_cast<float>(kVectorSize) * delta * delta;
   return fmaxf(fmaf(scale * scale, shifted_norm, fmaf(-2.0f * scale, shifted_dot, xnorm)), 0.0f);
 }
 
@@ -109,7 +112,7 @@ __global__ void encode(const scalar_t *input, int64_t num_blocks, const float *g
   __shared__ float group_error[kChoices];
   __shared__ unsigned long long warp_keys[kWarps];
   __shared__ int selected_choice;
-  __shared__ uint16_t selected_entries[4];
+  __shared__ uint16_t selected_entries[kVectorsPerGroup];
 
   const int tid = threadIdx.x;
   const int lane = tid & (kWarpSize - 1);
@@ -171,8 +174,8 @@ __global__ void encode(const scalar_t *input, int64_t num_blocks, const float *g
     __syncthreads();
 
 #pragma unroll
-    for (int vector = 0; vector < 4; ++vector) {
-      const int offset = group * 32 + vector * 8;
+    for (int vector = 0; vector < kVectorsPerGroup; ++vector) {
+      const int offset = group * kGroupValues + vector * kVectorSize;
       const int vector_index = offset / kVectorSize;
       const float *x = shared_input + offset;
       const float xnorm = vector_norm[vector_index];
@@ -232,8 +235,8 @@ __global__ void encode(const scalar_t *input, int64_t num_blocks, const float *g
     const float selected_scale = d * (2 * selected_local + 1);
 
 #pragma unroll
-    for (int vector = 0; vector < 4; ++vector) {
-      const int offset = group * 32 + vector * 8;
+    for (int vector = 0; vector < kVectorsPerGroup; ++vector) {
+      const int offset = group * kGroupValues + vector * kVectorSize;
       const int vector_index = offset / kVectorSize;
       const float *x = shared_input + offset;
       const float xnorm = vector_norm[vector_index];
@@ -263,16 +266,17 @@ __global__ void encode(const scalar_t *input, int64_t num_blocks, const float *g
           key = warp_keys[w] < key ? warp_keys[w] : key;
         const uint16_t entry = static_cast<uint16_t>(key & 0x7ff);
         selected_entries[vector] = entry;
-        payload[kIndexOffset + group * 4 + vector] = static_cast<uint8_t>(entry);
+        payload[kIndexOffset + group * kVectorsPerGroup + vector] = static_cast<uint8_t>(entry);
       }
       __syncthreads();
     }
 
     if (tid == 0) {
-      const uint16_t qh = static_cast<uint16_t>(
-          ((selected_entries[0] >> 8) & 7) | (((selected_entries[1] >> 8) & 7) << 3) |
-          (((selected_entries[2] >> 8) & 7) << 6) | (((selected_entries[3] >> 8) & 7) << 9) |
-          (selected_local << 12) | ((selected_choice >> 3) << 15));
+      uint16_t qh = 0;
+#pragma unroll
+      for (int vector = 0; vector < kVectorsPerGroup; ++vector)
+        qh |= static_cast<uint16_t>(((selected_entries[vector] >> 8) & 7) << (3 * vector));
+      qh |= static_cast<uint16_t>((selected_local << 12) | ((selected_choice >> 3) << 15));
       payload[kMetadataOffset + 2 * group] = static_cast<uint8_t>(qh);
       payload[kMetadataOffset + 2 * group + 1] = static_cast<uint8_t>(qh >> 8);
     }
