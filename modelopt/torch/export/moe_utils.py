@@ -15,8 +15,8 @@
 
 """Utilities for Mixture-of-Experts (MoE) model export."""
 
-import copy
 import warnings
+from copy import deepcopy
 from pathlib import Path
 
 import torch
@@ -166,7 +166,7 @@ def _export_fused_experts(
             # packing derives metadata from each weight directly, so retaining the source avoids
             # duplicating a potentially populated reconstruction cache.
             w_quantizer = (
-                copy.deepcopy(w_quantizer_src)
+                deepcopy(w_quantizer_src)
                 if uses_first_proj_quantizers and not is_iq
                 else w_quantizer_src
             )

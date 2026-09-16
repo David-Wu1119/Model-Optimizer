@@ -573,10 +573,10 @@ class TestExportFusedExperts:
                 lambda *_args, **_kwargs: None,
             )
 
-            def reject_copy(_quantizer):
+            def reject_copy(*_args, **_kwargs):
                 raise AssertionError("IQ export must reuse its source quantizer")
 
-            monkeypatch.setattr("modelopt.torch.export.moe_utils.copy.deepcopy", reject_copy)
+            monkeypatch.setattr("modelopt.torch.export.moe_utils.deepcopy", reject_copy)
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always")
                 _export_fused_experts(converted, torch.float16)
