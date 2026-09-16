@@ -36,6 +36,8 @@ constexpr int kEntries = 512;
 constexpr int kGroups = 16;
 constexpr int kLocalScales = 16;
 constexpr int kPayloadBytes = 74;
+constexpr int kCodeOffset = 2;
+constexpr int kLocalScaleOffset = kCodeOffset + 4 * kGroups;
 constexpr int kThreads = 256;
 constexpr int kWarpSize = 32;
 constexpr int kWarps = kThreads / kWarpSize;
@@ -49,9 +51,9 @@ constexpr float kMaxAnchor = 0.92f;
 static_assert(kThreads % kWarpSize == 0);
 static_assert(kWarpSize == 32, "the shuffle reductions below start at delta = 16");
 static_assert(kThreads >= kBlockSize, "shared_input is filled one value per thread");
-static_assert(kThreads >= kPayloadBytes, "the zero-block path writes one byte per thread");
+static_assert(kThreads >= kGroups / 2, "local-scale bytes are written one per thread");
 static_assert(kGroups * 2 * kVectorSize == kBlockSize, "group tiling must cover the block");
-static_assert(kPayloadBytes == 2 + 4 * kGroups + kGroups / 2,
+static_assert(kPayloadBytes == kLocalScaleOffset + kGroups / 2,
               "payload layout must match scale, code, and local-scale fields");
 
 template <typename scalar_t> __device__ __forceinline__ float load_float(const scalar_t *input) {
@@ -148,6 +150,8 @@ __global__ void encode(const scalar_t *input, int64_t num_blocks, const float *g
   if (tid < kBlockSize)
     shared_input[tid] = load_float(source + tid);
   __syncthreads();
+  // A zero scale makes row 0, no signs, and local scale 0 win each tie, so a zero block
+  // naturally emits an all-zero payload without a separate branch.
   if (tid < kBlockSize / kVectorSize) {
     float norm = 0.0f;
     int negative_count = 0;
@@ -275,7 +279,7 @@ __global__ void encode(const scalar_t *input, int64_t num_blocks, const float *g
           sign_mask |= static_cast<int>(is_negative) << j;
         }
         const uint16_t code = static_cast<uint16_t>(entry | ((sign_mask & 0x7f) << 9));
-        const int code_offset = 2 + 2 * (group * 2 + vector);
+        const int code_offset = kCodeOffset + 2 * (group * 2 + vector);
         payload[code_offset] = static_cast<uint8_t>(code);
         payload[code_offset + 1] = static_cast<uint8_t>(code >> 8);
       }
@@ -284,7 +288,7 @@ __global__ void encode(const scalar_t *input, int64_t num_blocks, const float *g
   }
 
   if (tid < kGroups / 2)
-    payload[66 + tid] = locals[2 * tid] | (locals[2 * tid + 1] << 4);
+    payload[kLocalScaleOffset + tid] = locals[2 * tid] | (locals[2 * tid + 1] << 4);
 }
 
 } // namespace

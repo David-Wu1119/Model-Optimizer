@@ -37,6 +37,8 @@ constexpr int kGroups = 8;
 constexpr int kLocalScales = 8;
 constexpr int kChoices = 2 * kLocalScales;
 constexpr int kPayloadBytes = 50;
+constexpr int kIndexOffset = 2;
+constexpr int kMetadataOffset = kIndexOffset + 4 * kGroups;
 constexpr int kThreads = 256;
 constexpr int kWarpSize = 32;
 constexpr int kWarps = kThreads / kWarpSize;
@@ -50,6 +52,8 @@ static_assert(kWarpSize == 32, "the shuffle reductions below start at delta = 16
 static_assert(kThreads >= kBlockSize, "shared_input is filled one value per thread");
 static_assert(kThreads >= kPayloadBytes, "the zero-block path writes one byte per thread");
 static_assert(kGroups * 4 * kVectorSize == kBlockSize, "group tiling must cover the block");
+static_assert(kPayloadBytes == kMetadataOffset + 2 * kGroups,
+              "payload layout must match scale, index, and metadata fields");
 
 template <typename scalar_t> __device__ __forceinline__ float load_float(const scalar_t *input) {
   return static_cast<float>(*input);
@@ -258,7 +262,7 @@ __global__ void encode(const scalar_t *input, int64_t num_blocks, const float *g
           key = warp_keys[w] < key ? warp_keys[w] : key;
         const uint16_t entry = static_cast<uint16_t>(key & 0x7ff);
         selected_entries[vector] = entry;
-        payload[2 + group * 4 + vector] = static_cast<uint8_t>(entry);
+        payload[kIndexOffset + group * 4 + vector] = static_cast<uint8_t>(entry);
       }
       __syncthreads();
     }
@@ -268,8 +272,8 @@ __global__ void encode(const scalar_t *input, int64_t num_blocks, const float *g
           ((selected_entries[0] >> 8) & 7) | (((selected_entries[1] >> 8) & 7) << 3) |
           (((selected_entries[2] >> 8) & 7) << 6) | (((selected_entries[3] >> 8) & 7) << 9) |
           (selected_local << 12) | ((selected_choice >> 3) << 15));
-      payload[34 + 2 * group] = static_cast<uint8_t>(qh);
-      payload[35 + 2 * group] = static_cast<uint8_t>(qh >> 8);
+      payload[kMetadataOffset + 2 * group] = static_cast<uint8_t>(qh);
+      payload[kMetadataOffset + 2 * group + 1] = static_cast<uint8_t>(qh >> 8);
     }
     __syncthreads();
   }
