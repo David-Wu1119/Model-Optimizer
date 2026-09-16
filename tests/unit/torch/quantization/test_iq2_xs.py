@@ -99,6 +99,23 @@ def test_iq2_xs_fake_mode_dequantizes_public_tensor_shape():
     assert reconstructed.shape == weight.shape
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires a CUDA-enabled PyTorch build")
+def test_iq2_xs_fake_cuda_tensor_bypasses_extension(monkeypatch):
+    monkeypatch.setattr(
+        iq2_xs_module.extensions,
+        "get_cuda_ext_iq2_xs",
+        lambda *_args, **_kwargs: pytest.fail("fake tensors must not load the CUDA extension"),
+    )
+
+    with FakeTensorMode():
+        weight = torch.empty((1, 256), device="cuda", dtype=torch.bfloat16)
+        packed, shape = quantize_iq2_xs(weight)
+
+    assert isinstance(packed, FakeTensor)
+    assert isinstance(shape, FakeTensor)
+    assert packed.shape == (1, 1, IQ2_XS_BLOCK_BYTES)
+
+
 def test_iq2_xs_zero_block_has_canonical_zero_encoding():
     weight = torch.zeros((2, 256), dtype=torch.bfloat16)
 
@@ -256,10 +273,10 @@ def test_iq2_xs_fake_quant_reuses_cached_reconstruction(monkeypatch):
     calls = 0
     original_quantize = iq2_xs_module._quantize_iq2_xs_packed
 
-    def counting_quantize(weight):
+    def counting_quantize(weight, **kwargs):
         nonlocal calls
         calls += 1
-        return original_quantize(weight)
+        return original_quantize(weight, **kwargs)
 
     monkeypatch.setattr(iq2_xs_module, "_quantize_iq2_xs_packed", counting_quantize)
     quantizer = TensorQuantizer(
@@ -301,10 +318,10 @@ def test_iq2_xs_fake_quant_handles_inference_tensors_without_a_version(monkeypat
     calls = 0
     original_quantize = iq2_xs_module._quantize_iq2_xs_packed
 
-    def counting_quantize(weight):
+    def counting_quantize(weight, **kwargs):
         nonlocal calls
         calls += 1
-        return original_quantize(weight)
+        return original_quantize(weight, **kwargs)
 
     monkeypatch.setattr(iq2_xs_module, "_quantize_iq2_xs_packed", counting_quantize)
     quantizer = TensorQuantizer(

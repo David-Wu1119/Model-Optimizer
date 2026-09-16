@@ -279,7 +279,7 @@ def _quantize_iq2_xs_packed(
         weight.shape[-1] // IQ2_XS_BLOCK_SIZE,
         IQ2_XS_BLOCK_BYTES,
     )
-    if weight.is_cuda and search_impl == "auto":
+    if weight.is_cuda and search_impl == "auto" and detect_fake_mode(weight) is None:
         extension = extensions.get_cuda_ext_iq2_xs()
         if extension is not None:
             packed = extension._pack_canonical(blocks, grid)
