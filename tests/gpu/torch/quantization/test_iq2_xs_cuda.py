@@ -144,6 +144,13 @@ def test_iq2_xs_cuda_float8_uses_reference_search(monkeypatch):
     assert torch.equal(shape, torch.tensor([1, 256], device="cuda"))
 
 
+def test_iq2_xs_cuda_extension_rejects_float8_input():
+    weight = torch.ones((1, 256), device="cuda").to(torch.float8_e4m3fn)
+
+    with pytest.raises(RuntimeError, match="supports float32, float64, float16, and bfloat16"):
+        _extension().pack(weight, iq2_xs_grid("cuda"))
+
+
 def test_iq2_xs_cuda_zero_encoding_matches_ggml_block_layout():
     weight = torch.zeros((1, 256), device="cuda", dtype=torch.bfloat16)
     packed = _extension().pack(weight, iq2_xs_grid("cuda")).reshape(1, 1, 74)

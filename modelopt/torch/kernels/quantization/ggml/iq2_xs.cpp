@@ -33,7 +33,8 @@ at::Tensor iq2_xs_pack_canonical(at::Tensor input, at::Tensor grid) {
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, module) {
   module.def("pack", &iq2_xs_pack,
-             "Pack a CUDA floating-point tensor whose numel is a positive multiple of 256. "
+             "Pack a float32, float64, float16, or bfloat16 CUDA tensor whose numel is a positive "
+             "multiple of 256. "
              "Validates a float32 [512, 8] non-negative magnitude grid. Returns uint8 [numel / "
              "256, 74] on the input device; leading dimensions are flattened.");
   module.def("_pack_canonical", &iq2_xs_pack_canonical,

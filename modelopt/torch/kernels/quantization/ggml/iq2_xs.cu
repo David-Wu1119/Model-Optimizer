@@ -272,6 +272,10 @@ __global__ void encode(const scalar_t *input, const float *grid, uint8_t *output
 
 at::Tensor iq2_xs_pack_cuda(at::Tensor input, at::Tensor grid, bool validate_grid) {
   TORCH_CHECK(input.is_contiguous() && grid.is_contiguous(), "inputs must be contiguous");
+  const auto input_type = input.scalar_type();
+  TORCH_CHECK(input_type == at::kFloat || input_type == at::kDouble || input_type == at::kHalf ||
+                  input_type == at::kBFloat16,
+              "IQ2_XS packing supports float32, float64, float16, and bfloat16 inputs");
   TORCH_CHECK(input.numel() > 0 && input.numel() % kBlockSize == 0,
               "input size must be a positive multiple of 256");
   TORCH_CHECK(grid.scalar_type() == at::kFloat && grid.dim() == 2 && grid.size(0) == kEntries &&
