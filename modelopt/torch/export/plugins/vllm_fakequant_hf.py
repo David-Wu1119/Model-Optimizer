@@ -196,7 +196,9 @@ def _fakequant_fused_experts_weights(
                 slice_ = w_3d[idx]
                 w_3d[idx] = q(slice_.float()).to(slice_.dtype)
             state_dict[sd_key] = w_3d.cpu()
-        # Both paths quantize transient float copies rather than the persistent source storage.
+        # ``q`` reads a transient float copy, so any cached payload is keyed to storage that is
+        # about to die. The inplace branch also rewrites the persistent weight through ``.data``,
+        # which does not bump the version counter. Clear either way.
         _clear_weight_quantizer_caches(module)
         fakequant_weights.add(sd_key)
 
@@ -274,7 +276,9 @@ def _fakequant_module_weights(
             if state_dict is None:
                 raise RuntimeError("state_dict is required when inplace=False for fakequant export")
             state_dict[sd_key] = w_quant.cpu()
-        # Both paths quantize a transient ``w.float()`` copy rather than persistent storage.
+        # The quantizer reads a transient ``w.float()`` copy, so any cached payload is keyed to
+        # storage that is about to die. The inplace branch also rewrites the persistent weight
+        # through ``.data``, which does not bump the version counter. Clear either way.
         quantizer.clear_reconstruction_cache()
         fakequant_weights.add(sd_key)
 
