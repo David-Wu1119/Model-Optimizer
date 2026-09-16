@@ -42,14 +42,14 @@ def test_iq2_xs_cuda_extension_handles_multiple_scale_grid_blocks():
 
 def test_iq2_xs_cuda_quality_matches_cpu_reference_and_public_dispatch():
     generator = torch.Generator().manual_seed(5678)
-    weight_cpu = torch.randn((4, 256), generator=generator, dtype=torch.bfloat16)
+    weight_cpu = torch.randn((4, 512), generator=generator, dtype=torch.bfloat16)
     reference, _ = quantize_iq2_xs(weight_cpu)
     weight_cuda = weight_cpu.cuda()
 
     extension = _extension()
     grid = iq2_xs_grid("cuda")
-    direct = extension.pack(weight_cuda, grid).reshape(4, 1, 74)
-    direct_again = extension.pack(weight_cuda, grid).reshape(4, 1, 74)
+    direct = extension.pack(weight_cuda, grid).reshape(4, 2, 74)
+    direct_again = extension.pack(weight_cuda, grid).reshape(4, 2, 74)
     dispatched, _ = quantize_iq2_xs(weight_cuda)
 
     shape = torch.tensor(weight_cpu.shape, dtype=torch.int64, device="cuda")

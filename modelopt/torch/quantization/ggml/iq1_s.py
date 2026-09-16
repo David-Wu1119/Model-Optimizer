@@ -254,26 +254,21 @@ def _quantize_iq1_s_packed(
 
     blocks = weight.contiguous().reshape(-1, IQ1_S_BLOCK_SIZE)
     grid = _cached_iq1_s_grid(weight.device)
-    if weight.is_cuda:
-        extension = extensions.get_cuda_ext_iq1_s()
-        if extension is not None:
-            packed = extension.pack(blocks, grid)
-            packed_shape = (
-                *weight.shape[:-1],
-                weight.shape[-1] // IQ1_S_BLOCK_SIZE,
-                IQ1_S_BLOCK_BYTES,
-            )
-            return packed.reshape(packed_shape), logical_shape
-
-    chunks = [
-        _encode_blocks(blocks[start : start + block_chunk_size], grid)
-        for start in range(0, blocks.shape[0], block_chunk_size)
-    ]
     packed_shape = (
         *weight.shape[:-1],
         weight.shape[-1] // IQ1_S_BLOCK_SIZE,
         IQ1_S_BLOCK_BYTES,
     )
+    if weight.is_cuda:
+        extension = extensions.get_cuda_ext_iq1_s()
+        if extension is not None:
+            packed = extension.pack(blocks, grid)
+            return packed.reshape(packed_shape)
+
+    chunks = [
+        _encode_blocks(blocks[start : start + block_chunk_size], grid)
+        for start in range(0, blocks.shape[0], block_chunk_size)
+    ]
     return torch.cat(chunks).reshape(packed_shape)
 
 
