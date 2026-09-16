@@ -47,6 +47,12 @@ constexpr float kPeakToRmsSlope = 0.035f;
 constexpr float kMinAnchor = 0.65f;
 constexpr float kMaxAnchor = 0.92f;
 static_assert(kThreads % kWarpSize == 0);
+static_assert(kWarpSize == 32, "the shuffle reductions below start at delta = 16");
+static_assert(kThreads >= kBlockSize, "shared_input is filled one value per thread");
+static_assert(kThreads >= kPayloadBytes, "the zero-block path writes one byte per thread");
+static_assert(kGroups * 2 * kVectorSize == kBlockSize, "group tiling must cover the block");
+static_assert(kPayloadBytes == 2 + 4 * kGroups + kGroups / 2,
+              "payload layout must match scale, code, and local-scale fields");
 
 template <typename scalar_t> __device__ __forceinline__ float load_float(const scalar_t *input) {
   return static_cast<float>(*input);

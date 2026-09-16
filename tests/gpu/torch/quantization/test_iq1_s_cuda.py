@@ -15,6 +15,7 @@
 
 import torch
 
+import modelopt.torch.quantization.ggml.iq1_s as iq1_s_module
 from modelopt.torch.quantization.extensions import get_cuda_ext_iq1_s
 from modelopt.torch.quantization.ggml.iq1_s import dequantize_iq1_s, iq1_s_grid, quantize_iq1_s
 
@@ -64,6 +65,17 @@ def test_iq1_s_cuda_quality_matches_cpu_reference_and_public_dispatch():
     assert direct_error <= reference_error * 1.02
     assert torch.equal(direct_again, direct)
     assert torch.equal(dispatched, direct)
+
+
+def test_iq1_s_cuda_uses_reference_fallback_when_extension_is_unavailable(monkeypatch):
+    monkeypatch.setattr(iq1_s_module.extensions, "get_cuda_ext_iq1_s", lambda: None)
+    weight = torch.randn((1, 256), device="cuda", dtype=torch.bfloat16)
+
+    packed, shape = quantize_iq1_s(weight, block_chunk_size=1)
+
+    assert packed.shape == (1, 1, 50)
+    assert torch.equal(shape, torch.tensor([1, 256], device="cuda"))
+    assert dequantize_iq1_s(packed, shape).shape == weight.shape
 
 
 def test_iq1_s_cuda_zero_encoding_matches_ggml_block_layout():

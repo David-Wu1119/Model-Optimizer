@@ -15,6 +15,7 @@
 
 import torch
 
+import modelopt.torch.quantization.ggml.iq2_xs as iq2_xs_module
 from modelopt.torch.quantization.extensions import get_cuda_ext_iq2_xs
 from modelopt.torch.quantization.ggml.iq2_xs import dequantize_iq2_xs, iq2_xs_grid, quantize_iq2_xs
 
@@ -66,6 +67,17 @@ def test_iq2_xs_cuda_quality_matches_cpu_reference_and_public_dispatch():
     assert direct_error <= reference_error * 1.02
     assert torch.equal(direct_again, direct)
     assert torch.equal(dispatched, direct)
+
+
+def test_iq2_xs_cuda_uses_reference_fallback_when_extension_is_unavailable(monkeypatch):
+    monkeypatch.setattr(iq2_xs_module.extensions, "get_cuda_ext_iq2_xs", lambda: None)
+    weight = torch.randn((1, 256), device="cuda", dtype=torch.bfloat16)
+
+    packed, shape = quantize_iq2_xs(weight, block_chunk_size=1)
+
+    assert packed.shape == (1, 1, 74)
+    assert torch.equal(shape, torch.tensor([1, 256], device="cuda"))
+    assert dequantize_iq2_xs(packed, shape).shape == weight.shape
 
 
 def test_iq2_xs_cuda_zero_encoding_matches_ggml_block_layout():

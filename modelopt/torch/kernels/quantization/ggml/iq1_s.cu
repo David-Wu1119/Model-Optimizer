@@ -46,6 +46,10 @@ constexpr float kNativeMax = 16.875f;
 // Mirrors the reference encoder's peak-clipping anchor.
 constexpr float kScaleAnchor = 0.61f;
 static_assert(kThreads % kWarpSize == 0);
+static_assert(kWarpSize == 32, "the shuffle reductions below start at delta = 16");
+static_assert(kThreads >= kBlockSize, "shared_input is filled one value per thread");
+static_assert(kThreads >= kPayloadBytes, "the zero-block path writes one byte per thread");
+static_assert(kGroups * 4 * kVectorSize == kBlockSize, "group tiling must cover the block");
 
 template <typename scalar_t> __device__ __forceinline__ float load_float(const scalar_t *input) {
   return static_cast<float>(*input);
