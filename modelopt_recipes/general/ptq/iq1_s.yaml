@@ -9,6 +9,7 @@ imports:
 metadata:
   recipe_type: ptq
   description: >-
-    Applies GGML-compatible IQ1_S weight-only quantization. No calibration data is required.
+    Applies uniform GGML-compatible IQ1_S weight-only quantization to eligible linear layers.
+    This is not a mixed per-tensor precision preset. No calibration data is required.
 quantize:
   $import: preset

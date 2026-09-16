@@ -84,6 +84,7 @@ from modelopt.torch.quantization.plugins.megatron import (
     keep_gpt_output_layer_extra_state,
     megatron_replace_quant_module_hook,
     quant_module_get_extra_state,
+    quant_module_set_extra_state,
 )
 from modelopt.torch.quantization.plugins.transformer_engine import (
     _COMPILE_TEGROUPED_WEIGHT_LOOP_ENV,
@@ -1933,6 +1934,24 @@ def test_output_layer_extra_state_empty_when_nothing_quantized():
 
     module.weight_quantizer.enable()
     assert "modelopt_quantizer_state" in quant_module_get_extra_state(module)
+
+
+def test_quant_module_extra_state_freezes_reconstruction_cache():
+    module = QuantModuleRegistry.convert(torch.nn.Linear(256, 4, bias=False))
+    module.weight_quantizer.set_from_attribute_config(
+        {
+            "num_bits": "iq2_xs",
+            "block_sizes": {-1: 256},
+            "backend": "ggml",
+            "backend_extra_args": {"search_impl": "auto"},
+        }
+    )
+    state = quant_module_get_extra_state(module)
+    module.weight_quantizer.unfreeze_quantizer_cache()
+
+    quant_module_set_extra_state(module, state)
+
+    assert module.weight_quantizer._reconstruction_cache_frozen
 
 
 def test_resolve_output_layer_untied():

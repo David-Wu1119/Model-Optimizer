@@ -55,6 +55,7 @@ from ..nn import (
     QuantModuleRegistry,
     SequentialQuantizer,
     TensorQuantizer,
+    freeze_reconstruction_caches,
 )
 from ..nn.modules.quant_linear import RealQuantLinear
 from ..qtensor import QTensorWrapper
@@ -301,6 +302,7 @@ def quant_module_set_extra_state(self, state: Any):
                 maybe_promote_nvfp4_static_quantizer(module, quantizer_substate)
                 module.set_from_modelopt_state(quantizer_substate, properties_only=False)
         self.modelopt_post_restore()
+        freeze_reconstruction_caches(self)
 
     # Handle real_quantizer_state and q_tensor_state
     real_quant_module_set_extra_state(self, state)

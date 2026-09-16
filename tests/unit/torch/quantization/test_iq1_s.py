@@ -211,6 +211,24 @@ def test_iq1_s_fake_quant_reuses_cached_reconstruction(monkeypatch):
     assert calls == 7
 
 
+def test_iq1_s_fake_quant_preserves_a_foreign_cache_object():
+    quantizer = TensorQuantizer(
+        QuantizerAttributeConfig(
+            num_bits="iq1_s",
+            block_sizes={-1: 256},
+            backend="ggml",
+            backend_extra_args={"search_impl": "auto"},
+        )
+    ).eval()
+    foreign_cache = object()
+    quantizer._quantizer_cache = foreign_cache
+    quantizer.freeze_quantizer_cache()
+
+    quantizer(torch.randn(1, 256))
+
+    assert quantizer._quantizer_cache is foreign_cache
+
+
 def test_iq1_s_frozen_cache_requires_explicit_clear_after_data_write():
     """Document that data-mediated writes bypass the signature and require invalidation."""
     quantizer = TensorQuantizer(
