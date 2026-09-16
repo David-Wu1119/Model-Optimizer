@@ -173,24 +173,60 @@ def test_megatron_iq_tensor_parallel_guard_is_collective():
 
 def test_megatron_iq_packer_rejects_tensor_parallelism():
     """Internal packing keeps the TP=1 guard for extra-module export paths."""
-    weight = torch.randn(2, 256, dtype=torch.bfloat16)
+    module = torch.nn.Linear(256, 2, bias=False, dtype=torch.bfloat16)
+    module.weight_quantizer = TensorQuantizer(
+        QuantizerAttributeConfig(
+            num_bits="iq2_xs",
+            block_sizes={-1: 256},
+            backend="ggml",
+            backend_extra_args={"search_impl": "auto"},
+        )
+    )
 
     with (
         patch.object(uem, "get_tensor_model_parallel_world_size", return_value=2),
         pytest.raises(NotImplementedError, match="tensor model parallel size 1"),
     ):
-        GPTModelExporter._get_iq_weight_state("weight", weight, "iq2_xs")
+        GPTModelExporter._get_iq_weight_state("weight", module.weight, "iq2_xs", module)
 
 
 def test_megatron_iq_packer_error_identifies_state_dict_key():
     weight_key = "model.layers.0.mlp.down_proj.weight"
-    weight = torch.randn(2, 192, dtype=torch.bfloat16)
+    module = torch.nn.Linear(192, 2, bias=False, dtype=torch.bfloat16)
+    module.weight_quantizer = TensorQuantizer(
+        QuantizerAttributeConfig(
+            num_bits="iq2_xs",
+            block_sizes={-1: 256},
+            backend="ggml",
+            backend_extra_args={"search_impl": "auto"},
+        )
+    )
 
     with (
         patch.object(uem, "get_tensor_model_parallel_world_size", return_value=1),
         pytest.raises(ValueError, match=weight_key),
     ):
-        GPTModelExporter._get_iq_weight_state(weight_key, weight, "iq2_xs")
+        GPTModelExporter._get_iq_weight_state(weight_key, module.weight, "iq2_xs", module)
+
+
+def test_megatron_iq_packer_revalidates_final_layout_owner():
+    """The final packing boundary rejects activation state omitted from the checkpoint."""
+    module = torch.nn.Linear(256, 2, bias=False, dtype=torch.bfloat16)
+    module.weight_quantizer = TensorQuantizer(
+        QuantizerAttributeConfig(
+            num_bits="iq2_xs",
+            block_sizes={-1: 256},
+            backend="ggml",
+            backend_extra_args={"search_impl": "auto"},
+        )
+    )
+    module.input_quantizer = TensorQuantizer(QuantizerAttributeConfig(num_bits=8))
+
+    with (
+        patch.object(uem, "get_tensor_model_parallel_world_size", return_value=1),
+        pytest.raises(NotImplementedError, match="weight-only"),
+    ):
+        GPTModelExporter._get_iq_weight_state("weight", module.weight, "iq2_xs", module)
 
 
 @pytest.mark.parametrize("method_name", ["_pack_name_remapping", "_pack_name_remapping_gpt_oss"])

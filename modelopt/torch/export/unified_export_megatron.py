@@ -1175,20 +1175,15 @@ class GPTModelExporter:
 
     @staticmethod
     def _get_iq_weight_state(
-        weight_key: str, weight: torch.Tensor, qformat: str
+        weight_key: str, weight: torch.Tensor, qformat: str, module: torch.nn.Module
     ) -> dict[str, torch.Tensor]:
-        """Pack one final-layout weight into the IQ unified-checkpoint representation.
-
-        Every caller reaches this helper through :meth:`_get_quantized_state`, which validates
-        the owning module before its final-layout tensor is packed. A new direct caller must run
-        ``_validate_iq_quantizer_config`` before calling this helper.
-        """
+        """Validate and pack one final-layout weight into the IQ checkpoint representation."""
         if get_tensor_model_parallel_world_size() != 1:
             raise NotImplementedError(
                 "Megatron IQ1_S/IQ2_XS unified export currently requires tensor model "
                 "parallel size 1"
             )
-        packed_weight = _pack_iq_weight(weight, qformat, describe_as=weight_key)
+        packed_weight = _pack_iq_weight(weight, qformat, module=module, describe_as=weight_key)
         return {weight_key: packed_weight.detach().cpu()}
 
     def _record_layer_quant_config(self, prefix: str, qformat: str | None, block_size: int | None):
@@ -1256,7 +1251,9 @@ class GPTModelExporter:
         weight_scale, weight_scale_2 = self._get_weight_scales(name_to_value, qformat)
 
         if qformat in IQ_FORMATS:
-            self._state_dict.update(self._get_iq_weight_state(prefix + "weight", weight, qformat))
+            self._state_dict.update(
+                self._get_iq_weight_state(prefix + "weight", weight, qformat, module)
+            )
         elif weight_scale is None:
             self._state_dict[prefix + "weight"] = weight
         else:
@@ -1304,10 +1301,14 @@ class GPTModelExporter:
 
         if qformat in IQ_FORMATS:
             self._state_dict.update(
-                self._get_iq_weight_state(gate_proj_prefix + "weight", gate_proj_weight, qformat)
+                self._get_iq_weight_state(
+                    gate_proj_prefix + "weight", gate_proj_weight, qformat, module
+                )
             )
             self._state_dict.update(
-                self._get_iq_weight_state(up_proj_prefix + "weight", up_proj_weight, qformat)
+                self._get_iq_weight_state(
+                    up_proj_prefix + "weight", up_proj_weight, qformat, module
+                )
             )
         elif weight_scale is None:
             self._state_dict[gate_proj_prefix + "weight"] = gate_proj_weight
@@ -1515,7 +1516,7 @@ class GPTModelExporter:
                     if qformat in IQ_FORMATS:
                         local_expert_state.update(
                             self._get_iq_weight_state(
-                                shard_prefix + "weight", shard_weight, qformat
+                                shard_prefix + "weight", shard_weight, qformat, module
                             )
                         )
                     elif shard_scale is None:
@@ -1683,7 +1684,7 @@ class GPTModelExporter:
 
         if qformat in IQ_FORMATS:
             for key, weight in zip(proj_keys, proj_weights):
-                self._state_dict.update(self._get_iq_weight_state(key, weight, qformat))
+                self._state_dict.update(self._get_iq_weight_state(key, weight, qformat, module))
         elif weight_scale is None:
             for key, weight in zip(proj_keys, proj_weights):
                 self._state_dict[key] = weight
@@ -1805,7 +1806,9 @@ class GPTModelExporter:
                     self._state_dict[proj_prefix + "weight"] = proj_weight.cpu()
                 else:
                     self._state_dict.update(
-                        self._get_iq_weight_state(proj_prefix + "weight", proj_weight, qformat)
+                        self._get_iq_weight_state(
+                            proj_prefix + "weight", proj_weight, qformat, in_proj
+                        )
                     )
         elif weight_scale is None:
             for key, proj_weight in zip(proj_keys, proj_weights):
