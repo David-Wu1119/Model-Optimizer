@@ -22,6 +22,8 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 
+from .quant_format import IQ_FORMATS
+
 
 def _delete_fused_moe_source_attrs(module: nn.Module) -> None:
     """Remove the 3-D fused source params and per-expert quantizer ModuleLists.
@@ -114,6 +116,7 @@ def _export_fused_experts(
         first_proj_q = first_proj_weight_quantizers[idx]
         if (
             is_gated
+            and getattr(first_proj_q, "num_bits", None) not in IQ_FORMATS
             and getattr(first_proj_q, "is_enabled", False)
             and (
                 not hasattr(first_proj_q, "_amax")
@@ -156,6 +159,7 @@ def _export_fused_experts(
                 if uses_first_proj_quantizers
                 else module.down_proj_weight_quantizers[idx]
             )
+            is_iq = getattr(w_quantizer_src, "num_bits", None) in IQ_FORMATS
             i_quantizer = first_proj_input_q if uses_first_proj_quantizers else down_input_q
 
             # gate/up share a weight quantizer — clone so each gets independent amax.
@@ -166,7 +170,8 @@ def _export_fused_experts(
             # For per-channel amax (dim >= 1), proportionally slice dim-0
             # to match the split weight.
             if (
-                hasattr(w_quantizer, "_amax")
+                not is_iq
+                and hasattr(w_quantizer, "_amax")
                 and w_quantizer._amax is not None
                 and w_quantizer._amax.dim() >= 1
             ):
@@ -194,7 +199,8 @@ def _export_fused_experts(
 
             # If the weight quantizer was never calibrated, compute amax from weights.
             if (
-                hasattr(w_quantizer, "is_enabled")
+                not is_iq
+                and hasattr(w_quantizer, "is_enabled")
                 and w_quantizer.is_enabled
                 and (
                     not hasattr(w_quantizer, "_amax")

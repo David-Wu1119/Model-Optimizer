@@ -62,7 +62,6 @@ except ImportError:
 from modelopt.torch.opt.conversion import ModeloptStateManager, modelopt_state
 from modelopt.torch.opt.plugins.huggingface import _MODELOPT_STATE_SAVE_NAME
 from modelopt.torch.quantization import set_quantizer_by_cfg_context
-from modelopt.torch.quantization.ggml import quantize_iq1_s, quantize_iq2_xs
 from modelopt.torch.quantization.nn import SequentialQuantizer, TensorQuantizer
 from modelopt.torch.quantization.qtensor import MXFP8QTensor, NVFP4QTensor
 from modelopt.torch.quantization.qtensor.base_qtensor import QTensorWrapper
@@ -95,11 +94,10 @@ from .quant_aware_conversion import (
 )
 from .quant_format import (
     FUSION_FREE_FORMATS,
+    IQ_FORMATS,
     QUANTIZATION_FP8,
     QUANTIZATION_FP8_PB_REAL,
     QUANTIZATION_FP8_PC_PT,
-    QUANTIZATION_IQ1_S,
-    QUANTIZATION_IQ2_XS,
     QUANTIZATION_MXFP8,
     QUANTIZATION_NONE,
     QUANTIZATION_NVFP4,
@@ -111,6 +109,7 @@ from .quant_format import (
 )
 from .quant_utils import (
     _get_kv_cache_postprocess_config,
+    _pack_iq_weight,
     fuse_prequant_layernorm,
     fuse_prequant_to_linear,
     get_activation_scaling_factor,
@@ -624,16 +623,15 @@ def _export_quantized_weight(
             "which dispatches to the streaming writer that materialises weights layer-by-layer."
         )
 
-    if quantization_format in (QUANTIZATION_IQ1_S, QUANTIZATION_IQ2_XS):
+    if quantization_format in IQ_FORMATS:
         if weight_name != "weight":
             raise NotImplementedError(
                 "IQ unified export currently supports modules with a standard 'weight' "
                 f"attribute, got {weight_name!r} on {type(sub_module).__name__}"
             )
-        quantize_iq = (
-            quantize_iq1_s if quantization_format == QUANTIZATION_IQ1_S else quantize_iq2_xs
+        packed_weight = _pack_iq_weight(
+            weight.to(dtype), quantization_format, sub_module, weight_name
         )
-        packed_weight, _ = quantize_iq(weight.to(dtype))
         delattr(sub_module, weight_name)
         sub_module.register_buffer("weight", packed_weight)
         maybe_clear_cuda_cache()

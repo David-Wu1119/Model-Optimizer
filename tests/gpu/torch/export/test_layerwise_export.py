@@ -139,6 +139,24 @@ def _fp8_cfg():
     return copy.deepcopy(mtq.FP8_DEFAULT_CFG)
 
 
+def _iq2_cfg():
+    return {
+        "quant_cfg": [
+            {"quantizer_name": "*", "enable": False},
+            {
+                "quantizer_name": "*weight_quantizer",
+                "cfg": {
+                    "num_bits": "iq2_xs",
+                    "block_sizes": {-1: 256},
+                    "backend": "ggml",
+                    "backend_extra_args": {"search_impl": "auto"},
+                },
+            },
+        ],
+        "algorithm": None,
+    }
+
+
 def _kv_cache_cfg():
     return mtq.update_quant_cfg_with_kv_cache_quant(
         copy.deepcopy(mtq.FP8_DEFAULT_CFG), copy.deepcopy(mtq.FP8_KV_CFG["quant_cfg"])
@@ -178,6 +196,40 @@ def test_layerwise_export_resolves_mixed_kv_cache_formats(tmp_path):
         "model.layers.0.self_attn": {"quant_algo": "FP8"},
         "model.layers.1.self_attn": {"quant_algo": "NVFP4"},
     }
+
+
+def test_iq2_layerwise_export_matches_whole_model_export(tmp_path):
+    """The per-layer path writes the same packed IQ tensors and metadata."""
+
+    def build_model():
+        model = (
+            get_tiny_llama(
+                hidden_size=256,
+                intermediate_size=256,
+                num_hidden_layers=2,
+                vocab_size=256,
+            )
+            .cuda()
+            .eval()
+        )
+        model.config.architectures = ["LlamaForCausalLM"]
+        return model
+
+    baseline_dir = tmp_path / "baseline"
+    baseline = mtq.quantize(build_model(), _iq2_cfg())
+    export_hf_checkpoint(baseline, export_dir=baseline_dir)
+
+    layerwise_dir = tmp_path / "layerwise"
+    layerwise = mtq.quantize(build_model(), _iq2_cfg())
+    exporter = LayerwiseExporter(layerwise, layerwise_dir)
+    layers = list(layerwise.model.layers)
+    exporter.bind(layers)
+    for layer_idx, layer in enumerate(layers):
+        exporter.export_layer(layer_idx, layer)
+    exporter.finalize()
+
+    _assert_same_checkpoint(_load_checkpoint(baseline_dir), _load_checkpoint(layerwise_dir))
+    _assert_same_quant_config(baseline_dir, layerwise_dir)
 
 
 def _nvfp4_cfg():

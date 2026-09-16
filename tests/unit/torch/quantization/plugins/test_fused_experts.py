@@ -15,6 +15,8 @@
 
 """Tests for _QuantFusedExperts: generic fused MoE quantization and export."""
 
+import warnings
+
 import pytest
 import torch
 import torch.nn as nn
@@ -530,6 +532,41 @@ class TestExportFusedExperts:
                     key = f"{idx}.{projection}.weight"
                     assert key in state_dict
                     assert state_dict[key].dtype == torch.uint8
+        finally:
+            self._cleanup_registry(expert_type)
+
+    def test_iq_export_does_not_create_or_warn_about_amax(self, monkeypatch):
+        """IQ expert packing is weight-only and must not enter amax fallback paths."""
+        model = _TinyMoEModel()
+        expert_type = type(model.moe.experts)
+        self._cleanup_registry(expert_type)
+        register_fused_experts_on_the_fly(model)
+
+        try:
+            converted = QuantModuleRegistry.convert(model.moe.experts)
+            quantizers = list(converted.gate_up_proj_weight_quantizers) + list(
+                converted.down_proj_weight_quantizers
+            )
+            config = QuantizerAttributeConfig(
+                num_bits="iq2_xs",
+                block_sizes={-1: 256},
+                backend="ggml",
+                backend_extra_args={"search_impl": "auto"},
+            )
+            for quantizer in quantizers:
+                quantizer.set_from_attribute_config(config)
+                assert not hasattr(quantizer, "_amax")
+
+            monkeypatch.setattr(
+                "modelopt.torch.export.unified_export_hf._export_quantized_weight",
+                lambda *_args, **_kwargs: None,
+            )
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                _export_fused_experts(converted, torch.float16)
+
+            assert not [warning for warning in caught if "amax" in str(warning.message)]
+            assert all(not hasattr(quantizer, "_amax") for quantizer in quantizers)
         finally:
             self._cleanup_registry(expert_type)
 

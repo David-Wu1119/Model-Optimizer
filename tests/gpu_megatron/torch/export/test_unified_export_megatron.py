@@ -158,6 +158,17 @@ def test_megatron_iq_export_rejects_tensor_parallelism():
         exporter.save_pretrained("unused", "unused")
 
 
+def test_megatron_iq_packer_rejects_tensor_parallelism():
+    """Internal packing keeps the TP=1 guard for extra-module export paths."""
+    weight = torch.randn(2, 256, dtype=torch.bfloat16)
+
+    with (
+        patch.object(uem, "get_tensor_model_parallel_world_size", return_value=2),
+        pytest.raises(NotImplementedError, match="tensor model parallel size 1"),
+    ):
+        GPTModelExporter._get_iq_weight_state("weight", weight, "iq2_xs")
+
+
 def _test_unified_export_megatron(
     tmp_path,
     model_type,

@@ -19,6 +19,17 @@ Backend-specific names live with their backend: the TensorRT-LLM checkpoint layo
 constants, for example, are in :mod:`modelopt.torch.export.trtllm.model_config`.
 """
 
+from typing import Any
+
+from modelopt.torch.quantization.ggml import (
+    IQ1_S_BLOCK_BYTES,
+    IQ1_S_BLOCK_SIZE,
+    IQ1_S_EFFECTIVE_BITS,
+    IQ2_XS_BLOCK_BYTES,
+    IQ2_XS_BLOCK_SIZE,
+    IQ2_XS_EFFECTIVE_BITS,
+)
+
 QUANTIZATION_NONE = None
 QUANTIZATION_FP8 = "fp8"
 QUANTIZATION_INT8_SQ = "int8_sq"
@@ -39,14 +50,42 @@ QUANTIZATION_FP8_PC_PT = "fp8_pc_pt"
 QUANTIZATION_IQ1_S = "iq1_s"
 QUANTIZATION_IQ2_XS = "iq2_xs"
 
+IQ_FORMATS = frozenset({QUANTIZATION_IQ1_S, QUANTIZATION_IQ2_XS})
+IQ_FORMAT_SPECS: dict[str, dict[str, Any]] = {
+    QUANTIZATION_IQ1_S: {
+        "quant_algo": "IQ1_S",
+        "num_bits": 1,
+        "effective_bits": IQ1_S_EFFECTIVE_BITS,
+        "group_size": IQ1_S_BLOCK_SIZE,
+        "block_payload_bytes": IQ1_S_BLOCK_BYTES,
+        "packing": "ggml",
+    },
+    QUANTIZATION_IQ2_XS: {
+        "quant_algo": "IQ2_XS",
+        "num_bits": 2,
+        "effective_bits": IQ2_XS_EFFECTIVE_BITS,
+        "group_size": IQ2_XS_BLOCK_SIZE,
+        "block_payload_bytes": IQ2_XS_BLOCK_BYTES,
+        "packing": "ggml",
+    },
+}
+
+
+def iq_format_spec(quantization_format: str) -> dict[str, Any]:
+    """Return a copy of the canonical export metadata for one IQ format."""
+    try:
+        return IQ_FORMAT_SPECS[quantization_format.lower()].copy()
+    except KeyError:
+        raise ValueError(f"Unsupported IQ quantization format: {quantization_format}") from None
+
+
 # Formats whose scales are purely per-module, so export never merges them across the q/k/v
 # and gate/up groups that share an input. Every other format unifies input_amax (and, for
 # NVFP4, weight_scale_2) across such a group, which only a whole-model forward can discover.
 FUSION_FREE_FORMATS = frozenset(
     {
         QUANTIZATION_FP8,
-        QUANTIZATION_IQ1_S,
-        QUANTIZATION_IQ2_XS,
+        *IQ_FORMATS,
         QUANTIZATION_NONE,
         QUANTIZATION_FP8_PB_REAL,
     }

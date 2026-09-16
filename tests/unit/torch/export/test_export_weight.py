@@ -126,6 +126,22 @@ def test_export_iq_payload_as_weight(num_bits, payload_bytes):
     assert "weight_shape" not in state_dict
 
 
+@pytest.mark.parametrize("num_bits", ["iq1_s", "iq2_xs"])
+def test_export_iq_rejects_an_unhandled_search_impl(num_bits):
+    linear = nn.Linear(256, 4, bias=False, dtype=torch.bfloat16)
+    linear.weight_quantizer = TensorQuantizer(
+        QuantizerAttributeConfig(
+            num_bits=num_bits,
+            block_sizes={-1: 256},
+            backend="ggml",
+            backend_extra_args={"search_impl": "reference"},
+        )
+    )
+
+    with pytest.raises(NotImplementedError, match="only supports search_impl='auto'"):
+        _export_quantized_weight(linear, torch.bfloat16)
+
+
 class QuantMoELinear(nn.Module):
     def __init__(self):
         super().__init__()

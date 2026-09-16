@@ -56,13 +56,13 @@ class _FakeAttention(torch.nn.Module):
 
 
 @pytest.mark.parametrize(
-    ("num_bits", "quantization_format", "payload_bytes", "effective_bits"),
+    ("num_bits", "quantization_format", "payload_bytes", "storage_bits"),
     [
-        ("iq1_s", QUANTIZATION_IQ1_S, 50, 1.5625),
-        ("iq2_xs", QUANTIZATION_IQ2_XS, 74, 2.3125),
+        ("iq1_s", QUANTIZATION_IQ1_S, 50, 1),
+        ("iq2_xs", QUANTIZATION_IQ2_XS, 74, 2),
     ],
 )
-def test_iq_quantization_config(num_bits, quantization_format, payload_bytes, effective_bits):
+def test_iq_quantization_config(num_bits, quantization_format, payload_bytes, storage_bits):
     model = torch.nn.Sequential(torch.nn.Linear(256, 256, bias=False))
     mtq.quantize(
         model,
@@ -89,9 +89,12 @@ def test_iq_quantization_config(num_bits, quantization_format, payload_bytes, ef
     assert config["quantization"]["block_payload_bytes"] == payload_bytes
     hf_config = convert_hf_quant_config_format(config)
     weights = hf_config["config_groups"]["group_0"]["weights"]
-    assert weights["group_size"] == 256
-    assert weights["effective_bits"] == effective_bits
-    assert weights["packing"] == "ggml"
+    assert weights == {
+        "dynamic": False,
+        "num_bits": storage_bits,
+        "type": "int",
+        "group_size": 256,
+    }
 
 
 class _FakeKVCacheQuantizer(torch.nn.Module):

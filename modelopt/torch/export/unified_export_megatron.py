@@ -35,7 +35,6 @@ from safetensors import safe_open
 from safetensors.torch import save_file
 
 from modelopt import __version__
-from modelopt.torch.quantization.ggml import quantize_iq1_s, quantize_iq2_xs
 from modelopt.torch.quantization.nn.modules.tensor_quantizer import GroupedQuantizer
 from modelopt.torch.utils import import_plugin, warn_rank_0
 
@@ -57,6 +56,7 @@ from .plugins.mcore_custom import (
 )
 from .plugins.megatron_importer import GPTModelImporter, _get_mamba_conv1d
 from .quant_format import (
+    IQ_FORMATS,
     KV_CACHE_FP8,
     KV_CACHE_NVFP4,
     QUANTIZATION_FP8,
@@ -67,8 +67,11 @@ from .quant_format import (
     QUANTIZATION_NONE,
     QUANTIZATION_NVFP4,
     QUANTIZATION_W4A16_NVFP4,
+    iq_format_spec,
 )
 from .quant_utils import (
+    _pack_iq_weight,
+    _validate_iq_quantizer_config,
     get_activation_scaling_factor,
     get_kv_cache_dtype,
     get_kv_cache_scaling_factor,
@@ -314,10 +317,7 @@ class GPTModelExporter:
         is_writer_rank = self._is_sidecar_writer_rank(is_last_stage_main_rank)
 
         quantization_format = self._get_quantization_format(self.model)
-        if (
-            quantization_format in (QUANTIZATION_IQ1_S, QUANTIZATION_IQ2_XS)
-            and get_tensor_model_parallel_world_size() != 1
-        ):
+        if quantization_format in IQ_FORMATS and get_tensor_model_parallel_world_size() != 1:
             raise NotImplementedError(
                 "Megatron IQ1_S/IQ2_XS unified export currently requires tensor model "
                 "parallel size 1"
@@ -338,7 +338,7 @@ class GPTModelExporter:
             quantization = "NVFP4"
         elif quantization_format == QUANTIZATION_W4A16_NVFP4:
             quantization = "W4A16_NVFP4"
-        elif quantization_format in (QUANTIZATION_IQ1_S, QUANTIZATION_IQ2_XS):
+        elif quantization_format in IQ_FORMATS:
             quantization = quantization_format.upper()
 
         if is_last_stage_main_rank:
@@ -403,6 +403,11 @@ class GPTModelExporter:
                 }
                 if quantization in ("NVFP4", "W4A16_NVFP4"):  # update block size
                     quantization_config["group_size"] = 16
+                elif quantization_format in IQ_FORMATS:
+                    spec = iq_format_spec(quantization_format)
+                    quantization_config.update(
+                        {key: spec[key] for key in ("group_size", "block_payload_bytes", "packing")}
+                    )
 
             if gathered_kv_cache_dtype is not None:
                 quantization_config["kv_cache_quant_algo"] = gathered_kv_cache_dtype
@@ -1101,7 +1106,9 @@ class GPTModelExporter:
             self._record_excluded_module(prefix)
         block_size = get_weight_block_size(module)
 
-        is_iq = qformat in (QUANTIZATION_IQ1_S, QUANTIZATION_IQ2_XS)
+        is_iq = qformat in IQ_FORMATS
+        if is_iq:
+            _validate_iq_quantizer_config(module, qformat)
         name_to_value = self._get_weight_bias(
             module, dtype, name_to_value, keep_weight_device=is_iq
         )
@@ -1156,8 +1163,12 @@ class GPTModelExporter:
         weight_key: str, weight: torch.Tensor, qformat: str
     ) -> dict[str, torch.Tensor]:
         """Pack one final-layout weight into the IQ unified-checkpoint representation."""
-        quantize_iq = quantize_iq1_s if qformat == QUANTIZATION_IQ1_S else quantize_iq2_xs
-        packed_weight, _ = quantize_iq(weight)
+        if get_tensor_model_parallel_world_size() != 1:
+            raise NotImplementedError(
+                "Megatron IQ1_S/IQ2_XS unified export currently requires tensor model "
+                "parallel size 1"
+            )
+        packed_weight = _pack_iq_weight(weight, qformat)
         return {weight_key: packed_weight.detach().cpu()}
 
     def _record_layer_quant_config(self, prefix: str, qformat: str | None, block_size: int | None):

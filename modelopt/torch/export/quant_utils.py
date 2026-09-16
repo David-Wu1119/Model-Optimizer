@@ -26,6 +26,7 @@ import torch.nn as nn
 
 from modelopt import __version__
 from modelopt.torch.models import get_spec, list_all_possible
+from modelopt.torch.quantization.ggml import quantize_iq1_s, quantize_iq2_xs
 from modelopt.torch.quantization.model_calib import (
     enable_stats_collection,
     finish_stats_collection,
@@ -50,6 +51,7 @@ from modelopt.torch.utils import clear_cuda_cache
 from ..quantization.nn import NVFP4StaticQuantizer, SequentialQuantizer, TensorQuantizer
 from .model_utils import TiedWeightMap, get_language_model_from_vl
 from .quant_format import (
+    IQ_FORMATS,
     KV_CACHE_FP8,
     KV_CACHE_FP8_K_NVFP4_V,
     KV_CACHE_INT8,
@@ -74,9 +76,47 @@ from .quant_format import (
     QUANTIZATION_W4A8_MXFP4_FP8,
     QUANTIZATION_W4A8_NVFP4_FP8,
     QUANTIZATION_W4A16_NVFP4,
+    iq_format_spec,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _validate_iq_quantizer_config(
+    module: nn.Module, quantization_format: str, weight_name: str = "weight"
+) -> None:
+    """Reject IQ export settings that the checkpoint encoder cannot reproduce."""
+    quantizer = representative_weight_quantizer(module, weight_name)
+    if not isinstance(quantizer, TensorQuantizer):
+        raise ValueError(f"{quantization_format.upper()} export requires one TensorQuantizer")
+    if quantizer.num_bits != quantization_format or quantizer.backend != "ggml":
+        raise ValueError(
+            f"{quantization_format.upper()} export requires the matching ggml quantizer"
+        )
+    extra_args = quantizer.backend_extra_args or {}
+    search_impl = extra_args.get("search_impl", extra_args.get("iq_search_impl", "auto"))
+    if search_impl != "auto":
+        raise NotImplementedError(
+            f"{quantization_format.upper()} export only supports search_impl='auto'"
+        )
+
+
+def _pack_iq_weight(
+    weight: torch.Tensor,
+    quantization_format: str,
+    module: nn.Module | None = None,
+    weight_name: str = "weight",
+) -> torch.Tensor:
+    """Pack one IQ weight after checking any attached quantizer configuration."""
+    if module is not None:
+        _validate_iq_quantizer_config(module, quantization_format, weight_name)
+    if quantization_format == QUANTIZATION_IQ1_S:
+        packed_weight, _ = quantize_iq1_s(weight)
+    elif quantization_format == QUANTIZATION_IQ2_XS:
+        packed_weight, _ = quantize_iq2_xs(weight)
+    else:
+        raise ValueError(f"Unsupported IQ quantization format: {quantization_format}")
+    return packed_weight
 
 
 def _has_large_fp8_scale(value: torch.Tensor) -> bool:
@@ -729,13 +769,11 @@ def process_layer_quant_config(layer_config_dict):
                 "quant_algo": "MXFP8",
                 "group_size": block_size_value,
             }
-        elif v in (QUANTIZATION_IQ1_S, QUANTIZATION_IQ2_XS):
-            payload_bytes = 50 if v == QUANTIZATION_IQ1_S else 74
+        elif v in IQ_FORMATS:
+            spec = iq_format_spec(v)
             layer_config = {
-                "quant_algo": v.upper(),
-                "group_size": 256,
-                "block_payload_bytes": payload_bytes,
-                "packing": "ggml",
+                key: spec[key]
+                for key in ("quant_algo", "group_size", "block_payload_bytes", "packing")
             }
         else:
             layer_config = {"quant_algo": v}
@@ -958,7 +996,6 @@ _BASE_SKIP_KEYS: tuple[str, ...] = (
     "_amax",
     "_bias_value",
     "input_quantizer._pre_quant_scale",
-    "weight_shape",
 )
 
 
@@ -1167,7 +1204,6 @@ def postprocess_state_dict(
         # (pre_quant_scale is the AWQ / NVFP4_AWQ / SVDQuant companion, renamed in the KV-cache pass.)
         weight_suffixes = (
             "weight",
-            "weight_shape",
             "weight_scale",
             "weight_scale_2",
             "input_scale",
