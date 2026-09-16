@@ -160,16 +160,20 @@ def test_megatron_iq_export_rejects_tensor_parallelism():
         exporter.save_pretrained("unused", "unused")
 
 
-def test_megatron_iq_export_guard_uses_one_collective_for_both_flags():
+def test_megatron_iq_export_guard_uses_one_collective_for_all_flags():
     def report_remote_iq(flags, **_kwargs):
-        flags.copy_(torch.tensor([1, 0], dtype=flags.dtype, device=flags.device))
+        flags.copy_(torch.tensor([1, 0, 1], dtype=flags.dtype, device=flags.device))
 
     with (
         patch.object(torch.distributed, "is_initialized", return_value=True),
         patch.object(torch.distributed, "get_backend", return_value=torch.distributed.Backend.GLOO),
         patch.object(torch.distributed, "all_reduce", side_effect=report_remote_iq),
     ):
-        assert GPTModelExporter._collective_iq_export_flags(False, False) == (True, False)
+        assert GPTModelExporter._collective_iq_export_flags(False, False, False) == (
+            True,
+            False,
+            True,
+        )
 
 
 def test_megatron_iq_tensor_parallel_guard_finds_later_mixed_format():
@@ -187,6 +191,30 @@ def test_megatron_iq_tensor_parallel_guard_finds_later_mixed_format():
     assert GPTModelExporter._model_has_iq_quantizer(torch.nn.Sequential(fp8, iq))
 
 
+def test_megatron_iq_packed_expert_guard_finds_selected_projection():
+    expert = torch.nn.Module()
+    expert.linear_fc1 = torch.nn.Linear(256, 2, bias=False, dtype=torch.bfloat16)
+    expert.linear_fc1.weight_quantizer = TensorQuantizer(
+        QuantizerAttributeConfig(
+            num_bits="iq2_xs",
+            block_sizes={-1: 256},
+            backend="ggml",
+        )
+    )
+    model = torch.nn.Module()
+    model.local_experts = torch.nn.ModuleList([expert])
+
+    def packed_rule(*_args, **_kwargs):
+        pass
+
+    setattr(packed_rule, "_modelopt_export_func_name", "pack_name_remapping")
+    exporter = object.__new__(GPTModelExporter)
+    exporter.model = model
+    exporter.rules = {"local_experts.linear_fc1": packed_rule}
+
+    assert exporter._model_has_packed_expert_iq_quantizer()
+
+
 def test_megatron_iq_tensor_parallel_guard_covers_extra_modules():
     exporter = object.__new__(GPTModelExporter)
     exporter.model = torch.nn.Module()
@@ -194,7 +222,7 @@ def test_megatron_iq_tensor_parallel_guard_covers_extra_modules():
     with (
         patch.object(uem, "get_tensor_model_parallel_world_size", return_value=2),
         patch.object(exporter, "_model_has_iq_quantizer", return_value=True),
-        patch.object(exporter, "_collective_iq_export_flags", return_value=(True, False)),
+        patch.object(exporter, "_collective_iq_export_flags", return_value=(True, False, False)),
         pytest.raises(NotImplementedError, match="tensor model parallel size 1"),
     ):
         exporter.save_pretrained_extra_modules("unused")
@@ -221,13 +249,13 @@ def test_megatron_non_iq_export_skips_shape_scan():
         patch.object(uem, "get_tensor_model_parallel_world_size", return_value=1),
         patch.object(exporter, "_model_has_iq_quantizer", return_value=False),
         patch.object(
-            exporter, "_collective_iq_export_flags", return_value=(False, False)
+            exporter, "_collective_iq_export_flags", return_value=(False, False, False)
         ) as collective,
         patch.object(uem, "_iq_export_weight_shape_errors") as shape_errors,
     ):
         exporter._validate_iq_export()
 
-    collective.assert_called_once_with(False, False)
+    collective.assert_called_once_with(False, False, False)
     shape_errors.assert_not_called()
 
 
@@ -245,13 +273,13 @@ def test_megatron_iq_shape_guard_fails_all_ranks_before_packing():
     with (
         patch.object(uem, "get_tensor_model_parallel_world_size", return_value=1),
         patch.object(
-            exporter, "_collective_iq_export_flags", return_value=(True, True)
+            exporter, "_collective_iq_export_flags", return_value=(True, True, False)
         ) as collective,
         pytest.raises(ValueError, match=r"weight: \(2, 192\)"),
     ):
         exporter._validate_iq_export()
 
-    collective.assert_called_once_with(True, True)
+    collective.assert_called_once_with(True, True, False)
 
 
 def test_megatron_iq_shape_guard_reports_another_rank():
@@ -260,10 +288,28 @@ def test_megatron_iq_shape_guard_reports_another_rank():
 
     with (
         patch.object(uem, "get_tensor_model_parallel_world_size", return_value=1),
-        patch.object(exporter, "_collective_iq_export_flags", return_value=(True, True)),
+        patch.object(exporter, "_collective_iq_export_flags", return_value=(True, True, False)),
         pytest.raises(ValueError, match="Another distributed rank"),
     ):
         exporter._validate_iq_export()
+
+
+def test_megatron_iq_packed_expert_guard_fails_all_ranks_before_conversion():
+    exporter = object.__new__(GPTModelExporter)
+    exporter.model = torch.nn.Module()
+
+    with (
+        patch.object(uem, "get_tensor_model_parallel_world_size", return_value=1),
+        patch.object(exporter, "_model_has_iq_quantizer", return_value=False),
+        patch.object(exporter, "_model_has_packed_expert_iq_quantizer", return_value=False),
+        patch.object(
+            exporter, "_collective_iq_export_flags", return_value=(True, False, True)
+        ) as collective,
+        pytest.raises(NotImplementedError, match="packed expert weights"),
+    ):
+        exporter._validate_iq_export()
+
+    collective.assert_called_once_with(False, False, False)
 
 
 def test_megatron_iq_packer_rejects_tensor_parallelism():

@@ -121,6 +121,8 @@ def _quant_algo_to_group_config(quant_algo: str, group_size: int | None = None) 
         }
     elif quant_algo.lower() in IQ_FORMATS:
         spec = iq_format_spec(quant_algo)
+        # ``num_bits`` and ``type`` are nominal format labels, not a scalar integer decode
+        # contract. Consumers must honor ``packing`` and ``block_payload_bytes``.
         return {
             "weights": {
                 "dynamic": False,

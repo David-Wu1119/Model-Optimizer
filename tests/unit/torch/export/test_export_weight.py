@@ -298,6 +298,31 @@ def test_export_iq_shape_preflight_reports_grouped_quantizers_beyond_num_gemms()
         _validate_iq_export_weight_shapes(model)
 
 
+def test_export_iq_shape_preflight_reports_legacy_fused_expert_quantizers():
+    class LegacyFusedExperts(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self._first_proj_attr = "up_proj"
+            self.up_proj = nn.Parameter(torch.ones(4, 192, dtype=torch.bfloat16))
+            self.gate_up_proj_weight_quantizers = nn.ModuleList(
+                [
+                    TensorQuantizer(
+                        QuantizerAttributeConfig(
+                            num_bits="iq2_xs",
+                            block_sizes={-1: 256},
+                            backend="ggml",
+                        )
+                    )
+                ]
+            )
+
+    model = nn.Module()
+    model.experts = LegacyFusedExperts()
+
+    with pytest.raises(ValueError, match=r"experts\.up_proj: \(4, 192\)"):
+        _validate_iq_export_weight_shapes(model)
+
+
 def test_export_iq_preflight_rejects_nonstandard_weight_before_mutation(tmp_path):
     class CustomWeightModule(nn.Module):
         def __init__(self):

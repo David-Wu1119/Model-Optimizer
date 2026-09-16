@@ -309,21 +309,46 @@ class GPTModelExporter:
             for module in model.modules()
         )
 
+    def _model_has_packed_expert_iq_quantizer(self) -> bool:
+        """Return whether this rank would route an IQ expert through a packed-expert rule."""
+        packed_projection_names = {
+            rule_name.rsplit(".", 1)[-1]
+            for rule_name, rule in getattr(self, "rules", {}).items()
+            if getattr(rule, "_modelopt_export_func_name", None)
+            in {"pack_name_remapping", "pack_name_remapping_gpt_oss"}
+        }
+        if not packed_projection_names:
+            return False
+
+        for module_name, module in self.model.named_modules():
+            path = module_name.split(".")
+            if (
+                "local_experts" in path
+                and path[-1] in packed_projection_names
+                and self._model_has_iq_quantizer(module)
+            ):
+                return True
+        return False
+
     @staticmethod
-    def _collective_iq_export_flags(local_iq: bool, local_bad_shape: bool) -> tuple[bool, bool]:
-        """Combine IQ presence and incompatible-shape flags across all ranks."""
+    def _collective_iq_export_flags(
+        local_iq: bool, local_bad_shape: bool, local_packed_expert_iq: bool
+    ) -> tuple[bool, bool, bool]:
+        """Combine IQ presence, incompatible-shape, and packed-expert flags across ranks."""
         if not torch.distributed.is_initialized():
-            return local_iq, local_bad_shape
+            return local_iq, local_bad_shape, local_packed_expert_iq
         device = (
             torch.device("cuda", torch.cuda.current_device())
             if torch.distributed.get_backend() == torch.distributed.Backend.NCCL
             else torch.device("cpu")
         )
         flags = torch.tensor(
-            [int(local_iq), int(local_bad_shape)], dtype=torch.int32, device=device
+            [int(local_iq), int(local_bad_shape), int(local_packed_expert_iq)],
+            dtype=torch.int32,
+            device=device,
         )
         torch.distributed.all_reduce(flags, op=torch.distributed.ReduceOp.MAX)
-        return bool(flags[0].item()), bool(flags[1].item())
+        return bool(flags[0].item()), bool(flags[1].item()), bool(flags[2].item())
 
     def _validate_iq_export(self) -> None:
         """Reject unsupported IQ export configurations in one collective preflight."""
@@ -335,13 +360,21 @@ class GPTModelExporter:
         local_errors = (
             _iq_export_weight_shape_errors(self.model) if local_iq and tp_size == 1 else []
         )
-        any_iq, any_bad_shape = self._collective_iq_export_flags(local_iq, bool(local_errors))
+        local_packed_expert_iq = local_iq and self._model_has_packed_expert_iq_quantizer()
+        any_iq, any_bad_shape, any_packed_expert_iq = self._collective_iq_export_flags(
+            local_iq, bool(local_errors), local_packed_expert_iq
+        )
         if not any_iq:
             return
         if tp_size != 1:
             raise NotImplementedError(
                 "Megatron IQ1_S/IQ2_XS unified export currently requires tensor model "
                 "parallel size 1"
+            )
+        if any_packed_expert_iq:
+            raise NotImplementedError(
+                "Megatron IQ1_S/IQ2_XS export does not yet support packed expert weights "
+                "because the HF transpose changes the 256-value block axis"
             )
         if not any_bad_shape:
             return
@@ -1084,9 +1117,14 @@ class GPTModelExporter:
             func = method_map[mapping.func_name]
             prefix = mapping.target_name_or_prefix
             func_kwargs = mapping.func_kwargs
-            return lambda m, *args, **kwargs: func(
-                m, prefix.format(*args), **{**func_kwargs, **kwargs}
-            )
+
+            def apply_mapping(m, *args, **kwargs):
+                return func(m, prefix.format(*args), **{**func_kwargs, **kwargs})
+
+            # Preflight uses this marker to identify packed-expert rules before any rank enters
+            # per-layer conversion, where a local exception would strand other pipeline ranks.
+            setattr(apply_mapping, "_modelopt_export_func_name", mapping.func_name)
+            return apply_mapping
 
         for arch, mappings in all_mcore_hf_export_mapping.items():
             all_rules[arch] = {

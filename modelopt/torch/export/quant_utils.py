@@ -87,60 +87,75 @@ from .quant_format import (
 logger = logging.getLogger(__name__)
 
 
+def _iq_export_weight_quantizer(
+    module: nn.Module, weight_name: str
+) -> tuple[nn.Module | None, bool]:
+    """Return a representative quantizer and whether ``weight_name`` uses a plural layout."""
+    quantizer = representative_weight_quantizer(module, weight_name)
+    quantizer_name = quantizer_attr_names(weight_name).weight_quantizer
+    plural_quantizers = getattr(module, quantizer_name + "s", None)
+    if quantizer is not None:
+        return quantizer, isinstance(plural_quantizers, nn.ModuleList)
+
+    if weight_name == getattr(module, "_first_proj_attr", None) and weight_name != "gate_up_proj":
+        # Older non-gated fused-expert wrappers kept the first-projection quantizers under
+        # the gate_up_proj sentinel name rather than the projection's actual attribute name.
+        plural_quantizers = getattr(module, "gate_up_proj_weight_quantizers", None)
+        if isinstance(plural_quantizers, nn.ModuleList) and len(plural_quantizers) > 0:
+            return plural_quantizers[0], True
+    return None, False
+
+
+def _iq_export_weight_shape_error(
+    module: nn.Module,
+    module_name: str,
+    weight_name: str,
+    quantizer: nn.Module | None,
+    *,
+    allow_nonstandard_name: bool = False,
+) -> str | None:
+    """Return one IQ export compatibility error, if any, for ``weight_name``."""
+    if not (
+        isinstance(quantizer, TensorQuantizer)
+        and quantizer.is_enabled
+        and quantizer.num_bits in IQ_FORMATS
+    ):
+        return None
+
+    qualified_name = f"{module_name}.{weight_name}".lstrip(".")
+    if weight_name != "weight" and not allow_nonstandard_name:
+        return f"{qualified_name}: nonstandard weight attributes are not supported"
+
+    weight = getattr(module, weight_name, None)
+    if not isinstance(weight, torch.Tensor):
+        return None
+    group_size = iq_format_spec(quantizer.num_bits)["group_size"]
+    if weight.dim() == 0 or weight.shape[-1] % group_size:
+        return f"{qualified_name}: {tuple(weight.shape)}"
+    return None
+
+
 def _iq_export_weight_shape_errors(model: nn.Module) -> list[str]:
     """Return selected IQ weights that cannot be handled by unified export."""
     incompatible: list[str] = []
     for module_name, module in model.named_modules():
         inspected: set[str] = set()
-
-        def uses_plural_quantizers(weight_name: str) -> bool:
-            quantizer_name = quantizer_attr_names(weight_name).weight_quantizer
-            if isinstance(getattr(module, quantizer_name + "s", None), nn.ModuleList):
-                return True
-            return (
-                weight_name == getattr(module, "_first_proj_attr", None)
-                and weight_name != "gate_up_proj"
-                and isinstance(
-                    getattr(module, "gate_up_proj_weight_quantizers", None), nn.ModuleList
-                )
-            )
-
-        def inspect_weight(
-            weight_name: str,
-            quantizer: nn.Module | None,
-            *,
-            allow_nonstandard_name: bool = False,
-        ) -> None:
+        for weight_name in weight_attr_names(module):
             qualified_name = f"{module_name}.{weight_name}".lstrip(".")
             if qualified_name in inspected:
-                return
+                continue
             inspected.add(qualified_name)
-            if not (
-                isinstance(quantizer, TensorQuantizer)
-                and quantizer.is_enabled
-                and quantizer.num_bits in IQ_FORMATS
-            ):
-                return
-            if weight_name != "weight" and not allow_nonstandard_name:
-                incompatible.append(
-                    f"{qualified_name}: nonstandard weight attributes are not supported"
-                )
-                return
-            weight = getattr(module, weight_name, None)
-            if not isinstance(weight, torch.Tensor):
-                return
-            group_size = iq_format_spec(quantizer.num_bits)["group_size"]
-            if weight.dim() == 0 or weight.shape[-1] % group_size:
-                incompatible.append(f"{qualified_name}: {tuple(weight.shape)}")
-
-        for weight_name in weight_attr_names(module):
-            quantizer = representative_weight_quantizer(module, weight_name)
+            quantizer, uses_plural_quantizers = _iq_export_weight_quantizer(module, weight_name)
             # Fused-expert plural quantizer lists are rebuilt as standard per-expert modules.
-            inspect_weight(
+            error = _iq_export_weight_shape_error(
+                module,
+                module_name,
                 weight_name,
                 quantizer,
-                allow_nonstandard_name=uses_plural_quantizers(weight_name),
+                allow_nonstandard_name=uses_plural_quantizers,
             )
+            if error is not None:
+                incompatible.append(error)
 
         grouped_quantizer = getattr(module, "weight_quantizer", None)
         if isinstance(grouped_quantizer, GroupedQuantizer) and len(grouped_quantizer) > 0:
@@ -148,7 +163,20 @@ def _iq_export_weight_shape_errors(model: nn.Module) -> list[str]:
             for index in range(max(num_gemms, len(grouped_quantizer))):
                 quantizer = grouped_quantizer[min(index, len(grouped_quantizer) - 1)]
                 # Grouped linears are rebuilt as standard per-expert modules before packing.
-                inspect_weight(f"weight{index}", quantizer, allow_nonstandard_name=True)
+                weight_name = f"weight{index}"
+                qualified_name = f"{module_name}.{weight_name}".lstrip(".")
+                if qualified_name in inspected:
+                    continue
+                inspected.add(qualified_name)
+                error = _iq_export_weight_shape_error(
+                    module,
+                    module_name,
+                    weight_name,
+                    quantizer,
+                    allow_nonstandard_name=True,
+                )
+                if error is not None:
+                    incompatible.append(error)
     return incompatible
 
 
