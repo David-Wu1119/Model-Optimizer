@@ -195,13 +195,31 @@ def validate_packed_weights(
     format_name: str,
 ) -> tuple[int, ...]:
     """Validate a packed payload and return its logical shape."""
-    if packed_weights.dtype != torch.uint8 or packed_weights.shape[-1] != block_bytes:
+    if (
+        packed_weights.ndim < 2
+        or packed_weights.dtype != torch.uint8
+        or packed_weights.shape[-1] != block_bytes
+    ):
         raise ValueError(
             f"packed_weights must be uint8 with last dimension {block_bytes}, "
             f"got {packed_weights.dtype} {tuple(packed_weights.shape)}"
         )
     if isinstance(weight_shape, torch.Tensor):
-        shape = tuple(int(v) for v in weight_shape.detach().cpu().tolist())
+        if detect_fake_mode(weight_shape) is not None:
+            if weight_shape.ndim != 1 or weight_shape.numel() != packed_weights.ndim - 1:
+                raise ValueError(
+                    "fake weight_shape rank does not match the packed payload: "
+                    f"{tuple(weight_shape.shape)} vs {tuple(packed_weights.shape)}"
+                )
+            # IQ payloads preserve every leading dimension and replace the logical last
+            # dimension with a 256-value block axis. Derive static metadata from those shapes
+            # because reading values from a FakeTensor would force a host transfer.
+            shape = (
+                *map(int, packed_weights.shape[:-2]),
+                int(packed_weights.shape[-2]) * GGML_BLOCK_SIZE,
+            )
+        else:
+            shape = tuple(int(v) for v in weight_shape.detach().cpu().tolist())
     else:
         shape = tuple(int(v) for v in weight_shape)
     if not shape or shape[-1] % GGML_BLOCK_SIZE:

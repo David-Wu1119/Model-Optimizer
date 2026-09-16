@@ -90,6 +90,16 @@ def test_iq1_s_fake_mode_uses_one_default_chunk(monkeypatch):
     assert chunk_sizes == [65]
 
 
+def test_iq1_s_fake_mode_dequantizes_public_tensor_shape():
+    with FakeTensorMode():
+        weight = torch.empty(2, 256)
+        packed, shape = quantize_iq1_s(weight)
+        reconstructed = dequantize_iq1_s(packed, shape)
+
+    assert isinstance(reconstructed, FakeTensor)
+    assert reconstructed.shape == weight.shape
+
+
 def test_iq1_s_zero_block_has_canonical_zero_encoding():
     weight = torch.zeros((2, 256), dtype=torch.bfloat16)
 

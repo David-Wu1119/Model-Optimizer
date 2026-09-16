@@ -186,7 +186,6 @@ def _fakequant_fused_experts_weights(
                     continue
                 slice_ = w.data[idx]
                 slice_.copy_(q(slice_.float()).to(w.dtype))
-            _clear_weight_quantizer_caches(module)
         else:
             if state_dict is None or sd_key not in state_dict:
                 continue
@@ -197,6 +196,8 @@ def _fakequant_fused_experts_weights(
                 slice_ = w_3d[idx]
                 w_3d[idx] = q(slice_.float()).to(slice_.dtype)
             state_dict[sd_key] = w_3d.cpu()
+        # Both paths quantize transient float copies rather than the persistent source storage.
+        _clear_weight_quantizer_caches(module)
         fakequant_weights.add(sd_key)
 
 
@@ -269,11 +270,12 @@ def _fakequant_module_weights(
 
         if inplace:
             w.data.copy_(w_quant)
-            quantizer.clear_reconstruction_cache()
         else:
             if state_dict is None:
                 raise RuntimeError("state_dict is required when inplace=False for fakequant export")
             state_dict[sd_key] = w_quant.cpu()
+        # Both paths quantize a transient ``w.float()`` copy rather than persistent storage.
+        quantizer.clear_reconstruction_cache()
         fakequant_weights.add(sd_key)
 
 

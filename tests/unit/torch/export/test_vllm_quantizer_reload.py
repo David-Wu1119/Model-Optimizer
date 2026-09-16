@@ -200,3 +200,31 @@ def test_inplace_requantization_restores_frozen_cache_declaration():
 
     assert quantizer._reconstruction_cache_frozen
     assert quantizer._reconstruction_cache is None
+
+
+def test_state_dict_fakequant_clears_transient_iq_reconstruction_cache():
+    linear = QuantModuleRegistry.convert(nn.Linear(256, 1, bias=False, dtype=torch.bfloat16))
+    quantizer = TensorQuantizer(
+        QuantizerAttributeConfig(
+            num_bits="iq2_xs",
+            block_sizes={-1: 256},
+            backend="ggml",
+        )
+    ).eval()
+    quantizer.freeze_reconstruction_cache()
+    linear.weight_quantizer = quantizer
+    state_dict = {"weight": linear.weight.detach().clone()}
+
+    vllm_fakequant_hf._fakequant_module_weights(
+        linear,
+        "",
+        linear,
+        state_dict,
+        set(),
+        set(),
+        set(),
+        inplace=False,
+    )
+
+    assert quantizer._reconstruction_cache is None
+    assert quantizer._reconstruction_cache_frozen
