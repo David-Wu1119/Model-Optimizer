@@ -81,3 +81,10 @@ def test_iq2_xs_cuda_extension_rejects_unsupported_input():
 
     with pytest.raises(RuntimeError, match="supports float32, float64, float16, and bfloat16"):
         _extension().pack(weight, iq2_xs_grid("cuda"))
+
+
+def test_iq2_xs_cuda_extension_rejects_row_straddling_input():
+    weight = torch.ones((512, 384), device="cuda", dtype=torch.bfloat16)
+
+    with pytest.raises(RuntimeError, match="innermost dimension must be a multiple of 256"):
+        _extension().pack(weight, iq2_xs_grid("cuda"))
