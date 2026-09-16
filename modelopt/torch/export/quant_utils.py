@@ -117,8 +117,9 @@ def _pack_iq_weight(
     quantization_format: str,
     module: nn.Module | None = None,
     weight_name: str = "weight",
+    describe_as: str | None = None,
 ) -> torch.Tensor:
-    """Pack one IQ weight after checking any attached quantizer configuration."""
+    """Pack one IQ weight, using ``describe_as`` only for failure attribution."""
     if module is not None:
         _validate_iq_quantizer_config(module, quantization_format, weight_name)
     try:
@@ -129,10 +130,12 @@ def _pack_iq_weight(
         else:
             raise ValueError(f"Unsupported IQ quantization format: {quantization_format}")
     except ValueError as exc:
-        owner = type(module).__name__ if module is not None else "state_dict"
+        if describe_as is None:
+            owner = type(module).__name__ if module is not None else "state_dict"
+            describe_as = f"{owner}.{weight_name}"
         raise ValueError(
             f"Failed to pack {quantization_format.upper()} weight "
-            f"'{owner}.{weight_name}' with shape {tuple(weight.shape)}: {exc}"
+            f"'{describe_as}' with shape {tuple(weight.shape)}: {exc}"
         ) from exc
     return packed_weight
 

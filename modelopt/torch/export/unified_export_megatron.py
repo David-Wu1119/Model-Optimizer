@@ -292,6 +292,21 @@ class GPTModelExporter:
             and get_expert_model_parallel_rank() == 0
         )
 
+    @staticmethod
+    def _collective_any_iq(quantization_format: str | None) -> bool:
+        """Return whether any distributed rank owns an IQ-quantized module."""
+        local_iq = quantization_format in IQ_FORMATS
+        if not torch.distributed.is_initialized():
+            return local_iq
+        device = (
+            torch.device("cuda", torch.cuda.current_device())
+            if torch.distributed.get_backend() == torch.distributed.Backend.NCCL
+            else torch.device("cpu")
+        )
+        any_iq = torch.tensor(int(local_iq), dtype=torch.int32, device=device)
+        torch.distributed.all_reduce(any_iq, op=torch.distributed.ReduceOp.MAX)
+        return bool(any_iq.item())
+
     def save_pretrained(
         self,
         save_directory: str | os.PathLike,
@@ -315,7 +330,9 @@ class GPTModelExporter:
         is_writer_rank = self._is_sidecar_writer_rank(is_last_stage_main_rank)
 
         quantization_format = self._get_quantization_format(self.model)
-        if quantization_format in IQ_FORMATS and get_tensor_model_parallel_world_size() != 1:
+        if get_tensor_model_parallel_world_size() != 1 and self._collective_any_iq(
+            quantization_format
+        ):
             raise NotImplementedError(
                 "Megatron IQ1_S/IQ2_XS unified export currently requires tensor model "
                 "parallel size 1"
@@ -1171,7 +1188,7 @@ class GPTModelExporter:
                 "Megatron IQ1_S/IQ2_XS unified export currently requires tensor model "
                 "parallel size 1"
             )
-        packed_weight = _pack_iq_weight(weight, qformat, weight_name=weight_key)
+        packed_weight = _pack_iq_weight(weight, qformat, describe_as=weight_key)
         return {weight_key: packed_weight.detach().cpu()}
 
     def _record_layer_quant_config(self, prefix: str, qformat: str | None, block_size: int | None):
