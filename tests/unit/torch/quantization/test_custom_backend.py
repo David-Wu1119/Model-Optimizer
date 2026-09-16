@@ -59,6 +59,43 @@ def test_backend_cache_capability_freezes_after_calibration():
     assert not quant_backend_caches_reconstruction(backend_name)
 
 
+def test_backend_cache_capability_freezes_after_all_restore_hooks(monkeypatch):
+    backend_name = "restore_reconstruction_cache_backend"
+    register_quant_backend(
+        backend_name, lambda inputs, _quantizer: inputs, caches_reconstruction=True
+    )
+    model = torch.nn.Linear(16, 16, bias=False)
+    config = {
+        "quant_cfg": [
+            {"quantizer_name": "*", "enable": False},
+            {
+                "quantizer_name": "*weight_quantizer",
+                "cfg": {"num_bits": 8, "axis": None, "backend": backend_name},
+                "enable": True,
+            },
+        ],
+        "algorithm": "max",
+    }
+
+    try:
+        mtq.quantize(model, config)
+        modelopt_state = mto.modelopt_state(model)
+
+        # Emulate a weight-bearing plugin hook that resets state and does not call the base hook.
+        quant_module_type = type(model)
+
+        def reset_cache_in_restore_hook(self, _prefix=""):
+            self.weight_quantizer.unfreeze_quantizer_cache()
+
+        monkeypatch.setattr(quant_module_type, "modelopt_post_restore", reset_cache_in_restore_hook)
+
+        restored = torch.nn.Linear(16, 16, bias=False)
+        mto.restore_from_modelopt_state(restored, modelopt_state)
+        assert restored.weight_quantizer._quantizer_cache == {"_modelopt_cache_frozen": True}
+    finally:
+        unregister_quant_backend(backend_name)
+
+
 def test_custom_backend_via_quantize():
     # Define and register a simple dummy backend that adds a constant to inputs
     def dummy_backend(inputs: torch.Tensor, tq) -> torch.Tensor:

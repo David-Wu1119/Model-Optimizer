@@ -28,11 +28,7 @@ from modelopt.torch.utils.distributed import ParallelState
 
 from ...tensor_quant import QUANT_DESC_8BIT_PER_TENSOR
 from ...utils import is_torch_export_mode
-from .tensor_quantizer import (
-    SequentialQuantizer,
-    TensorQuantizer,
-    quant_backend_caches_reconstruction,
-)
+from .tensor_quantizer import SequentialQuantizer, TensorQuantizer
 
 __all__ = [
     "QuantInputBase",
@@ -123,8 +119,6 @@ class QuantModule(DynamicModule):
         for module in self.modules():
             if isinstance(module, TensorQuantizer):
                 module.to(non_tq_param_or_buffer.device)
-                if quant_backend_caches_reconstruction(getattr(module, "backend", None)):
-                    module.freeze_quantizer_cache()
 
     def iter_weights_for_calibration(self):
         """Yield ``(weight, weight_quantizer)`` pairs for weight-only calibration."""

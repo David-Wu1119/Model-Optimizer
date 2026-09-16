@@ -140,7 +140,9 @@ activations and tensor-core math are what deliver the throughput.
 - **`iq1_s` / `iq2_xs`** — GGML-compatible IQ1_S or IQ2_XS weights on all linear
   layers, with BF16 activations. Unified export stores each logical weight as a packed
   50- or 74-byte-per-256-values payload plus its original shape. No calibration data is
-  required.
+  required. Every selected weight's final dimension must be divisible by 256 for packed
+  export. Exclude other layers: the fake-quant path pads them with zeros, which prevents
+  reconstruction-cache reuse and can affect the IQ2_XS fit in the final partial block.
 
 ---
 
