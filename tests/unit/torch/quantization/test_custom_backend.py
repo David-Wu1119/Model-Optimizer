@@ -130,6 +130,34 @@ def test_freezing_reconstruction_cache_skips_activation_quantizers():
         unregister_quant_backend(backend_name)
 
 
+def test_quantizer_config_edits_clear_payload_without_unfreezing_weight_cache():
+    backend_name = "persistent_reconstruction_cache_backend"
+    register_quant_backend(
+        backend_name, lambda inputs, _quantizer: inputs, caches_reconstruction=True
+    )
+    model = torch.nn.Linear(16, 16, bias=False)
+    model.weight_quantizer = TensorQuantizer(
+        QuantizerAttributeConfig(num_bits=8, backend=backend_name)
+    )
+    model.weight_quantizer.freeze_quantizer_cache()
+    model.weight_quantizer._quantizer_cache = {"payload": object()}
+
+    try:
+        mtq.disable_quantizer(model, "*weight_quantizer")
+        assert model.weight_quantizer._reconstruction_cache_frozen
+        assert model.weight_quantizer._quantizer_cache is None
+
+        with mtq.set_quantizer_by_cfg_context(
+            model, [{"quantizer_name": "*weight_quantizer", "enable": True}]
+        ):
+            assert model.weight_quantizer._reconstruction_cache_frozen
+
+        assert model.weight_quantizer._reconstruction_cache_frozen
+        assert not model.weight_quantizer.is_enabled
+    finally:
+        unregister_quant_backend(backend_name)
+
+
 def test_custom_backend_via_quantize():
     # Define and register a simple dummy backend that adds a constant to inputs
     def dummy_backend(inputs: torch.Tensor, tq) -> torch.Tensor:

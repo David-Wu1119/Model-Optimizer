@@ -323,7 +323,7 @@ class TensorQuantizer(nn.Module):
             self._pass_through_bwd = True
 
         if hasattr(self, "_quantizer_cache"):
-            self.unfreeze_quantizer_cache()
+            self.clear_quantizer_cache()
 
     def dequantize(self, inputs: BaseQuantizedTensor | QTensorWrapper):
         """De-quantize a real quantized tensor to a given dtype."""
