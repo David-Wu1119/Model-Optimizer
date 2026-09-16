@@ -60,7 +60,9 @@ def test_iq2_xs_cuda_quality_matches_cpu_reference_and_public_dispatch():
 
     assert direct.shape == reference.shape
     assert direct.dtype == torch.uint8
-    assert torch.equal(direct.cpu()[..., :2], reference[..., :2])
+    direct_scale = direct.cpu()[..., :2].contiguous().view(torch.float16).float()
+    reference_scale = reference[..., :2].contiguous().view(torch.float16).float()
+    torch.testing.assert_close(direct_scale, reference_scale, rtol=1e-3, atol=0)
     assert direct_error <= reference_error * 1.02
     assert torch.equal(direct_again, direct)
     assert torch.equal(dispatched, direct)

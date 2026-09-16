@@ -39,7 +39,8 @@ constexpr int kPayloadBytes = 74;
 constexpr int kThreads = 256;
 constexpr int kWarpSize = 32;
 constexpr int kWarps = kThreads / kWarpSize;
-constexpr float kNativeMax = 166.625f;
+// Largest grid value times the largest local multiplier, divided by 8.
+constexpr float kNativeMax = 43.0f * 31.0f / 8.0f;
 static_assert(kThreads % kWarpSize == 0);
 
 template <typename scalar_t> __device__ __forceinline__ float load_float(const scalar_t *input) {
@@ -50,6 +51,9 @@ __device__ __forceinline__ float quant_error(float xnorm, float dot, float qnorm
   return fmaxf(fmaf(scale * scale, qnorm, fmaf(-2.0f * scale, dot, xnorm)), 0.0f);
 }
 
+// The packed word stores seven of eight sign bits; the decoder rebuilds the eighth from parity,
+// so signs must have even popcount. For odd input parity, flip the smallest-magnitude |x|*q term,
+// which subtracts it twice from the dot. The payload-writing search below uses the same tie-break.
 __device__ __forceinline__ float even_parity_dot(const float *x, const int8_t *q, bool odd_parity) {
   float dot = 0.0f;
   float weakest = FLT_MAX;
