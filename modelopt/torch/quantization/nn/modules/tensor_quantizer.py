@@ -289,6 +289,9 @@ class TensorQuantizer(nn.Module):
         if self.is_mx_format:
             self._pass_through_bwd = True
 
+        if hasattr(self, "_quantizer_cache"):
+            self.clear_quantizer_cache()
+
     def dequantize(self, inputs: BaseQuantizedTensor | QTensorWrapper):
         """De-quantize a real quantized tensor to a given dtype."""
         qtensor = inputs.get_qtensor() if isinstance(inputs, QTensorWrapper) else inputs
@@ -381,10 +384,15 @@ class TensorQuantizer(nn.Module):
 
     def reset_amax(self):
         """Reset amax to None."""
+        self.clear_quantizer_cache()
         if hasattr(self, "_amax"):
             delattr(self, "_amax")
         self._calibrator.reset()
         self.reset_bias()
+
+    def clear_quantizer_cache(self):
+        """Discard runtime-only data cached by a custom quantization backend."""
+        self._quantizer_cache = None
 
     def reset_bias(self):
         """Reset bias to None."""

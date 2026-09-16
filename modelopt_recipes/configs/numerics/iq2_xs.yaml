@@ -11,4 +11,3 @@ block_sizes:
 backend: ggml
 backend_extra_args:
   search_impl: auto
-pass_through_bwd: true

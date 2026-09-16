@@ -1212,7 +1212,7 @@ _ENABLE_FOLDING_PQS_TO_WEIGHTS = True
 @torch.no_grad()
 def _apply_weight_pre_quant_scale(linear, pre_quant_scale):
     if _ENABLE_FOLDING_PQS_TO_WEIGHTS:
-        linear.weight.data.copy_(
+        linear.weight.copy_(
             (linear.weight * pre_quant_scale.to(linear.weight.device).squeeze()[None, :]).to(
                 linear.weight.dtype
             )

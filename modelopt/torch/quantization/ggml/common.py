@@ -33,7 +33,14 @@ def cached_reconstruction(
     quantize: Callable[[torch.Tensor], tuple[torch.Tensor, torch.Tensor]],
     dequantize: Callable[..., torch.Tensor],
 ) -> torch.Tensor:
-    """Return a cached reconstruction while an input tensor remains unchanged."""
+    """Return a reconstruction, caching only the compact payload for frozen weights.
+
+    Static block quantization reshapes the weight before backend dispatch, so the transient
+    ``inputs`` view is not a stable cache key.  Follow its view chain to the owning tensor and
+    use that tensor's version counter.  Cache reuse is restricted to eval mode; training always
+    recomputes.  Callers that rewrite a weight without advancing its version counter must clear
+    the quantizer cache explicitly.
+    """
     cache = getattr(quantizer, "_quantizer_cache", None)
     if not isinstance(cache, dict):
         cache = {}
@@ -41,27 +48,39 @@ def cached_reconstruction(
 
     input_key = f"{cache_namespace}_input"
     signature_key = f"{cache_namespace}_signature"
-    value_key = f"{cache_namespace}_value"
+    packed_key = f"{cache_namespace}_packed"
+    shape_key = f"{cache_namespace}_shape"
+
+    anchor = inputs
+    while anchor._base is not None:
+        anchor = anchor._base
     signature = (
-        inputs._version,
+        anchor._version,
         tuple(inputs.shape),
         tuple(inputs.stride()),
         inputs.dtype,
         inputs.device,
     )
     input_ref = cache.get(input_key)
-    if (
-        isinstance(input_ref, weakref.ReferenceType)
-        and input_ref() is inputs
+    cache_hit = (
+        not getattr(quantizer, "training", True)
+        and isinstance(input_ref, weakref.ReferenceType)
+        and input_ref() is anchor
         and cache.get(signature_key) == signature
-    ):
-        return cache[value_key]
+    )
 
-    packed, shape = quantize(inputs)
+    if cache_hit:
+        packed, shape = cache[packed_key], cache[shape_key]
+    else:
+        packed, shape = quantize(inputs)
+        if not getattr(quantizer, "training", True):
+            cache[input_key] = weakref.ref(anchor)
+            cache[signature_key] = signature
+            cache[packed_key] = packed
+            cache[shape_key] = shape
+        else:
+            quantizer._quantizer_cache = None
     reconstructed = dequantize(packed, shape, dtype=inputs.dtype)
-    cache[input_key] = weakref.ref(inputs)
-    cache[signature_key] = signature
-    cache[value_key] = reconstructed
     return reconstructed
 
 
