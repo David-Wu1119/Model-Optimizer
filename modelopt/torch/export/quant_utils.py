@@ -99,6 +99,15 @@ def _validate_iq_quantizer_config(
         raise NotImplementedError(
             f"{quantization_format.upper()} export only supports search_impl='auto'"
         )
+    input_quantizer = getattr(module, quantizer_attr_names(weight_name).input_quantizer, None)
+    if input_quantizer is not None and (
+        getattr(input_quantizer, "is_enabled", False)
+        or getattr(input_quantizer, "pre_quant_scale", None) is not None
+    ):
+        raise NotImplementedError(
+            f"{quantization_format.upper()} export is weight-only; input quantization and "
+            "pre_quant_scale are not represented in the checkpoint"
+        )
 
 
 def _pack_iq_weight(

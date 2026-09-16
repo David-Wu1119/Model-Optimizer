@@ -110,7 +110,8 @@ def test_megatron_name_remapping_exports_iq_payload(qformat, payload_bytes, dequ
     exporter.exclude_modules = []
     exporter.layer_config_dict = {}
 
-    exporter._name_remapping(linear, "model.layers.0.mlp.down_proj.")
+    with patch.object(uem, "get_tensor_model_parallel_world_size", return_value=1):
+        exporter._name_remapping(linear, "model.layers.0.mlp.down_proj.")
 
     packed_key = "model.layers.0.mlp.down_proj.weight"
     assert exporter._state_dict[packed_key].shape == (2, 1, payload_bytes)

@@ -142,6 +142,28 @@ def test_export_iq_rejects_an_unhandled_search_impl(num_bits):
         _export_quantized_weight(linear, torch.bfloat16)
 
 
+@pytest.mark.parametrize("input_mode", ["enabled", "pre_quant_scale"])
+@pytest.mark.parametrize("num_bits", ["iq1_s", "iq2_xs"])
+def test_export_iq_rejects_non_weight_only_config(num_bits, input_mode):
+    linear = nn.Linear(256, 4, bias=False, dtype=torch.bfloat16)
+    linear.weight_quantizer = TensorQuantizer(
+        QuantizerAttributeConfig(
+            num_bits=num_bits,
+            block_sizes={-1: 256},
+            backend="ggml",
+            backend_extra_args={"search_impl": "auto"},
+        )
+    )
+    linear.input_quantizer = TensorQuantizer(
+        QuantizerAttributeConfig(num_bits=8, axis=None, enable=input_mode == "enabled")
+    )
+    if input_mode == "pre_quant_scale":
+        linear.input_quantizer.pre_quant_scale = torch.ones(256)
+
+    with pytest.raises(NotImplementedError, match="export is weight-only"):
+        _export_quantized_weight(linear, torch.bfloat16)
+
+
 class QuantMoELinear(nn.Module):
     def __init__(self):
         super().__init__()
