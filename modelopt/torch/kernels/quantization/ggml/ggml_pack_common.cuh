@@ -84,6 +84,8 @@ __device__ __forceinline__ void accumulate_choice_min(const float (&local_best)[
 }
 
 template <int Warps>
+// Only thread 0 receives the block minimum; other threads retain their warp-local value.
+// There is no trailing barrier, so callers must consume the block result in thread 0 before sync.
 __device__ __forceinline__ unsigned long long
 block_min_key(unsigned long long key, unsigned long long *warp_keys, int tid, int lane, int warp) {
   key = warp_min_key(key);

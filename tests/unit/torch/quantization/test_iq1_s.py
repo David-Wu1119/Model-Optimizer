@@ -250,6 +250,24 @@ def test_iq1_s_backend_rejects_unknown_search_implementation():
         quantizer(torch.ones(1, 256))
 
 
+def test_iq1_s_frozen_cache_hit_still_validates_search_implementation():
+    quantizer = TensorQuantizer(
+        QuantizerAttributeConfig(
+            num_bits="iq1_s",
+            block_sizes={-1: 256},
+            backend="ggml",
+            backend_extra_args={"search_impl": "auto"},
+        )
+    ).eval()
+    quantizer.freeze_reconstruction_cache()
+    weight = torch.ones(1, 256)
+    quantizer(weight)
+
+    quantizer.backend_extra_args["search_impl"] = "unknown"
+    with pytest.raises(ValueError, match="Unsupported IQ1_S search_impl"):
+        quantizer(weight)
+
+
 def test_iq1_s_fake_quant_has_pass_through_gradient():
     class Quantizer:
         num_bits = "iq1_s"

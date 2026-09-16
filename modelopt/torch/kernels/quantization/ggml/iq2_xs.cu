@@ -73,16 +73,26 @@ __device__ __forceinline__ float quant_error(float xnorm, float dot, float qnorm
 // The packed word stores seven of eight sign bits; the decoder rebuilds the eighth from parity,
 // so signs must have even popcount. For odd input parity, flip the smallest-magnitude |x|*q term,
 // which subtracts it twice from the dot. The payload-writing search below uses the same tie-break.
-__device__ __forceinline__ float even_parity_dot(const float *x, const int8_t *q, bool odd_parity) {
+struct ParityDot {
+  float dot;
+  int flip_index;
+};
+
+__device__ __forceinline__ ParityDot even_parity_dot(const float *x, const int8_t *q,
+                                                     bool odd_parity) {
   float dot = 0.0f;
   float weakest = FLT_MAX;
+  int flip_index = 0;
 #pragma unroll
   for (int j = 0; j < kVectorSize; ++j) {
     const float term = fabsf(x[j]) * static_cast<float>(q[j]);
     dot += term;
-    weakest = fminf(weakest, term);
+    if (term < weakest) {
+      weakest = term;
+      flip_index = j;
+    }
   }
-  return odd_parity ? dot - 2.0f * weakest : dot;
+  return {odd_parity ? dot - 2.0f * weakest : dot, flip_index};
 }
 
 template <typename scalar_t>
@@ -191,7 +201,7 @@ __global__ void encode(const scalar_t *input, int64_t num_blocks, const float *g
         local_best[local] = FLT_MAX;
       for (int entry = tid; entry < kEntries; entry += kThreads) {
         const int8_t *q = shared_grid + entry * kVectorSize;
-        const float dot = even_parity_dot(x, q, odd_parity);
+        const float dot = even_parity_dot(x, q, odd_parity).dot;
 #pragma unroll
         for (int local = 0; local < kLocalScales; ++local) {
           const float scale = d * (2 * local + 1) * 0.125f;
@@ -227,9 +237,8 @@ __global__ void encode(const scalar_t *input, int64_t num_blocks, const float *g
       const bool odd_parity = vector_odd_parity[vector_index] != 0;
       unsigned long long key = ~0ULL;
       for (int entry = tid; entry < kEntries; entry += kThreads) {
-        const float error =
-            quant_error(xnorm, even_parity_dot(x, shared_grid + entry * kVectorSize, odd_parity),
-                        grid_norm[entry], selected_scale);
+        const auto parity = even_parity_dot(x, shared_grid + entry * kVectorSize, odd_parity);
+        const float error = quant_error(xnorm, parity.dot, grid_norm[entry], selected_scale);
         const unsigned long long candidate =
             (static_cast<unsigned long long>(__float_as_uint(error)) << 32) |
             static_cast<unsigned long long>(entry);
@@ -239,16 +248,7 @@ __global__ void encode(const scalar_t *input, int64_t num_blocks, const float *g
       if (tid == 0) {
         const int entry = static_cast<int>(key & kEntryMask);
         const int8_t *q = shared_grid + entry * kVectorSize;
-        int flip_index = 0;
-        float weakest = fabsf(x[0]) * q[0];
-#pragma unroll
-        for (int j = 1; j < kVectorSize; ++j) {
-          const float term = fabsf(x[j]) * q[j];
-          if (term < weakest) {
-            weakest = term;
-            flip_index = j;
-          }
-        }
+        const int flip_index = even_parity_dot(x, q, odd_parity).flip_index;
         int sign_mask = 0;
 #pragma unroll
         for (int j = 0; j < kVectorSize; ++j) {

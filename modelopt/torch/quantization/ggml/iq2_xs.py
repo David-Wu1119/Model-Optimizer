@@ -66,6 +66,7 @@ from .common import (
     cached_reconstruction,
     detect_fake_mode,
     validate_packed_weights,
+    validate_search_impl,
     validate_weight,
 )
 
@@ -262,8 +263,7 @@ def _quantize_iq2_xs_packed(
 ) -> torch.Tensor:
     """Pack a weight without allocating the public logical-shape tensor."""
     validate_weight(weight, "IQ2_XS")
-    if search_impl not in {"auto", "reference"}:
-        raise ValueError(f"Unsupported IQ2_XS search_impl {search_impl!r}")
+    search_impl = validate_search_impl(search_impl, "IQ2_XS")
     if block_chunk_size is None:
         if detect_fake_mode(weight) is not None:
             # Tracing allocates no tensor storage, so chunking only unrolls the graph.
@@ -373,7 +373,7 @@ def iq2_xs_fake_quant(inputs: torch.Tensor, quantizer) -> torch.Tensor:
             f"Unsupported IQ2_XS backend_extra_args keys: {sorted(unknown_keys)}; "
             f"supported: {sorted(_IQ2_XS_SUPPORTED_BACKEND_EXTRA_ARGS)}"
         )
-    search_impl = extra_args.get("search_impl", "auto")
+    search_impl = validate_search_impl(extra_args.get("search_impl", "auto"), "IQ2_XS")
     reconstructed = cached_reconstruction(
         inputs,
         quantizer,

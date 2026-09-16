@@ -64,6 +64,13 @@ def _cached_grid_from_bytes(
     return cache[resolved_device]
 
 
+def validate_search_impl(search_impl: str, format_name: str) -> str:
+    """Validate and return the IQ encoder selection."""
+    if search_impl not in {"auto", "reference"}:
+        raise ValueError(f"Unsupported {format_name} search_impl {search_impl!r}")
+    return search_impl
+
+
 def _cache_identity(inputs: torch.Tensor) -> tuple[Any, tuple[Any, ...]]:
     """Return storage ownership plus a signature that works in every grad mode."""
     storage = inputs.untyped_storage()
