@@ -108,7 +108,7 @@ def _iq_export_weight_quantizer(
 
 def _iq_export_weights(
     model: nn.Module,
-) -> Generator[tuple[nn.Module, str, str, TensorQuantizer, bool], None, None]:
+) -> Generator[tuple[nn.Module, str, str, str, TensorQuantizer, bool], None, None]:
     """Yield each selected IQ weight and the metadata needed by export preflight."""
     for module_name, module in model.named_modules():
         inspected: set[str] = set()
@@ -123,7 +123,14 @@ def _iq_export_weights(
                 and quantizer.is_enabled
                 and quantizer.num_bits in IQ_FORMATS
             ):
-                yield module, module_name, weight_name, quantizer, uses_plural_quantizers
+                yield (
+                    module,
+                    module_name,
+                    weight_name,
+                    weight_name,
+                    quantizer,
+                    uses_plural_quantizers,
+                )
 
         grouped_quantizer = getattr(module, "weight_quantizer", None)
         if isinstance(grouped_quantizer, GroupedQuantizer) and len(grouped_quantizer) > 0:
@@ -141,7 +148,7 @@ def _iq_export_weights(
                     and quantizer.num_bits in IQ_FORMATS
                 ):
                     # Grouped linears are rebuilt as standard per-expert modules before packing.
-                    yield module, module_name, weight_name, quantizer, True
+                    yield module, module_name, weight_name, "weight", quantizer, True
 
 
 def _iq_export_weight_shape_error(
@@ -169,9 +176,14 @@ def _iq_export_weight_shape_error(
 def _iq_export_weight_shape_errors(model: nn.Module) -> list[str]:
     """Return selected IQ weights that cannot be handled by unified export."""
     incompatible: list[str] = []
-    for module, module_name, weight_name, quantizer, uses_plural_quantizers in _iq_export_weights(
-        model
-    ):
+    for (
+        module,
+        module_name,
+        weight_name,
+        _,
+        quantizer,
+        uses_plural_quantizers,
+    ) in _iq_export_weights(model):
         # Fused-expert plural and grouped quantizers are rebuilt as standard per-expert modules.
         error = _iq_export_weight_shape_error(
             module,
@@ -185,21 +197,21 @@ def _iq_export_weight_shape_errors(model: nn.Module) -> list[str]:
     return incompatible
 
 
-def _validate_iq_export_weight_shapes(model: nn.Module) -> None:
-    """Reject all unsupported IQ weights before export mutates the model."""
+def _validate_iq_export_support(model: nn.Module) -> None:
+    """Reject unsupported IQ weights and quantizer settings before export mutates the model."""
     if not any(
         isinstance(module, TensorQuantizer) and module.is_enabled and module.num_bits in IQ_FORMATS
         for module in model.modules()
     ):
         return
     incompatible = _iq_export_weight_shape_errors(model)
+    incompatible.extend(_iq_export_quantizer_config_errors(model))
 
     if incompatible:
         details = "\n  - ".join(incompatible)
         raise ValueError(
-            "IQ export cannot handle the following selected weights. Each weight must use the "
-            "standard 'weight' attribute and have a final dimension divisible by its format "
-            f"group size:\n  - {details}"
+            "IQ export cannot handle the following selected weights or quantizer settings:"
+            f"\n  - {details}"
         )
 
 
@@ -264,12 +276,19 @@ def _validate_iq_quantizer_config(
 def _iq_export_quantizer_config_errors(model: nn.Module) -> list[str]:
     """Return selected IQ quantizer configurations unsupported by checkpoint export."""
     incompatible: list[str] = []
-    for module, module_name, weight_name, quantizer, _ in _iq_export_weights(model):
+    for (
+        module,
+        module_name,
+        weight_name,
+        quantizer_weight_name,
+        quantizer,
+        _,
+    ) in _iq_export_weights(model):
         qualified_name = f"{module_name}.{weight_name}".lstrip(".")
         error = _iq_quantizer_config_error(
             module,
             quantizer.num_bits,
-            weight_name,
+            quantizer_weight_name,
             qualified_name,
             quantizer=quantizer,
         )

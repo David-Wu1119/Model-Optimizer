@@ -42,7 +42,7 @@ from .quant_format import FUSION_FREE_FORMATS, QUANTIZATION_NVFP4
 from .quant_utils import (
     _get_kv_cache_postprocess_config,
     _postprocess_single_tensor,
-    _validate_iq_export_weight_shapes,
+    _validate_iq_export_support,
     get_quant_config,
     get_quantization_format,
 )
@@ -138,7 +138,7 @@ def assert_formats_supported(module: nn.Module, scope: str) -> None:
 def assert_layerwise_export_supported(model: nn.Module) -> None:
     """Raise unless per-layer export is valid for this model."""
     assert_formats_supported(model, "before calibration")
-    _validate_iq_export_weight_shapes(model)
+    _validate_iq_export_support(model)
 
     tied = _tied_quantized_modules(model)
     if tied:

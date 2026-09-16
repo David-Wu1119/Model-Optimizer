@@ -25,7 +25,7 @@ import modelopt.torch.export.quant_utils as quant_utils
 import modelopt.torch.quantization as mtq
 from modelopt.torch.export.quant_utils import (
     _pack_iq_weight,
-    _validate_iq_export_weight_shapes,
+    _validate_iq_export_support,
     postprocess_state_dict,
 )
 from modelopt.torch.export.unified_export_hf import (
@@ -227,7 +227,7 @@ def test_export_iq_shape_preflight_reports_every_incompatible_weight():
         )
 
     with pytest.raises(ValueError) as exc_info:
-        _validate_iq_export_weight_shapes(model)
+        _validate_iq_export_support(model)
 
     message = str(exc_info.value)
     assert "0.weight: (4, 192)" in message
@@ -243,7 +243,7 @@ def test_export_iq_shape_preflight_skips_detailed_scan_without_iq(monkeypatch):
         lambda _model: pytest.fail("non-IQ export must skip the detailed weight scan"),
     )
 
-    _validate_iq_export_weight_shapes(model)
+    _validate_iq_export_support(model)
 
 
 def test_export_iq_shape_preflight_reports_grouped_weights():
@@ -267,7 +267,7 @@ def test_export_iq_shape_preflight_reports_grouped_weights():
     model.experts = GroupedLinear()
 
     with pytest.raises(ValueError) as exc_info:
-        _validate_iq_export_weight_shapes(model)
+        _validate_iq_export_support(model)
 
     message = str(exc_info.value)
     assert "experts.weight1: (4, 192)" in message
@@ -295,7 +295,7 @@ def test_export_iq_shape_preflight_reports_grouped_quantizers_beyond_num_gemms()
     model.experts = GroupedLinear()
 
     with pytest.raises(ValueError, match=r"experts\.weight1: \(4, 192\)"):
-        _validate_iq_export_weight_shapes(model)
+        _validate_iq_export_support(model)
 
 
 def test_export_iq_shape_preflight_reports_legacy_fused_expert_quantizers():
@@ -320,7 +320,7 @@ def test_export_iq_shape_preflight_reports_legacy_fused_expert_quantizers():
     model.experts = LegacyFusedExperts()
 
     with pytest.raises(ValueError, match=r"experts\.up_proj: \(4, 192\)"):
-        _validate_iq_export_weight_shapes(model)
+        _validate_iq_export_support(model)
 
 
 def test_export_iq_preflight_rejects_nonstandard_weight_before_mutation(tmp_path):
@@ -392,6 +392,31 @@ def test_export_transformers_checkpoint_runs_iq_shape_preflight_before_mutation(
     original_weights = [linear.weight.detach().clone() for linear in model]
 
     with pytest.raises(ValueError, match=r"1\.weight: \(4, 192\)"):
+        _export_transformers_checkpoint(model)
+
+    for linear, original_weight in zip(model, original_weights):
+        assert linear.weight.dtype == torch.bfloat16
+        assert torch.equal(linear.weight, original_weight)
+
+
+def test_export_transformers_checkpoint_runs_iq_config_preflight_before_mutation():
+    model = nn.Sequential(
+        nn.Linear(256, 4, bias=False, dtype=torch.bfloat16),
+        nn.Linear(256, 4, bias=False, dtype=torch.bfloat16),
+    )
+    model.config = SimpleNamespace(torch_dtype=torch.bfloat16)
+    for linear in model:
+        linear.weight_quantizer = TensorQuantizer(
+            QuantizerAttributeConfig(
+                num_bits="iq2_xs",
+                block_sizes={-1: 256},
+                backend="ggml",
+            )
+        )
+    model[1].input_quantizer = TensorQuantizer(QuantizerAttributeConfig(num_bits=8))
+    original_weights = [linear.weight.detach().clone() for linear in model]
+
+    with pytest.raises(ValueError, match=r"weight-only.*1\.weight"):
         _export_transformers_checkpoint(model)
 
     for linear, original_weight in zip(model, original_weights):
@@ -486,6 +511,35 @@ def test_export_iq_config_preflight_reports_weight_owner():
     assert len(errors) == 1
     assert "block.weight" in errors[0]
     assert "weight-only" in errors[0]
+
+
+def test_export_iq_config_preflight_uses_unprefixed_grouped_activation_quantizer():
+    class GroupedLinear(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.num_gemms = 2
+            self.weight0 = nn.Parameter(torch.ones(4, 256, dtype=torch.bfloat16))
+            self.weight1 = nn.Parameter(torch.ones(4, 256, dtype=torch.bfloat16))
+            quantizer_config = QuantizerAttributeConfig(
+                num_bits="iq2_xs",
+                block_sizes={-1: 256},
+                backend="ggml",
+            )
+            self.weight_quantizer = GroupedQuantizer(
+                TensorQuantizer(quantizer_config),
+                TensorQuantizer(quantizer_config),
+            )
+            self.input_quantizer = TensorQuantizer(QuantizerAttributeConfig(num_bits=8))
+
+    model = nn.Module()
+    model.experts = GroupedLinear()
+
+    errors = quant_utils._iq_export_quantizer_config_errors(model)
+
+    assert len(errors) == 2
+    assert all("weight-only" in error for error in errors)
+    assert any("experts.weight0" in error for error in errors)
+    assert any("experts.weight1" in error for error in errors)
 
 
 def test_iq_config_error_identifies_weight():

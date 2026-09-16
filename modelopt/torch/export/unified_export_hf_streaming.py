@@ -48,7 +48,7 @@ from .quant_aware_conversion import _build_reverse_rules, build_reverse_name_map
 from .quant_utils import (
     _get_kv_cache_postprocess_config,
     _postprocess_single_tensor,
-    _validate_iq_export_weight_shapes,
+    _validate_iq_export_support,
     get_quant_config,
 )
 from .registry import ExportContext
@@ -367,7 +367,7 @@ def _export_transformers_checkpoint_streaming(
 
     # --- Same model-level setup as _export_transformers_checkpoint ---
     dtype = _resolve_export_dtype(model, dtype)
-    _validate_iq_export_weight_shapes(model)
+    _validate_iq_export_support(model)
     _prepare_moe_inputs(model, dtype, is_modelopt_qlora)
 
     requantize_resmooth_fused_llm_layers(model)

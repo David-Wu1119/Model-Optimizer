@@ -110,7 +110,7 @@ from .quant_format import (
 from .quant_utils import (
     _get_kv_cache_postprocess_config,
     _pack_iq_weight,
-    _validate_iq_export_weight_shapes,
+    _validate_iq_export_support,
     fuse_prequant_layernorm,
     fuse_prequant_to_linear,
     get_activation_scaling_factor,
@@ -988,7 +988,7 @@ def _prepare_model_for_export(model, dtype, is_modelopt_qlora):
     the quant config.
     """
     dtype = _resolve_export_dtype(model, dtype)
-    _validate_iq_export_weight_shapes(model)
+    _validate_iq_export_support(model)
     # One tied-weight map for the whole export (amax sync + final dedup in postprocess_state_dict).
     # Sourced from HF's name-based all_tied_weights_keys, so it is correct even under FSDP/offload.
     tied_map = TiedWeightMap(model)
@@ -1286,7 +1286,7 @@ def _export_diffusers_checkpoint(
     # Validate every component before processing the first one so a later incompatible weight
     # cannot leave earlier components partially packed.
     for component in module_components.values():
-        _validate_iq_export_weight_shapes(component)
+        _validate_iq_export_support(component)
 
     # Best-effort diffusers pipeline check (kept for folder layout + model_index.json behavior)
     is_diffusers_pipe = False
