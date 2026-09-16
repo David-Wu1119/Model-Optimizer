@@ -115,21 +115,27 @@ def _validate_iq_export_weight_shapes(model: nn.Module) -> None:
 
 
 def _validate_iq_quantizer_config(
-    module: nn.Module, quantization_format: str, weight_name: str = "weight"
+    module: nn.Module,
+    quantization_format: str,
+    weight_name: str = "weight",
+    describe_as: str | None = None,
 ) -> None:
     """Reject IQ export settings that the checkpoint encoder cannot reproduce."""
+    where = f" for '{describe_as}'" if describe_as else ""
     quantizer = representative_weight_quantizer(module, weight_name)
     if not isinstance(quantizer, TensorQuantizer):
-        raise ValueError(f"{quantization_format.upper()} export requires one TensorQuantizer")
+        raise ValueError(
+            f"{quantization_format.upper()} export requires one TensorQuantizer{where}"
+        )
     if quantizer.num_bits != quantization_format or quantizer.backend != "ggml":
         raise ValueError(
-            f"{quantization_format.upper()} export requires the matching ggml quantizer"
+            f"{quantization_format.upper()} export requires the matching ggml quantizer{where}"
         )
     extra_args = quantizer.backend_extra_args or {}
     search_impl = extra_args.get("search_impl", "auto")
     if search_impl != "auto":
         raise NotImplementedError(
-            f"{quantization_format.upper()} export only supports search_impl='auto'"
+            f"{quantization_format.upper()} export only supports search_impl='auto'{where}"
         )
     quantizer_names = quantizer_attr_names(weight_name)
     for quantizer_name in (quantizer_names.input_quantizer, quantizer_names.output_quantizer):
@@ -139,7 +145,8 @@ def _validate_iq_quantizer_config(
             or getattr(activation_quantizer, "pre_quant_scale", None) is not None
         ):
             raise NotImplementedError(
-                f"{quantization_format.upper()} export is weight-only; activation quantization "
+                f"{quantization_format.upper()} export is weight-only{where}; activation "
+                "quantization "
                 "and pre_quant_scale are not represented in the checkpoint"
             )
 
@@ -153,7 +160,11 @@ def _pack_iq_weight(
 ) -> torch.Tensor:
     """Pack one IQ weight, using ``describe_as`` only for failure attribution."""
     if module is not None:
-        _validate_iq_quantizer_config(module, quantization_format, weight_name)
+        if describe_as is None:
+            describe_as = f"{type(module).__name__}.{weight_name}"
+        _validate_iq_quantizer_config(
+            module, quantization_format, weight_name, describe_as=describe_as
+        )
     if quantization_format not in IQ_FORMATS:
         raise ValueError(f"Unsupported IQ quantization format: {quantization_format}")
     try:
@@ -167,8 +178,7 @@ def _pack_iq_weight(
             )
     except (TypeError, ValueError) as exc:
         if describe_as is None:
-            owner = type(module).__name__ if module is not None else "state_dict"
-            describe_as = f"{owner}.{weight_name}"
+            describe_as = f"state_dict.{weight_name}"
         raise type(exc)(
             f"Failed to pack {quantization_format.upper()} weight "
             f"'{describe_as}' with shape {tuple(weight.shape)}: {exc}"

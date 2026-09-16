@@ -1162,7 +1162,9 @@ class GPTModelExporter:
 
         is_iq = qformat in IQ_FORMATS
         if is_iq:
-            _validate_iq_quantizer_config(module, qformat)
+            _validate_iq_quantizer_config(
+                module, qformat, describe_as=f"{prefix}weight" if prefix else "weight"
+            )
         name_to_value = self._get_weight_bias(
             module, dtype, name_to_value, keep_weight_device=is_iq
         )

@@ -270,6 +270,26 @@ def test_export_iq_rejects_non_weight_only_config(num_bits, quantizer_name, mode
         _export_quantized_weight(linear, torch.bfloat16)
 
 
+def test_iq_config_error_identifies_weight():
+    linear = nn.Linear(256, 4, bias=False, dtype=torch.bfloat16)
+    linear.weight_quantizer = TensorQuantizer(
+        QuantizerAttributeConfig(
+            num_bits="iq2_xs",
+            block_sizes={-1: 256},
+            backend="ggml",
+        )
+    )
+    linear.input_quantizer = TensorQuantizer(QuantizerAttributeConfig(num_bits=8, axis=None))
+
+    with pytest.raises(NotImplementedError, match=r"model\.layers\.3\.mlp\.down_proj\.weight"):
+        _pack_iq_weight(
+            linear.weight,
+            "iq2_xs",
+            module=linear,
+            describe_as="model.layers.3.mlp.down_proj.weight",
+        )
+
+
 class QuantMoELinear(nn.Module):
     def __init__(self):
         super().__init__()
