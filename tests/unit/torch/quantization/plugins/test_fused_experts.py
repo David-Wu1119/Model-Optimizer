@@ -30,6 +30,7 @@ import modelopt.torch.quantization as mtq
 import modelopt.torch.quantization.nn.modules.tensor_quantizer as tensor_quantizer_module
 from modelopt.torch.export.moe_utils import _export_fused_experts
 from modelopt.torch.export.quant_utils import get_quant_config, get_quantization_format
+from modelopt.torch.export.unified_export_hf import export_hf_checkpoint
 from modelopt.torch.quantization.config import QuantizerAttributeConfig
 from modelopt.torch.quantization.conversion import _normalize_fused_experts_quantizer_name
 from modelopt.torch.quantization.model_calib import local_hessian_calibrate
@@ -555,6 +556,54 @@ class TestExportFusedExperts:
                 for idx in range(NUM_EXPERTS)
                 for projection in ("gate_proj", "up_proj", "down_proj")
             ]
+        finally:
+            self._cleanup_registry(expert_type)
+
+    def test_export_hf_checkpoint_preflight_allows_fused_iq_weights(self, monkeypatch, tmp_path):
+        """The model-wide preflight must preserve the fused-expert split path."""
+        model = _TinyMoEModel()
+        expert_type = type(model.moe.experts)
+        self._cleanup_registry(expert_type)
+        register_fused_experts_on_the_fly(model)
+
+        try:
+            converted = QuantModuleRegistry.convert(model.moe.experts)
+            converted.gate_up_proj = nn.Parameter(torch.ones(NUM_EXPERTS, 512, 256))
+            converted.down_proj = nn.Parameter(torch.ones(NUM_EXPERTS, 256, 256))
+            config = QuantizerAttributeConfig(
+                num_bits="iq2_xs",
+                block_sizes={-1: 256},
+                backend="ggml",
+                backend_extra_args={"search_impl": "auto"},
+            )
+            quantizers = list(converted.gate_up_proj_weight_quantizers) + list(
+                converted.down_proj_weight_quantizers
+            )
+            for quantizer in quantizers:
+                quantizer.set_from_attribute_config(config)
+
+            export_called = False
+
+            def fake_export(*_args, **_kwargs):
+                nonlocal export_called
+                export_called = True
+                return {}, {}
+
+            monkeypatch.setattr(
+                "modelopt.torch.export.unified_export_hf._export_transformers_checkpoint",
+                fake_export,
+            )
+            monkeypatch.setattr(
+                model, "save_pretrained", lambda *_args, **_kwargs: None, raising=False
+            )
+            monkeypatch.setattr(
+                "modelopt.torch.export.unified_export_hf._write_hf_export_config",
+                lambda *_args, **_kwargs: None,
+            )
+
+            export_hf_checkpoint(model, export_dir=tmp_path)
+
+            assert export_called
         finally:
             self._cleanup_registry(expert_type)
 

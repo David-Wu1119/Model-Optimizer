@@ -93,6 +93,18 @@ def _iq_export_weight_shape_errors(model: nn.Module) -> list[str]:
     for module_name, module in model.named_modules():
         inspected: set[str] = set()
 
+        def uses_plural_quantizers(weight_name: str) -> bool:
+            quantizer_name = quantizer_attr_names(weight_name).weight_quantizer
+            if isinstance(getattr(module, quantizer_name + "s", None), nn.ModuleList):
+                return True
+            return (
+                weight_name == getattr(module, "_first_proj_attr", None)
+                and weight_name != "gate_up_proj"
+                and isinstance(
+                    getattr(module, "gate_up_proj_weight_quantizers", None), nn.ModuleList
+                )
+            )
+
         def inspect_weight(
             weight_name: str,
             quantizer: nn.Module | None,
@@ -123,7 +135,12 @@ def _iq_export_weight_shape_errors(model: nn.Module) -> list[str]:
 
         for weight_name in weight_attr_names(module):
             quantizer = representative_weight_quantizer(module, weight_name)
-            inspect_weight(weight_name, quantizer)
+            # Fused-expert plural quantizer lists are rebuilt as standard per-expert modules.
+            inspect_weight(
+                weight_name,
+                quantizer,
+                allow_nonstandard_name=uses_plural_quantizers(weight_name),
+            )
 
         grouped_quantizer = getattr(module, "weight_quantizer", None)
         if isinstance(grouped_quantizer, GroupedQuantizer) and len(grouped_quantizer) > 0:
