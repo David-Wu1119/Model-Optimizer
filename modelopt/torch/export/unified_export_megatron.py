@@ -1442,7 +1442,11 @@ class GPTModelExporter:
                     # weight_scale_2 derivation asserts one. Max-calibration weight amax
                     # is exactly max(|W|), so compute it from this expert's weight.
                     _wq = module.weight_quantizer
-                    if getattr(_wq, "_amax", None) is None and getattr(_wq, "is_enabled", False):
+                    if (
+                        getattr(_wq, "num_bits", None) not in IQ_FORMATS
+                        and getattr(_wq, "_amax", None) is None
+                        and getattr(_wq, "is_enabled", False)
+                    ):
                         _wq.amax = module.weight.detach().abs().max().float()
                         temp_amax_wqs.append(_wq)
 
