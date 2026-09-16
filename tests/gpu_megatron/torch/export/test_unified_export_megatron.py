@@ -45,6 +45,7 @@ import modelopt.torch.export.unified_export_megatron as uem
 import modelopt.torch.quantization as mtq
 import modelopt.torch.speculative as mtsp
 from modelopt.torch.export import KV_CACHE_FP8, export_mcore_gpt_to_hf, import_mcore_gpt_from_hf
+from modelopt.torch.export.plugins.vllm_fakequant_megatron import VllmFqGPTModelExporter
 from modelopt.torch.export.unified_export_megatron import GPTModelExporter
 from modelopt.torch.quantization.config import QuantizerAttributeConfig
 from modelopt.torch.quantization.ggml import dequantize_iq1_s, dequantize_iq2_xs
@@ -184,6 +185,32 @@ def test_megatron_iq_tensor_parallel_guard_finds_later_mixed_format():
     )
 
     assert GPTModelExporter._model_has_iq_quantizer(torch.nn.Sequential(fp8, iq))
+
+
+def test_megatron_iq_tensor_parallel_guard_covers_extra_modules():
+    exporter = object.__new__(GPTModelExporter)
+    exporter.model = torch.nn.Module()
+
+    with (
+        patch.object(uem, "get_tensor_model_parallel_world_size", return_value=2),
+        patch.object(exporter, "_model_has_iq_quantizer", return_value=True),
+        patch.object(exporter, "_collective_any_iq", return_value=True),
+        pytest.raises(NotImplementedError, match="tensor model parallel size 1"),
+    ):
+        exporter.save_pretrained_extra_modules("unused")
+
+
+def test_vllm_fakequant_export_skips_iq_packing_guard():
+    exporter = object.__new__(VllmFqGPTModelExporter)
+    exporter.model = torch.nn.Module()
+
+    with (
+        patch.object(uem, "get_tensor_model_parallel_world_size", return_value=2),
+        patch.object(exporter, "_collective_any_iq") as collective,
+    ):
+        exporter._validate_iq_tensor_parallelism()
+
+    collective.assert_not_called()
 
 
 def test_megatron_iq_packer_rejects_tensor_parallelism():

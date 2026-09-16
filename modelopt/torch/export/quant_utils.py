@@ -159,11 +159,11 @@ def _pack_iq_weight(
             raise NotImplementedError(
                 f"No checkpoint packer is registered for {quantization_format.upper()}"
             )
-    except ValueError as exc:
+    except (TypeError, ValueError) as exc:
         if describe_as is None:
             owner = type(module).__name__ if module is not None else "state_dict"
             describe_as = f"{owner}.{weight_name}"
-        raise ValueError(
+        raise type(exc)(
             f"Failed to pack {quantization_format.upper()} weight "
             f"'{describe_as}' with shape {tuple(weight.shape)}: {exc}"
         ) from exc

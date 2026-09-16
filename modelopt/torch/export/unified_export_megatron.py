@@ -137,6 +137,8 @@ class GPTModelExporter:
         clamp_kv_cache_scales: Whether to clamp FP8 KV cache scaling factors to at least 1.0.
     """
 
+    _packs_iq_weights = True
+
     def __init__(
         self,
         model: torch.nn.Module,
@@ -272,6 +274,7 @@ class GPTModelExporter:
         save_directory: str | os.PathLike,
     ):
         """Save a EAGLE or Medusa checkpoints which can be deployed by vLLM and TensorRT-LLM."""
+        self._validate_iq_tensor_parallelism()
         # We use the last PP rank to write the config because
         # medusa_heads and eagle_module only exist in the last stage.
         pp_rank = get_pipeline_model_parallel_rank()
@@ -319,6 +322,18 @@ class GPTModelExporter:
         torch.distributed.all_reduce(any_iq, op=torch.distributed.ReduceOp.MAX)
         return bool(any_iq.item())
 
+    def _validate_iq_tensor_parallelism(self) -> None:
+        """Fail collectively when this exporter would pack IQ weights across TP ranks."""
+        if (
+            self._packs_iq_weights
+            and get_tensor_model_parallel_world_size() != 1
+            and self._collective_any_iq(self._model_has_iq_quantizer(self.model))
+        ):
+            raise NotImplementedError(
+                "Megatron IQ1_S/IQ2_XS unified export currently requires tensor model "
+                "parallel size 1"
+            )
+
     def save_pretrained(
         self,
         save_directory: str | os.PathLike,
@@ -329,6 +344,8 @@ class GPTModelExporter:
         Args:
             save_directory: Directory to which to save. Will be created if it doesn't exist.
         """
+        self._validate_iq_tensor_parallelism()
+
         pp_rank = get_pipeline_model_parallel_rank()
         pp_size = get_pipeline_model_parallel_world_size()
         tp_rank = get_tensor_model_parallel_rank()
@@ -342,14 +359,6 @@ class GPTModelExporter:
         is_writer_rank = self._is_sidecar_writer_rank(is_last_stage_main_rank)
 
         quantization_format = self._get_quantization_format(self.model)
-        if get_tensor_model_parallel_world_size() != 1 and self._collective_any_iq(
-            self._model_has_iq_quantizer(self.model)
-        ):
-            raise NotImplementedError(
-                "Megatron IQ1_S/IQ2_XS unified export currently requires tensor model "
-                "parallel size 1"
-            )
-
         # Main export process
         layer_state_dicts = self.layer_state_dicts
 

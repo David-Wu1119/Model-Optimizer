@@ -71,6 +71,8 @@ def gather_mcore_vllm_fq_quantized_state_dict(
 class VllmFqGPTModelExporter(GPTModelExporter):
     """VLLM fakequant GPTModel exporter."""
 
+    _packs_iq_weights = False
+
     @staticmethod
     def _pop_quantizer_keys(state_dict: dict) -> None:
         """Remove quantizer tensors from an export shard (OrderedDict-safe)."""

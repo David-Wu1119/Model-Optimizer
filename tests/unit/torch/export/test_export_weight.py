@@ -171,6 +171,17 @@ def test_export_iq_divisibility_error_identifies_weight(num_bits):
         _export_quantized_weight(linear, torch.bfloat16)
 
 
+@pytest.mark.parametrize("num_bits", ["iq1_s", "iq2_xs"])
+def test_export_iq_dtype_error_identifies_weight(num_bits):
+    weight = torch.ones((4, 256), dtype=torch.uint8)
+
+    with pytest.raises(
+        TypeError,
+        match=rf"Failed to pack {num_bits.upper()} weight 'model.layers.0.weight'",
+    ):
+        _pack_iq_weight(weight, num_bits, describe_as="model.layers.0.weight")
+
+
 def test_export_iq_shape_preflight_reports_every_incompatible_weight():
     model = nn.Sequential(
         nn.Linear(192, 4, bias=False, dtype=torch.bfloat16),
