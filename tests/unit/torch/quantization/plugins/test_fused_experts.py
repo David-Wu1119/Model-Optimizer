@@ -504,7 +504,7 @@ class TestExportFusedExperts:
 
         self._cleanup_registry(expert_type)
 
-    def test_export_registers_packed_weight_buffers(self, monkeypatch):
+    def test_export_preserves_packed_iq_weights(self, monkeypatch):
         """Packed expert weights must remain present in the exported state dict."""
         model = _TinyMoEModel()
         expert_type = type(model.moe.experts)
@@ -513,15 +513,23 @@ class TestExportFusedExperts:
 
         try:
             converted = QuantModuleRegistry.convert(model.moe.experts)
-
-            def _pack_weight_as_buffer(wrapper, dtype):
-                packed = torch.zeros((*wrapper.weight.shape, 1), dtype=torch.uint8)
-                del wrapper.weight
-                wrapper.register_buffer("weight", packed)
+            config = QuantizerAttributeConfig(
+                num_bits="iq2_xs",
+                block_sizes={-1: 256},
+                backend="ggml",
+                backend_extra_args={"search_impl": "auto"},
+            )
+            quantizers = list(converted.gate_up_proj_weight_quantizers) + list(
+                converted.down_proj_weight_quantizers
+            )
+            for quantizer in quantizers:
+                quantizer.set_from_attribute_config(config)
 
             monkeypatch.setattr(
-                "modelopt.torch.export.unified_export_hf._export_quantized_weight",
-                _pack_weight_as_buffer,
+                "modelopt.torch.export.unified_export_hf._pack_iq_weight",
+                lambda weight, *_args: torch.zeros(
+                    (weight.numel() // 256, 74), dtype=torch.uint8, device=weight.device
+                ),
             )
 
             _export_fused_experts(converted, torch.float16)
@@ -532,6 +540,9 @@ class TestExportFusedExperts:
                     key = f"{idx}.{projection}.weight"
                     assert key in state_dict
                     assert state_dict[key].dtype == torch.uint8
+                    assert isinstance(
+                        getattr(getattr(converted, str(idx)), projection).weight, nn.Parameter
+                    )
         finally:
             self._cleanup_registry(expert_type)
 

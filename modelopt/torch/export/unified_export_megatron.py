@@ -62,8 +62,6 @@ from .quant_format import (
     QUANTIZATION_FP8,
     QUANTIZATION_FP8_PB_REAL,
     QUANTIZATION_FP8_PB_WO,
-    QUANTIZATION_IQ1_S,
-    QUANTIZATION_IQ2_XS,
     QUANTIZATION_NONE,
     QUANTIZATION_NVFP4,
     QUANTIZATION_W4A16_NVFP4,
@@ -1235,7 +1233,7 @@ class GPTModelExporter:
             weight = weight + 1.0
         weight_scale, weight_scale_2 = self._get_weight_scales(name_to_value, qformat)
 
-        if qformat in (QUANTIZATION_IQ1_S, QUANTIZATION_IQ2_XS):
+        if qformat in IQ_FORMATS:
             self._state_dict.update(self._get_iq_weight_state(prefix + "weight", weight, qformat))
         elif weight_scale is None:
             self._state_dict[prefix + "weight"] = weight
@@ -1282,7 +1280,7 @@ class GPTModelExporter:
         gate_proj_weight = weight[:ffn_hidden_size, :]
         up_proj_weight = weight[ffn_hidden_size:, :]
 
-        if qformat in (QUANTIZATION_IQ1_S, QUANTIZATION_IQ2_XS):
+        if qformat in IQ_FORMATS:
             self._state_dict.update(
                 self._get_iq_weight_state(gate_proj_prefix + "weight", gate_proj_weight, qformat)
             )
@@ -1456,7 +1454,7 @@ class GPTModelExporter:
                 seen_qformat, seen_block_size = qformat, block_size
 
                 weight = state_dict[weight_key].to(self.dtype)
-                if qformat not in (QUANTIZATION_IQ1_S, QUANTIZATION_IQ2_XS):
+                if qformat not in IQ_FORMATS:
                     weight = weight.cpu()
                 weight_scale_cpu = (
                     weight_scale.detach().cpu().clone() if weight_scale is not None else None
@@ -1488,7 +1486,7 @@ class GPTModelExporter:
                     ]
 
                 for shard_prefix, shard_weight, shard_scale in shards:
-                    if qformat in (QUANTIZATION_IQ1_S, QUANTIZATION_IQ2_XS):
+                    if qformat in IQ_FORMATS:
                         local_expert_state.update(
                             self._get_iq_weight_state(
                                 shard_prefix + "weight", shard_weight, qformat
@@ -1657,7 +1655,7 @@ class GPTModelExporter:
         proj_weights = [_take(weight, s, hidden_size, g) for s, g in zip(slices, gated)]
         proj_keys = [p + "weight" for p in prefixes]
 
-        if qformat in (QUANTIZATION_IQ1_S, QUANTIZATION_IQ2_XS):
+        if qformat in IQ_FORMATS:
             for key, weight in zip(proj_keys, proj_weights):
                 self._state_dict.update(self._get_iq_weight_state(key, weight, qformat))
         elif weight_scale is None:
@@ -1775,7 +1773,7 @@ class GPTModelExporter:
         proj_keys = [p + "weight" for p in proj_prefixes]
         weight_scale, weight_scale_2 = self._get_weight_scales(name_to_value, qformat)
 
-        if qformat in (QUANTIZATION_IQ1_S, QUANTIZATION_IQ2_XS):
+        if qformat in IQ_FORMATS:
             for proj_prefix, proj_weight in zip(proj_prefixes, proj_weights):
                 if proj_prefix in keep_bf16:
                     self._state_dict[proj_prefix + "weight"] = proj_weight.cpu()
