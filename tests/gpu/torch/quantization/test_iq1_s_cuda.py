@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import pytest
 import torch
 
 import modelopt.torch.quantization.ggml.iq1_s as iq1_s_module
@@ -41,9 +42,10 @@ def test_iq1_s_cuda_extension_handles_multiple_scale_grid_blocks():
     assert normalized_mse < 0.25
 
 
-def test_iq1_s_cuda_quality_matches_cpu_reference_and_public_dispatch():
+@pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16, torch.float32])
+def test_iq1_s_cuda_quality_matches_cpu_reference_and_public_dispatch(dtype):
     generator = torch.Generator().manual_seed(5678)
-    weight_cpu = torch.randn((4, 512), generator=generator, dtype=torch.bfloat16)
+    weight_cpu = torch.randn((4, 512), generator=generator, dtype=dtype)
     reference, _ = quantize_iq1_s(weight_cpu)
     weight_cuda = weight_cpu.cuda()
 

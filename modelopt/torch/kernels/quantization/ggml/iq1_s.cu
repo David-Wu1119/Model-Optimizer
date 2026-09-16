@@ -55,16 +55,25 @@ template <typename scalar_t> __device__ __forceinline__ float load_float(const s
   return static_cast<float>(*input);
 }
 
-__device__ __forceinline__ float quant_error(float xnorm, float xsum, const float *x,
-                                             const int8_t *q, float qnorm, float qsum, float scale,
-                                             float delta) {
+__device__ __forceinline__ float quant_dot(const float *x, const int8_t *q) {
   float dot = 0.0f;
 #pragma unroll
   for (int j = 0; j < kVectorSize; ++j)
     dot = fmaf(x[j], static_cast<float>(q[j]), dot);
+  return dot;
+}
+
+__device__ __forceinline__ float shifted_error(float xnorm, float dot, float xsum, float qnorm,
+                                               float qsum, float scale, float delta) {
   const float shifted_dot = dot + delta * xsum;
   const float shifted_norm = qnorm + 2.0f * delta * qsum + 8.0f * delta * delta;
   return fmaxf(fmaf(scale * scale, shifted_norm, fmaf(-2.0f * scale, shifted_dot, xnorm)), 0.0f);
+}
+
+__device__ __forceinline__ float quant_error(float xnorm, float xsum, const float *x,
+                                             const int8_t *q, float qnorm, float qsum, float scale,
+                                             float delta) {
+  return shifted_error(xnorm, quant_dot(x, q), xsum, qnorm, qsum, scale, delta);
 }
 
 template <typename scalar_t>
@@ -169,10 +178,7 @@ __global__ void encode(const scalar_t *input, int64_t num_blocks, const float *g
         local_best[choice] = FLT_MAX;
       for (int entry = tid; entry < kEntries; entry += kThreads) {
         const int8_t *q = shared_grid + entry * kVectorSize;
-        float dot = 0.0f;
-#pragma unroll
-        for (int j = 0; j < kVectorSize; ++j)
-          dot = fmaf(x[j], static_cast<float>(q[j]), dot);
+        const float dot = quant_dot(x, q);
         const float qnorm = static_cast<float>(grid_norm[entry]);
         const float qsum = static_cast<float>(grid_sum[entry]);
 #pragma unroll
@@ -180,10 +186,7 @@ __global__ void encode(const scalar_t *input, int64_t num_blocks, const float *g
           const int local = choice & (kLocalScales - 1);
           const float delta = choice < kLocalScales ? kDelta : -kDelta;
           const float scale = d * (2 * local + 1);
-          const float shifted_dot = dot + delta * xsum;
-          const float shifted_norm = qnorm + 2.0f * delta * qsum + 8.0f * delta * delta;
-          const float error = fmaxf(
-              fmaf(scale * scale, shifted_norm, fmaf(-2.0f * scale, shifted_dot, xnorm)), 0.0f);
+          const float error = shifted_error(xnorm, dot, xsum, qnorm, qsum, scale, delta);
           local_best[choice] = fminf(local_best[choice], error);
         }
       }
