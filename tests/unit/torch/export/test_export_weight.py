@@ -14,6 +14,8 @@
 # limitations under the License.
 
 
+from types import SimpleNamespace
+
 import pytest
 import torch
 import torch.nn as nn
@@ -28,6 +30,7 @@ from modelopt.torch.export.quant_utils import (
 )
 from modelopt.torch.export.unified_export_hf import (
     _export_quantized_weight,
+    _export_transformers_checkpoint,
     _process_quantized_modules,
     export_hf_checkpoint,
 )
@@ -329,6 +332,30 @@ def test_export_hf_checkpoint_runs_iq_shape_preflight_before_mutation(tmp_path):
 
     assert linear.weight.dtype == torch.bfloat16
     assert torch.equal(linear.weight, original_weight)
+
+
+def test_export_transformers_checkpoint_runs_iq_shape_preflight_before_mutation():
+    model = nn.Sequential(
+        nn.Linear(256, 4, bias=False, dtype=torch.bfloat16),
+        nn.Linear(192, 4, bias=False, dtype=torch.bfloat16),
+    )
+    model.config = SimpleNamespace(torch_dtype=torch.bfloat16)
+    for linear in model:
+        linear.weight_quantizer = TensorQuantizer(
+            QuantizerAttributeConfig(
+                num_bits="iq2_xs",
+                block_sizes={-1: 256},
+                backend="ggml",
+            )
+        )
+    original_weights = [linear.weight.detach().clone() for linear in model]
+
+    with pytest.raises(ValueError, match=r"1\.weight: \(4, 192\)"):
+        _export_transformers_checkpoint(model)
+
+    for linear, original_weight in zip(model, original_weights):
+        assert linear.weight.dtype == torch.bfloat16
+        assert torch.equal(linear.weight, original_weight)
 
 
 @pytest.mark.parametrize("num_bits", ["iq1_s", "iq2_xs"])

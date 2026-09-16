@@ -988,6 +988,7 @@ def _prepare_model_for_export(model, dtype, is_modelopt_qlora):
     the quant config.
     """
     dtype = _resolve_export_dtype(model, dtype)
+    _validate_iq_export_weight_shapes(model)
     # One tied-weight map for the whole export (amax sync + final dedup in postprocess_state_dict).
     # Sourced from HF's name-based all_tied_weights_keys, so it is correct even under FSDP/offload.
     tied_map = TiedWeightMap(model)
