@@ -22,6 +22,8 @@ from typing import Any
 
 import torch
 
+from modelopt.torch.utils.logging import warn_rank_0
+
 try:
     from torch._guards import detect_fake_mode as _torch_detect_fake_mode
 except ImportError:  # pragma: no cover - compatibility with older PyTorch versions
@@ -134,6 +136,13 @@ def cached_reconstruction(
         # phase. Explicit cache invalidation starts a new phase and permits caching again.
         cache.clear()
         cache["abandoned"] = True
+        warn_rank_0(
+            f"{cache_namespace}: reconstruction cache abandoned because the source weight "
+            "storage was replaced or freed (for example, by a device or dtype move, or "
+            "per-forward weight materialization under CPU offload). Every forward will now "
+            "rerun the full codebook search. Call clear_reconstruction_cache() and then "
+            "freeze_reconstruction_cache() after the move to re-enable caching."
+        )
 
     cache_active = cache_enabled and not cache.get("abandoned", False)
 

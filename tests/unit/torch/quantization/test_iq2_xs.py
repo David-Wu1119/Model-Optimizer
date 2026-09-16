@@ -57,6 +57,23 @@ def test_iq2_xs_fake_grid_does_not_poison_real_grid_cache():
     assert not isinstance(iq2_xs_grid(), FakeTensor)
 
 
+def test_iq2_xs_fake_mode_uses_one_default_chunk(monkeypatch):
+    chunk_sizes = []
+
+    def fake_encode(blocks, _grid):
+        chunk_sizes.append(blocks.shape[0])
+        return torch.empty(
+            (blocks.shape[0], IQ2_XS_BLOCK_BYTES), dtype=torch.uint8, device=blocks.device
+        )
+
+    monkeypatch.setattr(iq2_xs_module, "_encode_blocks", fake_encode)
+    with FakeTensorMode():
+        packed, _ = quantize_iq2_xs(torch.empty(65, 256))
+
+    assert isinstance(packed, FakeTensor)
+    assert chunk_sizes == [65]
+
+
 def test_iq2_xs_zero_block_has_canonical_zero_encoding():
     weight = torch.zeros((2, 256), dtype=torch.bfloat16)
 

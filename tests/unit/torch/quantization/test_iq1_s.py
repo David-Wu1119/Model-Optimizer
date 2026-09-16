@@ -73,6 +73,23 @@ def test_iq1_s_fake_grid_does_not_poison_real_grid_cache():
     assert not isinstance(iq1_s_grid(), FakeTensor)
 
 
+def test_iq1_s_fake_mode_uses_one_default_chunk(monkeypatch):
+    chunk_sizes = []
+
+    def fake_encode(blocks, _grid):
+        chunk_sizes.append(blocks.shape[0])
+        return torch.empty(
+            (blocks.shape[0], IQ1_S_BLOCK_BYTES), dtype=torch.uint8, device=blocks.device
+        )
+
+    monkeypatch.setattr(iq1_s_module, "_encode_blocks", fake_encode)
+    with FakeTensorMode():
+        packed, _ = quantize_iq1_s(torch.empty(65, 256))
+
+    assert isinstance(packed, FakeTensor)
+    assert chunk_sizes == [65]
+
+
 def test_iq1_s_zero_block_has_canonical_zero_encoding():
     weight = torch.zeros((2, 256), dtype=torch.bfloat16)
 
@@ -272,6 +289,7 @@ def test_iq1_s_fake_quant_preserves_a_foreign_dict_cache():
 
 def test_iq1_s_fake_quant_abandons_cache_for_transient_inputs(monkeypatch):
     calls = 0
+    warning_messages = []
     original_quantize = iq1_s_module._quantize_iq1_s_packed
 
     def counting_quantize(weight):
@@ -280,6 +298,7 @@ def test_iq1_s_fake_quant_abandons_cache_for_transient_inputs(monkeypatch):
         return original_quantize(weight)
 
     monkeypatch.setattr(iq1_s_module, "_quantize_iq1_s_packed", counting_quantize)
+    monkeypatch.setattr(ggml_common, "warn_rank_0", warning_messages.append)
     quantizer = TensorQuantizer(
         QuantizerAttributeConfig(
             num_bits="iq1_s",
@@ -297,10 +316,13 @@ def test_iq1_s_fake_quant_abandons_cache_for_transient_inputs(monkeypatch):
 
     quantizer(torch.randn(1, 256, dtype=torch.bfloat16).float())
     assert quantizer._reconstruction_cache == {"abandoned": True}
+    assert len(warning_messages) == 1
+    assert "reconstruction cache abandoned" in warning_messages[0]
 
     quantizer(torch.randn(1, 256, dtype=torch.bfloat16).float())
     assert calls == 3
     assert quantizer._reconstruction_cache == {"abandoned": True}
+    assert len(warning_messages) == 1
 
 
 def test_cached_reconstruction_bypasses_storage_identity_in_fake_mode(monkeypatch):

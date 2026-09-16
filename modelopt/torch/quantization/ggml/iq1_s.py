@@ -67,6 +67,7 @@ from .common import (
     GGML_BLOCK_SIZE,
     _cached_grid_from_bytes,
     cached_reconstruction,
+    detect_fake_mode,
     validate_packed_weights,
     validate_weight,
 )
@@ -242,7 +243,11 @@ def _quantize_iq1_s_packed(
     """Pack a weight without allocating the public logical-shape tensor."""
     validate_weight(weight, "IQ1_S")
     if block_chunk_size is None:
-        block_chunk_size = 4096 if weight.is_cuda else 64
+        if detect_fake_mode(weight) is not None:
+            # Tracing allocates no tensor storage, so chunking only unrolls the graph.
+            block_chunk_size = max(1, weight.numel() // IQ1_S_BLOCK_SIZE)
+        else:
+            block_chunk_size = 4096 if weight.is_cuda else 64
     if block_chunk_size <= 0:
         raise ValueError(f"block_chunk_size must be positive, got {block_chunk_size}")
 
