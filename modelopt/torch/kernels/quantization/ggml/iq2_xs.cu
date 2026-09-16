@@ -96,8 +96,7 @@ __device__ __forceinline__ ParityDot even_parity_dot(const float *x, const int8_
 }
 
 template <typename scalar_t>
-__global__ void encode(const scalar_t *input, int64_t num_blocks, const float *grid,
-                       uint8_t *output) {
+__global__ void encode(const scalar_t *input, const float *grid, uint8_t *output) {
   // Canonical IQ2_XS magnitudes are at most 43 and therefore fit in int8_t.
   __shared__ int8_t shared_grid[kEntries * kVectorSize];
   __shared__ float grid_norm[kEntries];
@@ -116,9 +115,8 @@ __global__ void encode(const scalar_t *input, int64_t num_blocks, const float *g
   const int tid = threadIdx.x;
   const int lane = tid & (kWarpSize - 1);
   const int warp = tid / kWarpSize;
+  // The launch grid contains exactly one CTA per 256-value payload.
   const int64_t block = blockIdx.x;
-  if (block >= num_blocks)
-    return;
   const scalar_t *source = input + block * kBlockSize;
   uint8_t *payload = output + block * kPayloadBytes;
   const float value = tid < kBlockSize ? modelopt::ggml_pack::load_float(source + tid) : 0.0f;
@@ -298,8 +296,7 @@ at::Tensor iq2_xs_pack_cuda(at::Tensor input, at::Tensor grid, bool validate_gri
   AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half, at::ScalarType::BFloat16, input.scalar_type(), "iq2_xs_pack", [&] {
         encode<scalar_t><<<static_cast<int>(num_blocks), kThreads, 0, stream>>>(
-            input.data_ptr<scalar_t>(), num_blocks, grid.data_ptr<float>(),
-            output.data_ptr<uint8_t>());
+            input.data_ptr<scalar_t>(), grid.data_ptr<float>(), output.data_ptr<uint8_t>());
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
   return output;

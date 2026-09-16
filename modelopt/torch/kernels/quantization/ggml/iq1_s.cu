@@ -88,8 +88,7 @@ __device__ __forceinline__ float quant_error(float xnorm, float xsum, const floa
 }
 
 template <typename scalar_t>
-__global__ void encode(const scalar_t *input, int64_t num_blocks, const float *grid,
-                       uint8_t *output) {
+__global__ void encode(const scalar_t *input, const float *grid, uint8_t *output) {
   __shared__ int8_t shared_grid[kEntries * kVectorSize];
   // The canonical ternary grid has |q| <= 1, so its 8-value norm and sum fit below.
   __shared__ uint8_t grid_norm[kEntries];
@@ -108,9 +107,8 @@ __global__ void encode(const scalar_t *input, int64_t num_blocks, const float *g
   const int tid = threadIdx.x;
   const int lane = tid & (kWarpSize - 1);
   const int warp = tid / kWarpSize;
+  // The launch grid contains exactly one CTA per 256-value payload.
   const int64_t block = blockIdx.x;
-  if (block >= num_blocks)
-    return;
 
   const scalar_t *source = input + block * kBlockSize;
   uint8_t *payload = output + block * kPayloadBytes;
@@ -287,8 +285,7 @@ at::Tensor iq1_s_pack_cuda(at::Tensor input, at::Tensor grid, bool validate_grid
   AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half, at::ScalarType::BFloat16, input.scalar_type(), "iq1_s_pack", [&] {
         encode<scalar_t><<<static_cast<int>(num_blocks), kThreads, 0, stream>>>(
-            input.data_ptr<scalar_t>(), num_blocks, grid.data_ptr<float>(),
-            output.data_ptr<uint8_t>());
+            input.data_ptr<scalar_t>(), grid.data_ptr<float>(), output.data_ptr<uint8_t>());
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
   return output;

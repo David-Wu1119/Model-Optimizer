@@ -62,6 +62,19 @@ __device__ __forceinline__ void stage_grid_int8(const float *grid, int8_t *share
     shared_grid[i] = static_cast<int8_t>(grid[i]);
 }
 
+// Accumulate per-choice block minima into group_error.
+//
+// Preconditions:
+//   * Every thread in the block must reach this call -- warp_min uses full-mask shuffles,
+//     so a divergent caller gets undefined results.
+//   * blockDim.x = Warps * warpSize and blockDim.x >= Choices; warp_best has at least
+//     Warps * Choices elements and group_error at least Choices.
+//   * group_error is accumulated into, so the caller must zero it before the first call
+//     of each group.
+//
+// Postconditions:
+//   * group_error[choice] grows by the block-wide minimum of local_best[choice].
+//   * Ends with a barrier, so warp_best and group_error may be reused immediately.
 template <int Choices, int Warps>
 __device__ __forceinline__ void accumulate_choice_min(const float (&local_best)[Choices],
                                                       float *warp_best, float *group_error, int tid,
