@@ -279,6 +279,33 @@ def test_iq2_xs_frozen_cache_hit_still_validates_search_implementation():
         quantizer(weight)
 
 
+def test_iq2_xs_frozen_cache_misses_after_search_implementation_change(monkeypatch):
+    calls = []
+    original_quantize = iq2_xs_module._quantize_iq2_xs_packed
+
+    def counting_quantize(weight, **kwargs):
+        calls.append(kwargs["search_impl"])
+        return original_quantize(weight, **kwargs)
+
+    monkeypatch.setattr(iq2_xs_module, "_quantize_iq2_xs_packed", counting_quantize)
+    quantizer = TensorQuantizer(
+        QuantizerAttributeConfig(
+            num_bits="iq2_xs",
+            block_sizes={-1: 256},
+            backend="ggml",
+            backend_extra_args={"search_impl": "auto"},
+        )
+    ).eval()
+    quantizer.freeze_reconstruction_cache()
+    weight = torch.ones(1, 256)
+
+    quantizer(weight)
+    quantizer.backend_extra_args["search_impl"] = "reference"
+    quantizer(weight)
+
+    assert calls == ["auto", "reference"]
+
+
 def test_iq2_xs_fake_quant_has_pass_through_gradient():
     class Quantizer:
         num_bits = "iq2_xs"

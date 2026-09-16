@@ -83,9 +83,18 @@ __device__ __forceinline__ void accumulate_choice_min(const float (&local_best)[
   __syncthreads();
 }
 
+// Block-wide minimum over a packed comparison key.
+//
+// Preconditions:
+//   * Every thread in the block must reach this call -- the warp reduction uses full-mask
+//     shuffles, so a divergent caller gets undefined results.
+//   * Threads = Warps * warpSize, and warp_keys has at least Warps elements.
+//
+// Postconditions:
+//   * Only thread 0 receives the block minimum; other threads retain their warp-local value.
+//   * No trailing barrier: the caller must consume the result in thread 0 and reach a
+//     __syncthreads() before any thread overwrites warp_keys.
 template <int Warps>
-// Only thread 0 receives the block minimum; other threads retain their warp-local value.
-// There is no trailing barrier, so callers must consume the block result in thread 0 before sync.
 __device__ __forceinline__ unsigned long long
 block_min_key(unsigned long long key, unsigned long long *warp_keys, int tid, int lane, int warp) {
   key = warp_min_key(key);

@@ -272,10 +272,12 @@ at::Tensor iq1_s_pack_cuda(at::Tensor input, at::Tensor grid, bool validate_grid
   TORCH_CHECK(input.get_device() == grid.get_device(), "input and grid must share a device");
   c10::cuda::CUDAGuard guard(input.device());
   if (validate_grid) {
+    // The bound is semantic, not a staging limit: the IQ1_S grid is ternary, and kNativeMax
+    // (1.125 * 15) is derived from |q + kDelta| <= 1.125.
     const auto valid = grid.eq(grid.trunc()).logical_and(grid.ge(-1.0f)).logical_and(grid.le(1.0f));
-    TORCH_CHECK(
-        valid.all().item<bool>(),
-        "grid values must be integral and within [-1, 1] for compact shared-memory staging");
+    TORCH_CHECK(valid.all().item<bool>(),
+                "grid values must be integral and within [-1, 1]: IQ1_S is a ternary codebook "
+                "and the shifted-scale envelope assumes |q| <= 1");
   }
   const int64_t num_blocks = input.numel() / kBlockSize;
   TORCH_CHECK(num_blocks <= std::numeric_limits<int>::max(), "IQ1_S CUDA grid is too large");

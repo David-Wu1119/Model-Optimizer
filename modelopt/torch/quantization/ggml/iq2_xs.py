@@ -377,7 +377,7 @@ def iq2_xs_fake_quant(inputs: torch.Tensor, quantizer) -> torch.Tensor:
     reconstructed = cached_reconstruction(
         inputs,
         quantizer,
-        cache_namespace="iq2_xs",
+        cache_namespace=f"iq2_xs_{search_impl}",
         quantize=lambda weight: _quantize_iq2_xs_packed(weight, search_impl=search_impl),
         dequantize=dequantize_iq2_xs,
     )

@@ -360,7 +360,7 @@ def iq1_s_fake_quant(inputs: torch.Tensor, quantizer) -> torch.Tensor:
     reconstructed = cached_reconstruction(
         inputs,
         quantizer,
-        cache_namespace="iq1_s",
+        cache_namespace=f"iq1_s_{search_impl}",
         quantize=lambda weight: _quantize_iq1_s_packed(weight, search_impl=search_impl),
         dequantize=dequantize_iq1_s,
     )
