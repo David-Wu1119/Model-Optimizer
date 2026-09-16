@@ -33,3 +33,11 @@ def test_cuda_ext_fp8():
 
 def test_cuda_ext_mx():
     assert ext.get_cuda_ext_mx() is not None
+
+
+def test_cuda_ext_iq1_s():
+    assert ext.get_cuda_ext_iq1_s() is not None
+
+
+def test_cuda_ext_iq2_xs():
+    assert ext.get_cuda_ext_iq2_xs() is not None

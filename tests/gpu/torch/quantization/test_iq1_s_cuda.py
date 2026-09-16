@@ -20,6 +20,8 @@ import modelopt.torch.quantization.ggml.iq1_s as iq1_s_module
 from modelopt.torch.quantization.extensions import get_cuda_ext_iq1_s
 from modelopt.torch.quantization.ggml.iq1_s import dequantize_iq1_s, iq1_s_grid, quantize_iq1_s
 
+pytestmark = pytest.mark.timeout(240)
+
 
 def _extension():
     extension = get_cuda_ext_iq1_s(raise_if_failed=True)

@@ -82,6 +82,7 @@ def get_cuda_ext_mx(raise_if_failed: bool = False):
 
 def get_cuda_ext_iq1_s(raise_if_failed: bool = False):
     """Return the GGML-compatible IQ1_S packing extension."""
+    # A strict caller may follow an optional build that cached ``None``; retry so it fails loudly.
     if not hasattr(get_cuda_ext_iq1_s, "extension") or (
         raise_if_failed and get_cuda_ext_iq1_s.extension is None
     ):
@@ -98,6 +99,7 @@ def get_cuda_ext_iq1_s(raise_if_failed: bool = False):
 
 def get_cuda_ext_iq2_xs(raise_if_failed: bool = False):
     """Return the GGML-compatible IQ2_XS packing extension."""
+    # A strict caller may follow an optional build that cached ``None``; retry so it fails loudly.
     if not hasattr(get_cuda_ext_iq2_xs, "extension") or (
         raise_if_failed and get_cuda_ext_iq2_xs.extension is None
     ):
@@ -119,10 +121,6 @@ def __getattr__(name):
         return get_cuda_ext_fp8()
     elif name == "cuda_ext_mx":
         return get_cuda_ext_mx()
-    elif name == "cuda_ext_iq1_s":
-        return get_cuda_ext_iq1_s()
-    elif name == "cuda_ext_iq2_xs":
-        return get_cuda_ext_iq2_xs()
     else:
         raise AttributeError(f"module {__name__} has no attribute {name}")
 

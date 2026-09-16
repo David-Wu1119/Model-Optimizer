@@ -33,6 +33,7 @@ namespace {
 constexpr int kBlockSize = 256;
 constexpr int kVectorSize = 8;
 constexpr int kEntries = 2048;
+constexpr int kEntryMask = kEntries - 1;
 constexpr int kGroups = 8;
 constexpr int kVectorsPerGroup = kBlockSize / (kGroups * kVectorSize);
 constexpr int kGroupValues = kVectorsPerGroup * kVectorSize;
@@ -54,6 +55,7 @@ static_assert(kWarpSize == 32, "the shuffle reductions below start at delta = 16
 static_assert(kThreads >= kBlockSize, "shared_input is filled one value per thread");
 static_assert(kThreads >= kPayloadBytes, "the zero-block path writes one byte per thread");
 static_assert(kThreads >= kChoices, "choice reductions assign one thread per choice");
+static_assert(kEntries == 2048, "the packed code stores an 11-bit grid index");
 static_assert(kGroups * kGroupValues == kBlockSize, "group tiling must cover the block");
 static_assert(kPayloadBytes == kMetadataOffset + 2 * kGroups,
               "payload layout must match scale, index, and metadata fields");
@@ -264,7 +266,7 @@ __global__ void encode(const scalar_t *input, int64_t num_blocks, const float *g
 #pragma unroll
         for (int w = 1; w < kWarps; ++w)
           key = warp_keys[w] < key ? warp_keys[w] : key;
-        const uint16_t entry = static_cast<uint16_t>(key & 0x7ff);
+        const uint16_t entry = static_cast<uint16_t>(key & kEntryMask);
         selected_entries[vector] = entry;
         payload[kIndexOffset + group * kVectorsPerGroup + vector] = static_cast<uint8_t>(entry);
       }
@@ -276,7 +278,8 @@ __global__ void encode(const scalar_t *input, int64_t num_blocks, const float *g
 #pragma unroll
       for (int vector = 0; vector < kVectorsPerGroup; ++vector)
         qh |= static_cast<uint16_t>(((selected_entries[vector] >> 8) & 7) << (3 * vector));
-      qh |= static_cast<uint16_t>((selected_local << 12) | ((selected_choice >> 3) << 15));
+      qh |=
+          static_cast<uint16_t>((selected_local << 12) | ((selected_choice / kLocalScales) << 15));
       payload[kMetadataOffset + 2 * group] = static_cast<uint8_t>(qh);
       payload[kMetadataOffset + 2 * group + 1] = static_cast<uint8_t>(qh >> 8);
     }

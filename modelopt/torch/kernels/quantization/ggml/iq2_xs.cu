@@ -33,6 +33,7 @@ namespace {
 constexpr int kBlockSize = 256;
 constexpr int kVectorSize = 8;
 constexpr int kEntries = 512;
+constexpr int kEntryMask = kEntries - 1;
 constexpr int kGroups = 16;
 constexpr int kVectorsPerGroup = kBlockSize / (kGroups * kVectorSize);
 constexpr int kGroupValues = kVectorsPerGroup * kVectorSize;
@@ -54,7 +55,9 @@ constexpr float kMaxAnchor = 0.92f;
 static_assert(kThreads % kWarpSize == 0);
 static_assert(kWarpSize == 32, "the shuffle reductions below start at delta = 16");
 static_assert(kThreads >= kBlockSize, "shared_input is filled one value per thread");
+static_assert(kThreads >= kLocalScales, "local-scale reductions assign one thread per scale");
 static_assert(kThreads >= kGroups / 2, "local-scale bytes are written one per thread");
+static_assert(kEntries == 512, "the packed code stores a 9-bit grid index");
 static_assert(kGroups * kGroupValues == kBlockSize, "group tiling must cover the block");
 static_assert(kPayloadBytes == kLocalScaleOffset + kGroups / 2,
               "payload layout must match scale, code, and local-scale fields");
@@ -153,8 +156,6 @@ __global__ void encode(const scalar_t *input, int64_t num_blocks, const float *g
   if (tid < kBlockSize)
     shared_input[tid] = load_float(source + tid);
   __syncthreads();
-  // A zero scale makes row 0, no signs, and local scale 0 win each tie, so a zero block
-  // naturally emits an all-zero payload without a separate branch.
   if (tid < kBlockSize / kVectorSize) {
     float norm = 0.0f;
     int negative_count = 0;
@@ -171,6 +172,9 @@ __global__ void encode(const scalar_t *input, int64_t num_blocks, const float *g
 
 #pragma unroll 1
   for (int group = 0; group < kGroups; ++group) {
+    // A zero scale ties every candidate error, so the key selects entry 0 and local scale 0; an
+    // all-zero block additionally has no negative values, so its payload is all zero without a
+    // separate branch, matching the reference encoder.
     if (tid < kLocalScales)
       group_error[tid] = 0.0f;
     __syncthreads();
@@ -261,7 +265,7 @@ __global__ void encode(const scalar_t *input, int64_t num_blocks, const float *g
 #pragma unroll
         for (int w = 1; w < kWarps; ++w)
           key = warp_keys[w] < key ? warp_keys[w] : key;
-        const int entry = static_cast<int>(key & 0x1ff);
+        const int entry = static_cast<int>(key & kEntryMask);
         const int8_t *q = shared_grid + entry * kVectorSize;
         int flip_index = 0;
         float weakest = fabsf(x[0]) * q[0];

@@ -20,6 +20,8 @@ import modelopt.torch.quantization.ggml.iq2_xs as iq2_xs_module
 from modelopt.torch.quantization.extensions import get_cuda_ext_iq2_xs
 from modelopt.torch.quantization.ggml.iq2_xs import dequantize_iq2_xs, iq2_xs_grid, quantize_iq2_xs
 
+pytestmark = pytest.mark.timeout(240)
+
 
 def _extension():
     extension = get_cuda_ext_iq2_xs(raise_if_failed=True)
