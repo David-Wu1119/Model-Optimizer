@@ -257,6 +257,30 @@ def test_export_iq_shape_preflight_reports_grouped_weights():
     assert "experts.weight0" not in message
 
 
+def test_export_iq_shape_preflight_reports_grouped_quantizers_beyond_num_gemms():
+    class GroupedLinear(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.num_gemms = 1
+            self.weight0 = nn.Parameter(torch.ones(4, 256, dtype=torch.bfloat16))
+            self.weight1 = nn.Parameter(torch.ones(4, 192, dtype=torch.bfloat16))
+            quantizer_config = QuantizerAttributeConfig(
+                num_bits="iq2_xs",
+                block_sizes={-1: 256},
+                backend="ggml",
+            )
+            self.weight_quantizer = GroupedQuantizer(
+                TensorQuantizer(quantizer_config),
+                TensorQuantizer(quantizer_config),
+            )
+
+    model = nn.Module()
+    model.experts = GroupedLinear()
+
+    with pytest.raises(ValueError, match=r"experts\.weight1: \(4, 192\)"):
+        _validate_iq_export_weight_shapes(model)
+
+
 def test_export_iq_preflight_rejects_nonstandard_weight_before_mutation(tmp_path):
     class CustomWeightModule(nn.Module):
         def __init__(self):

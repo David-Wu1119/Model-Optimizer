@@ -145,7 +145,7 @@ def _iq_export_weight_shape_errors(model: nn.Module) -> list[str]:
         grouped_quantizer = getattr(module, "weight_quantizer", None)
         if isinstance(grouped_quantizer, GroupedQuantizer) and len(grouped_quantizer) > 0:
             num_gemms = int(getattr(module, "num_gemms", len(grouped_quantizer)))
-            for index in range(num_gemms):
+            for index in range(max(num_gemms, len(grouped_quantizer))):
                 quantizer = grouped_quantizer[min(index, len(grouped_quantizer) - 1)]
                 # Grouped linears are rebuilt as standard per-expert modules before packing.
                 inspect_weight(f"weight{index}", quantizer, allow_nonstandard_name=True)
