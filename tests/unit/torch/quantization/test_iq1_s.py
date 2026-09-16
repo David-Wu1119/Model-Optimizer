@@ -175,7 +175,7 @@ def test_iq1_s_cache_is_frozen_after_quantization():
     mtq.quantize(model, config)
 
     assert model.weight_quantizer._reconstruction_cache_frozen
-    assert model.weight_quantizer._quantizer_cache is None
+    assert model.weight_quantizer._reconstruction_cache is None
 
 
 def test_iq1_s_fake_quant_reuses_cached_reconstruction(monkeypatch):
@@ -218,7 +218,7 @@ def test_iq1_s_fake_quant_reuses_cached_reconstruction(monkeypatch):
 
     weight.data.add_(1)
     quantizer.reset_amax()
-    assert quantizer._quantizer_cache is None
+    assert quantizer._reconstruction_cache is None
     quantizer.freeze_quantizer_cache()
     quantizer(weight)
     assert calls == 6
@@ -245,7 +245,7 @@ def test_iq1_s_fake_quant_preserves_a_foreign_cache_object():
     assert quantizer._quantizer_cache is foreign_cache
 
 
-def test_iq1_s_fake_quant_preserves_foreign_dict_entries_when_cache_is_disabled():
+def test_iq1_s_fake_quant_preserves_a_foreign_dict_cache():
     quantizer = TensorQuantizer(
         QuantizerAttributeConfig(
             num_bits="iq1_s",
@@ -255,11 +255,70 @@ def test_iq1_s_fake_quant_preserves_foreign_dict_entries_when_cache_is_disabled(
         )
     ).eval()
     foreign_value = object()
-    quantizer._quantizer_cache = {"foreign": foreign_value, "iq1_s_packed": torch.empty(0)}
+    foreign_cache = {"foreign": foreign_value, "iq1_s_packed": torch.empty(0)}
+    quantizer._quantizer_cache = foreign_cache
 
     quantizer(torch.randn(1, 256))
 
-    assert quantizer._quantizer_cache == {"foreign": foreign_value}
+    assert quantizer._quantizer_cache is foreign_cache
+
+
+def test_iq1_s_fake_quant_abandons_cache_for_transient_inputs(monkeypatch):
+    calls = 0
+    original_quantize = iq1_s_module.quantize_iq1_s
+
+    def counting_quantize(weight):
+        nonlocal calls
+        calls += 1
+        return original_quantize(weight)
+
+    monkeypatch.setattr(iq1_s_module, "quantize_iq1_s", counting_quantize)
+    quantizer = TensorQuantizer(
+        QuantizerAttributeConfig(
+            num_bits="iq1_s",
+            block_sizes={-1: 256},
+            backend="ggml",
+            backend_extra_args={"search_impl": "auto"},
+        )
+    ).eval()
+    quantizer.freeze_quantizer_cache()
+
+    temporary = torch.randn(1, 256, dtype=torch.bfloat16).float()
+    quantizer(temporary)
+    del temporary
+    gc.collect()
+
+    quantizer(torch.randn(1, 256, dtype=torch.bfloat16).float())
+    assert quantizer._reconstruction_cache == {"abandoned": True}
+
+    quantizer(torch.randn(1, 256, dtype=torch.bfloat16).float())
+    assert calls == 3
+    assert quantizer._reconstruction_cache == {"abandoned": True}
+
+
+def test_cached_reconstruction_bypasses_storage_identity_in_fake_mode(monkeypatch):
+    quantizer = TensorQuantizer().eval()
+    quantizer.freeze_quantizer_cache()
+    existing_cache = {"existing": object()}
+    quantizer._reconstruction_cache = existing_cache
+    monkeypatch.setattr(
+        ggml_common,
+        "_cache_identity",
+        lambda _inputs: pytest.fail("fake tensors must not use storage identity"),
+    )
+
+    with FakeTensorMode() as mode:
+        inputs = mode.from_tensor(torch.randn(1, 256))
+        output = ggml_common.cached_reconstruction(
+            inputs,
+            quantizer,
+            cache_namespace="test",
+            quantize=lambda value: (value, torch.empty(0)),
+            dequantize=lambda packed, _shape, dtype: packed.to(dtype),
+        )
+
+    assert isinstance(output, FakeTensor)
+    assert quantizer._reconstruction_cache is existing_cache
 
 
 def test_iq1_s_fake_quant_skips_storage_identity_when_cache_is_disabled(monkeypatch):

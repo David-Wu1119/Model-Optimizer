@@ -164,12 +164,15 @@ def test_quantizer_config_edits_clear_payload_without_unfreezing_weight_cache():
         QuantizerAttributeConfig(num_bits=8, backend=backend_name)
     )
     model.weight_quantizer.freeze_quantizer_cache()
-    model.weight_quantizer._quantizer_cache = {"payload": object()}
+    backend_cache = {"payload": object()}
+    model.weight_quantizer._quantizer_cache = backend_cache
+    model.weight_quantizer._reconstruction_cache = {"payload": object()}
 
     try:
         mtq.disable_quantizer(model, "*weight_quantizer")
         assert model.weight_quantizer._reconstruction_cache_frozen
-        assert model.weight_quantizer._quantizer_cache is None
+        assert model.weight_quantizer._reconstruction_cache is None
+        assert model.weight_quantizer._quantizer_cache is backend_cache
 
         with mtq.set_quantizer_by_cfg_context(
             model, [{"quantizer_name": "*weight_quantizer", "enable": True}]

@@ -222,6 +222,8 @@ class TensorQuantizer(nn.Module):
         "pre_bwd_fn",
         # quantizer cache for custom backends, like luts
         "_quantizer_cache",
+        # Runtime-only packed reconstruction payload owned by ModelOpt.
+        "_reconstruction_cache",
         # Runtime-only set of storage attributes tied to shared state. The tied
         # aliases are rebuilt from calibration config and tensor state during restore.
         "_shared_quant_tied_attrs",
@@ -267,6 +269,7 @@ class TensorQuantizer(nn.Module):
 
         # Optional quantizer cache for caching quantizer related encoding or tensors.
         self._quantizer_cache = None
+        self._reconstruction_cache = None
         self._reconstruction_cache_frozen = False
 
     def set_from_attribute_config(self, attribute_cfg: QuantizerAttributeConfig | dict[str, Any]):
@@ -435,12 +438,8 @@ class TensorQuantizer(nn.Module):
         self.reset_bias()
 
     def clear_quantizer_cache(self):
-        """Drop a dict-valued reconstruction cache while preserving frozen eligibility.
-
-        A non-dict cache object belongs to another backend and is left intact.
-        """
-        if isinstance(self._quantizer_cache, dict):
-            self._quantizer_cache = None
+        """Drop the ModelOpt reconstruction payload while preserving backend-owned caches."""
+        self._reconstruction_cache = None
 
     def freeze_quantizer_cache(self):
         """Declare source weights frozen for a backend that caches reconstructions."""

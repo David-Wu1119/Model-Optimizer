@@ -21,6 +21,7 @@ from collections.abc import Callable
 from typing import Any
 
 import torch
+from torch._guards import detect_fake_mode
 
 GGML_BLOCK_SIZE = 256
 
@@ -64,10 +65,12 @@ def cached_reconstruction(
     distinguishes live allocations without retaining temporary input buffers. Callers that
     rewrite a frozen weight must clear its quantizer cache before the next forward.
     """
-    raw_cache = getattr(quantizer, "_quantizer_cache", None)
+    raw_cache = getattr(quantizer, "_reconstruction_cache", None)
+    in_fake_mode = detect_fake_mode() is not None
     cache_enabled = (
         not getattr(quantizer, "training", True)
         and getattr(quantizer, "_reconstruction_cache_frozen", False)
+        and not in_fake_mode
         and (raw_cache is None or isinstance(raw_cache, dict))
     )
     storage_key = f"{cache_namespace}_storage"
@@ -77,15 +80,28 @@ def cached_reconstruction(
 
     cache: dict[str, Any] = raw_cache if isinstance(raw_cache, dict) else {}
     if cache_enabled and raw_cache is None:
-        quantizer._quantizer_cache = cache
-    elif not cache_enabled and isinstance(raw_cache, dict):
-        for key in (storage_key, signature_key, packed_key, shape_key):
-            raw_cache.pop(key, None)
+        quantizer._reconstruction_cache = cache
+    elif not cache_enabled and not in_fake_mode and raw_cache is not None:
+        quantizer._reconstruction_cache = None
 
-    storage, signature = _cache_identity(inputs) if cache_enabled else (None, None)
     cached_storage_ref = cache.get(storage_key) if cache_enabled else None
-    cache_hit = (
+    cache_abandoned = (
         cache_enabled
+        and isinstance(cached_storage_ref, weakref.ReferenceType)
+        and cached_storage_ref() is None
+    )
+    if cache_abandoned:
+        # A dead source allocation identifies a transformed or otherwise temporary input. Avoid
+        # retaining and rewriting a packed payload on every subsequent forward in this frozen
+        # phase. Explicit cache invalidation starts a new phase and permits caching again.
+        cache.clear()
+        cache["abandoned"] = True
+
+    cache_active = cache_enabled and not cache.get("abandoned", False)
+
+    storage, signature = _cache_identity(inputs) if cache_active else (None, None)
+    cache_hit = (
+        cache_active
         and isinstance(cached_storage_ref, weakref.ReferenceType)
         and cached_storage_ref() is storage
         and cache.get(signature_key) == signature
@@ -98,7 +114,7 @@ def cached_reconstruction(
         # The backend receives the final logical block view, so its Python shape is the exact
         # metadata needed by the decoder and avoids a device-to-host copy on every cache hit.
         shape = tuple(inputs.shape)
-        if cache_enabled:
+        if cache_active:
             # If the source allocation dies, the weak reference forces a miss before a recycled
             # data pointer can make another tensor appear to own the cached payload.
             cache[storage_key] = weakref.ref(storage)

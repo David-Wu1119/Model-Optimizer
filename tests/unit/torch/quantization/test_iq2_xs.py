@@ -150,7 +150,7 @@ def test_iq2_xs_fake_quant_reuses_cached_reconstruction(monkeypatch):
 
     weight.data.add_(1)
     quantizer.reset_amax()
-    assert quantizer._quantizer_cache is None
+    assert quantizer._reconstruction_cache is None
     quantizer.freeze_quantizer_cache()
     quantizer(weight)
     assert calls == 4
