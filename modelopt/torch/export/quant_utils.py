@@ -106,22 +106,53 @@ def _iq_export_weight_quantizer(
     return None, False
 
 
+def _iq_export_weights(
+    model: nn.Module,
+) -> Generator[tuple[nn.Module, str, str, TensorQuantizer, bool], None, None]:
+    """Yield each selected IQ weight and the metadata needed by export preflight."""
+    for module_name, module in model.named_modules():
+        inspected: set[str] = set()
+        for weight_name in weight_attr_names(module):
+            qualified_name = f"{module_name}.{weight_name}".lstrip(".")
+            if qualified_name in inspected:
+                continue
+            inspected.add(qualified_name)
+            quantizer, uses_plural_quantizers = _iq_export_weight_quantizer(module, weight_name)
+            if (
+                isinstance(quantizer, TensorQuantizer)
+                and quantizer.is_enabled
+                and quantizer.num_bits in IQ_FORMATS
+            ):
+                yield module, module_name, weight_name, quantizer, uses_plural_quantizers
+
+        grouped_quantizer = getattr(module, "weight_quantizer", None)
+        if isinstance(grouped_quantizer, GroupedQuantizer) and len(grouped_quantizer) > 0:
+            num_gemms = int(getattr(module, "num_gemms", len(grouped_quantizer)))
+            for index in range(max(num_gemms, len(grouped_quantizer))):
+                quantizer = grouped_quantizer[min(index, len(grouped_quantizer) - 1)]
+                weight_name = f"weight{index}"
+                qualified_name = f"{module_name}.{weight_name}".lstrip(".")
+                if qualified_name in inspected:
+                    continue
+                inspected.add(qualified_name)
+                if (
+                    isinstance(quantizer, TensorQuantizer)
+                    and quantizer.is_enabled
+                    and quantizer.num_bits in IQ_FORMATS
+                ):
+                    # Grouped linears are rebuilt as standard per-expert modules before packing.
+                    yield module, module_name, weight_name, quantizer, True
+
+
 def _iq_export_weight_shape_error(
     module: nn.Module,
     module_name: str,
     weight_name: str,
-    quantizer: nn.Module | None,
+    quantizer: TensorQuantizer,
     *,
     allow_nonstandard_name: bool = False,
 ) -> str | None:
     """Return one IQ export compatibility error, if any, for ``weight_name``."""
-    if not (
-        isinstance(quantizer, TensorQuantizer)
-        and quantizer.is_enabled
-        and quantizer.num_bits in IQ_FORMATS
-    ):
-        return None
-
     qualified_name = f"{module_name}.{weight_name}".lstrip(".")
     if weight_name != "weight" and not allow_nonstandard_name:
         return f"{qualified_name}: nonstandard weight attributes are not supported"
@@ -138,45 +169,19 @@ def _iq_export_weight_shape_error(
 def _iq_export_weight_shape_errors(model: nn.Module) -> list[str]:
     """Return selected IQ weights that cannot be handled by unified export."""
     incompatible: list[str] = []
-    for module_name, module in model.named_modules():
-        inspected: set[str] = set()
-        for weight_name in weight_attr_names(module):
-            qualified_name = f"{module_name}.{weight_name}".lstrip(".")
-            if qualified_name in inspected:
-                continue
-            inspected.add(qualified_name)
-            quantizer, uses_plural_quantizers = _iq_export_weight_quantizer(module, weight_name)
-            # Fused-expert plural quantizer lists are rebuilt as standard per-expert modules.
-            error = _iq_export_weight_shape_error(
-                module,
-                module_name,
-                weight_name,
-                quantizer,
-                allow_nonstandard_name=uses_plural_quantizers,
-            )
-            if error is not None:
-                incompatible.append(error)
-
-        grouped_quantizer = getattr(module, "weight_quantizer", None)
-        if isinstance(grouped_quantizer, GroupedQuantizer) and len(grouped_quantizer) > 0:
-            num_gemms = int(getattr(module, "num_gemms", len(grouped_quantizer)))
-            for index in range(max(num_gemms, len(grouped_quantizer))):
-                quantizer = grouped_quantizer[min(index, len(grouped_quantizer) - 1)]
-                # Grouped linears are rebuilt as standard per-expert modules before packing.
-                weight_name = f"weight{index}"
-                qualified_name = f"{module_name}.{weight_name}".lstrip(".")
-                if qualified_name in inspected:
-                    continue
-                inspected.add(qualified_name)
-                error = _iq_export_weight_shape_error(
-                    module,
-                    module_name,
-                    weight_name,
-                    quantizer,
-                    allow_nonstandard_name=True,
-                )
-                if error is not None:
-                    incompatible.append(error)
+    for module, module_name, weight_name, quantizer, uses_plural_quantizers in _iq_export_weights(
+        model
+    ):
+        # Fused-expert plural and grouped quantizers are rebuilt as standard per-expert modules.
+        error = _iq_export_weight_shape_error(
+            module,
+            module_name,
+            weight_name,
+            quantizer,
+            allow_nonstandard_name=uses_plural_quantizers,
+        )
+        if error is not None:
+            incompatible.append(error)
     return incompatible
 
 
@@ -198,27 +203,35 @@ def _validate_iq_export_weight_shapes(model: nn.Module) -> None:
         )
 
 
-def _validate_iq_quantizer_config(
+def _iq_quantizer_config_error(
     module: nn.Module,
     quantization_format: str,
     weight_name: str = "weight",
     describe_as: str | None = None,
-) -> None:
-    """Reject IQ export settings that the checkpoint encoder cannot reproduce."""
+    quantizer: nn.Module | None = None,
+) -> Exception | None:
+    """Return an IQ export configuration error without mutating the module."""
     where = f" for '{describe_as}'" if describe_as else ""
-    quantizer = representative_weight_quantizer(module, weight_name)
+    if quantizer is None:
+        quantizer = representative_weight_quantizer(module, weight_name)
     if not isinstance(quantizer, TensorQuantizer):
-        raise ValueError(
+        return ValueError(
             f"{quantization_format.upper()} export requires one TensorQuantizer{where}"
         )
     if quantizer.num_bits != quantization_format or quantizer.backend != "ggml":
-        raise ValueError(
+        return ValueError(
             f"{quantization_format.upper()} export requires the matching ggml quantizer{where}"
         )
     extra_args = quantizer.backend_extra_args or {}
+    unknown_keys = set(extra_args) - {"search_impl"}
+    if unknown_keys:
+        return ValueError(
+            f"{quantization_format.upper()} export received unsupported backend_extra_args keys "
+            f"{sorted(unknown_keys)}{where}"
+        )
     search_impl = extra_args.get("search_impl", "auto")
     if search_impl != "auto":
-        raise NotImplementedError(
+        return NotImplementedError(
             f"{quantization_format.upper()} export only supports search_impl='auto'{where}"
         )
     quantizer_names = quantizer_attr_names(weight_name)
@@ -228,11 +241,41 @@ def _validate_iq_quantizer_config(
             getattr(activation_quantizer, "is_enabled", False)
             or getattr(activation_quantizer, "pre_quant_scale", None) is not None
         ):
-            raise NotImplementedError(
+            return NotImplementedError(
                 f"{quantization_format.upper()} export is weight-only{where}; activation "
                 "quantization "
                 "and pre_quant_scale are not represented in the checkpoint"
             )
+    return None
+
+
+def _validate_iq_quantizer_config(
+    module: nn.Module,
+    quantization_format: str,
+    weight_name: str = "weight",
+    describe_as: str | None = None,
+) -> None:
+    """Reject IQ export settings that the checkpoint encoder cannot reproduce."""
+    error = _iq_quantizer_config_error(module, quantization_format, weight_name, describe_as)
+    if error is not None:
+        raise error
+
+
+def _iq_export_quantizer_config_errors(model: nn.Module) -> list[str]:
+    """Return selected IQ quantizer configurations unsupported by checkpoint export."""
+    incompatible: list[str] = []
+    for module, module_name, weight_name, quantizer, _ in _iq_export_weights(model):
+        qualified_name = f"{module_name}.{weight_name}".lstrip(".")
+        error = _iq_quantizer_config_error(
+            module,
+            quantizer.num_bits,
+            weight_name,
+            qualified_name,
+            quantizer=quantizer,
+        )
+        if error is not None:
+            incompatible.append(str(error))
+    return incompatible
 
 
 def _pack_iq_weight(

@@ -294,6 +294,31 @@ def test_megatron_iq_shape_guard_reports_another_rank():
         exporter._validate_iq_export()
 
 
+def test_megatron_iq_config_guard_fails_collectively_before_conversion():
+    exporter = object.__new__(GPTModelExporter)
+    exporter.model = torch.nn.Linear(256, 2, bias=False, dtype=torch.bfloat16)
+    exporter.model.weight_quantizer = TensorQuantizer(
+        QuantizerAttributeConfig(
+            num_bits="iq2_xs",
+            block_sizes={-1: 256},
+            backend="ggml",
+            backend_extra_args={"search_impl": "auto"},
+        )
+    )
+    exporter.model.input_quantizer = TensorQuantizer(QuantizerAttributeConfig(num_bits=8))
+
+    with (
+        patch.object(uem, "get_tensor_model_parallel_world_size", return_value=1),
+        patch.object(
+            exporter, "_collective_iq_export_flags", return_value=(True, True, False)
+        ) as collective,
+        pytest.raises(ValueError, match="weight-only"),
+    ):
+        exporter._validate_iq_export()
+
+    collective.assert_called_once_with(True, True, False)
+
+
 def test_megatron_iq_packed_expert_guard_fails_all_ranks_before_conversion():
     exporter = object.__new__(GPTModelExporter)
     exporter.model = torch.nn.Module()

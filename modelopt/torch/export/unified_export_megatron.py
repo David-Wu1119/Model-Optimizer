@@ -71,6 +71,7 @@ from .quant_format import (
     iq_format_spec,
 )
 from .quant_utils import (
+    _iq_export_quantizer_config_errors,
     _iq_export_weight_shape_errors,
     _pack_iq_weight,
     _validate_iq_quantizer_config,
@@ -332,18 +333,18 @@ class GPTModelExporter:
 
     @staticmethod
     def _collective_iq_export_flags(
-        local_iq: bool, local_bad_shape: bool, local_packed_expert_iq: bool
+        local_iq: bool, local_error: bool, local_packed_expert_iq: bool
     ) -> tuple[bool, bool, bool]:
-        """Combine IQ presence, incompatible-shape, and packed-expert flags across ranks."""
+        """Combine IQ presence, preflight-error, and packed-expert flags across ranks."""
         if not torch.distributed.is_initialized():
-            return local_iq, local_bad_shape, local_packed_expert_iq
+            return local_iq, local_error, local_packed_expert_iq
         device = (
             torch.device("cuda", torch.cuda.current_device())
             if torch.distributed.get_backend() == torch.distributed.Backend.NCCL
             else torch.device("cpu")
         )
         flags = torch.tensor(
-            [int(local_iq), int(local_bad_shape), int(local_packed_expert_iq)],
+            [int(local_iq), int(local_error), int(local_packed_expert_iq)],
             dtype=torch.int32,
             device=device,
         )
@@ -357,11 +358,12 @@ class GPTModelExporter:
 
         local_iq = self._model_has_iq_quantizer(self.model)
         tp_size = get_tensor_model_parallel_world_size()
-        local_errors = (
-            _iq_export_weight_shape_errors(self.model) if local_iq and tp_size == 1 else []
-        )
+        local_errors = []
+        if local_iq and tp_size == 1:
+            local_errors.extend(_iq_export_weight_shape_errors(self.model))
+            local_errors.extend(_iq_export_quantizer_config_errors(self.model))
         local_packed_expert_iq = local_iq and self._model_has_packed_expert_iq_quantizer()
-        any_iq, any_bad_shape, any_packed_expert_iq = self._collective_iq_export_flags(
+        any_iq, any_error, any_packed_expert_iq = self._collective_iq_export_flags(
             local_iq, bool(local_errors), local_packed_expert_iq
         )
         if not any_iq:
@@ -376,15 +378,15 @@ class GPTModelExporter:
                 "Megatron IQ1_S/IQ2_XS export does not yet support packed expert weights "
                 "because the HF transpose changes the 256-value block axis"
             )
-        if not any_bad_shape:
+        if not any_error:
             return
         if local_errors:
             details = "\n  - ".join(local_errors)
             raise ValueError(
-                "IQ export requires every selected weight's final dimension to be divisible by "
-                f"its format group size. Incompatible weights:\n  - {details}"
+                "IQ export rejected unsupported selected weights or quantizer settings:"
+                f"\n  - {details}"
             )
-        raise ValueError("Another distributed rank owns an IQ weight that cannot be packed")
+        raise ValueError("Another distributed rank owns an IQ weight that failed export preflight")
 
     def save_pretrained(
         self,
@@ -1215,8 +1217,9 @@ class GPTModelExporter:
         if qformat == QUANTIZATION_NONE:
             return name_to_value, qformat, block_size
         # IQ formats derive all block metadata directly from the weight and do not use amax or
-        # separately exported scaling tensors. Keep the weight on-device until its final HF layout
-        # has been produced, so the CUDA packer can be used.
+        # separately exported scaling tensors. Keep the weight on its current device until its
+        # final HF layout has been produced: this avoids a CPU round-trip in slicing paths and
+        # leaves this seam ready for a device-side packer.
         if is_iq:
             return name_to_value, qformat, block_size
         # Getting the weight scales

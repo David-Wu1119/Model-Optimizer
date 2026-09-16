@@ -467,6 +467,27 @@ def test_export_iq_rejects_non_weight_only_config(num_bits, quantizer_name, mode
         _export_quantized_weight(linear, torch.bfloat16)
 
 
+def test_export_iq_config_preflight_reports_weight_owner():
+    linear = nn.Linear(256, 4, bias=False, dtype=torch.bfloat16)
+    linear.weight_quantizer = TensorQuantizer(
+        QuantizerAttributeConfig(
+            num_bits="iq2_xs",
+            block_sizes={-1: 256},
+            backend="ggml",
+            backend_extra_args={"search_impl": "auto"},
+        )
+    )
+    linear.input_quantizer = TensorQuantizer(QuantizerAttributeConfig(num_bits=8))
+    model = nn.Module()
+    model.block = linear
+
+    errors = quant_utils._iq_export_quantizer_config_errors(model)
+
+    assert len(errors) == 1
+    assert "block.weight" in errors[0]
+    assert "weight-only" in errors[0]
+
+
 def test_iq_config_error_identifies_weight():
     linear = nn.Linear(256, 4, bias=False, dtype=torch.bfloat16)
     linear.weight_quantizer = TensorQuantizer(
