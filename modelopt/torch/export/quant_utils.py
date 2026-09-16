@@ -88,12 +88,17 @@ logger = logging.getLogger(__name__)
 
 
 def _iq_export_weight_shape_errors(model: nn.Module) -> list[str]:
-    """Return selected IQ weights whose final dimension cannot be packed."""
+    """Return selected IQ weights that cannot be handled by unified export."""
     incompatible: list[str] = []
     for module_name, module in model.named_modules():
         inspected: set[str] = set()
 
-        def inspect_weight(weight_name: str, quantizer: nn.Module | None) -> None:
+        def inspect_weight(
+            weight_name: str,
+            quantizer: nn.Module | None,
+            *,
+            allow_nonstandard_name: bool = False,
+        ) -> None:
             qualified_name = f"{module_name}.{weight_name}".lstrip(".")
             if qualified_name in inspected:
                 return
@@ -103,6 +108,11 @@ def _iq_export_weight_shape_errors(model: nn.Module) -> list[str]:
                 and quantizer.is_enabled
                 and quantizer.num_bits in IQ_FORMATS
             ):
+                return
+            if weight_name != "weight" and not allow_nonstandard_name:
+                incompatible.append(
+                    f"{qualified_name}: nonstandard weight attributes are not supported"
+                )
                 return
             weight = getattr(module, weight_name, None)
             if not isinstance(weight, torch.Tensor):
@@ -120,19 +130,21 @@ def _iq_export_weight_shape_errors(model: nn.Module) -> list[str]:
             num_gemms = int(getattr(module, "num_gemms", len(grouped_quantizer)))
             for index in range(num_gemms):
                 quantizer = grouped_quantizer[min(index, len(grouped_quantizer) - 1)]
-                inspect_weight(f"weight{index}", quantizer)
+                # Grouped linears are rebuilt as standard per-expert modules before packing.
+                inspect_weight(f"weight{index}", quantizer, allow_nonstandard_name=True)
     return incompatible
 
 
 def _validate_iq_export_weight_shapes(model: nn.Module) -> None:
-    """Reject all IQ weights that cannot be packed before export mutates the model."""
+    """Reject all unsupported IQ weights before export mutates the model."""
     incompatible = _iq_export_weight_shape_errors(model)
 
     if incompatible:
         details = "\n  - ".join(incompatible)
         raise ValueError(
-            "IQ export requires every selected weight's final dimension to be divisible by "
-            f"its format group size. Incompatible weights:\n  - {details}"
+            "IQ export cannot handle the following selected weights. Each weight must use the "
+            "standard 'weight' attribute and have a final dimension divisible by its format "
+            f"group size:\n  - {details}"
         )
 
 
@@ -213,9 +225,11 @@ def _pack_iq_weight(
         spec["block_payload_bytes"],
     )
     if packed_weight.shape != expected_shape:
+        where = describe_as or f"state_dict.{weight_name}"
         raise RuntimeError(
-            f"{quantization_format.upper()} packing produced {tuple(packed_weight.shape)}, "
-            f"expected {expected_shape}; logical-shape recovery is no longer valid"
+            f"{quantization_format.upper()} packing for weight '{where}' produced "
+            f"{tuple(packed_weight.shape)}, expected {expected_shape}; logical-shape recovery "
+            "is no longer valid"
         )
     return packed_weight
 

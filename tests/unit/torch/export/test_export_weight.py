@@ -19,6 +19,7 @@ import torch
 import torch.nn as nn
 from _test_utils.torch.export.utils import ToyModel, partial_fp8_config, partial_w4a8_config
 
+import modelopt.torch.export.quant_utils as quant_utils
 import modelopt.torch.quantization as mtq
 from modelopt.torch.export.quant_utils import (
     _pack_iq_weight,
@@ -182,6 +183,21 @@ def test_export_iq_dtype_error_identifies_weight(num_bits):
         _pack_iq_weight(weight, num_bits, describe_as="model.layers.0.weight")
 
 
+def test_export_iq_payload_shape_error_identifies_weight(monkeypatch):
+    weight = torch.ones((4, 256), dtype=torch.bfloat16)
+
+    def pack_with_wrong_shape(weight):
+        return torch.zeros((4, 2, 74), dtype=torch.uint8), None
+
+    monkeypatch.setattr(quant_utils, "quantize_iq2_xs", pack_with_wrong_shape)
+
+    with pytest.raises(
+        RuntimeError,
+        match=r"packing for weight 'model\.layers\.0\.weight'.*expected \(4, 1, 74\)",
+    ):
+        _pack_iq_weight(weight, "iq2_xs", describe_as="model.layers.0.weight")
+
+
 def test_iq_packer_rejects_non_iq_format_before_inspecting_module():
     linear = nn.Linear(256, 4, bias=False, dtype=torch.bfloat16)
 
@@ -239,6 +255,38 @@ def test_export_iq_shape_preflight_reports_grouped_weights():
     message = str(exc_info.value)
     assert "experts.weight1: (4, 192)" in message
     assert "experts.weight0" not in message
+
+
+def test_export_iq_preflight_rejects_nonstandard_weight_before_mutation(tmp_path):
+    class CustomWeightModule(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.proj = nn.Parameter(torch.ones(4, 256, dtype=torch.bfloat16))
+            self.proj_weight_quantizer = TensorQuantizer(
+                QuantizerAttributeConfig(
+                    num_bits="iq2_xs",
+                    block_sizes={-1: 256},
+                    backend="ggml",
+                )
+            )
+
+    model = nn.Module()
+    model.block = CustomWeightModule()
+    original_weight = model.block.proj.detach().clone()
+
+    with pytest.raises(ValueError, match=r"block\.proj: nonstandard weight"):
+        export_hf_checkpoint(model, export_dir=tmp_path)
+
+    assert model.block.proj.dtype == torch.bfloat16
+    assert torch.equal(model.block.proj, original_weight)
+
+    with pytest.raises(NotImplementedError, match=r"got 'model\.block\.proj'"):
+        _export_quantized_weight(
+            model.block,
+            torch.bfloat16,
+            weight_name="proj",
+            describe_as="model.block.proj",
+        )
 
 
 def test_export_hf_checkpoint_runs_iq_shape_preflight_before_mutation(tmp_path):

@@ -627,9 +627,10 @@ def _export_quantized_weight(
 
     if quantization_format in IQ_FORMATS:
         if weight_name != "weight":
+            where = describe_as or f"{type(sub_module).__name__}.{weight_name}"
             raise NotImplementedError(
                 "IQ unified export currently supports modules with a standard 'weight' "
-                f"attribute, got {weight_name!r} on {type(sub_module).__name__}"
+                f"attribute, got '{where}'"
             )
         packed_weight = _pack_iq_weight(
             weight.to(dtype), quantization_format, sub_module, weight_name, describe_as
