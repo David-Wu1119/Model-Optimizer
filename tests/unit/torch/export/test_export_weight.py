@@ -20,7 +20,7 @@ import torch.nn as nn
 from _test_utils.torch.export.utils import ToyModel, partial_fp8_config, partial_w4a8_config
 
 import modelopt.torch.quantization as mtq
-from modelopt.torch.export.quant_utils import postprocess_state_dict
+from modelopt.torch.export.quant_utils import _pack_iq_weight, postprocess_state_dict
 from modelopt.torch.export.unified_export_hf import (
     _export_quantized_weight,
     _process_quantized_modules,
@@ -125,6 +125,15 @@ def test_export_iq_payload_as_weight(num_bits, payload_bytes):
     assert isinstance(linear.weight, nn.Parameter)
     assert "packed_weights" not in state_dict
     assert "weight_shape" not in state_dict
+
+
+@pytest.mark.parametrize(("num_bits", "payload_bytes"), [("iq1_s", 50), ("iq2_xs", 74)])
+def test_iq_packer_preserves_leading_dimensions(num_bits, payload_bytes):
+    weight = torch.randn(2, 3, 512, dtype=torch.bfloat16)
+
+    packed = _pack_iq_weight(weight, num_bits)
+
+    assert packed.shape == (2, 3, 2, payload_bytes)
 
 
 def test_postprocess_state_dict_drops_legacy_weight_shape():

@@ -122,13 +122,13 @@ def _pack_iq_weight(
     """Pack one IQ weight, using ``describe_as`` only for failure attribution."""
     if module is not None:
         _validate_iq_quantizer_config(module, quantization_format, weight_name)
+    if quantization_format not in IQ_FORMATS:
+        raise ValueError(f"Unsupported IQ quantization format: {quantization_format}")
     try:
         if quantization_format == QUANTIZATION_IQ1_S:
             packed_weight, _ = quantize_iq1_s(weight)
-        elif quantization_format == QUANTIZATION_IQ2_XS:
-            packed_weight, _ = quantize_iq2_xs(weight)
         else:
-            raise ValueError(f"Unsupported IQ quantization format: {quantization_format}")
+            packed_weight, _ = quantize_iq2_xs(weight)
     except ValueError as exc:
         if describe_as is None:
             owner = type(module).__name__ if module is not None else "state_dict"
@@ -137,6 +137,18 @@ def _pack_iq_weight(
             f"Failed to pack {quantization_format.upper()} weight "
             f"'{describe_as}' with shape {tuple(weight.shape)}: {exc}"
         ) from exc
+
+    spec = iq_format_spec(quantization_format)
+    expected_shape = (
+        *weight.shape[:-1],
+        weight.shape[-1] // spec["group_size"],
+        spec["block_payload_bytes"],
+    )
+    if packed_weight.shape != expected_shape:
+        raise RuntimeError(
+            f"{quantization_format.upper()} packing produced {tuple(packed_weight.shape)}, "
+            f"expected {expected_shape}; logical-shape recovery is no longer valid"
+        )
     return packed_weight
 
 
