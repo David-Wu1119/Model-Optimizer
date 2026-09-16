@@ -43,6 +43,7 @@ def test_iq1_s_canonical_grid():
     assert grid.dtype == torch.float32
     assert set(grid.unique().tolist()) == {-1.0, 0.0, 1.0}
     assert grid[0].tolist() == [-1.0] * 8
+    assert grid.unique(dim=0).shape[0] == grid.shape[0]
 
 
 def test_iq1_s_zero_block_has_canonical_zero_encoding():
@@ -101,6 +102,19 @@ def test_iq1_s_round_trip_and_payload_fields():
     assert torch.all((qh & 0xFFF) < 0x1000)
 
 
+def test_iq1_s_encoding_is_independent_of_default_dtype():
+    weight = torch.randn((1, 256), generator=torch.Generator().manual_seed(4321))
+    expected, _ = quantize_iq1_s(weight)
+    original_dtype = torch.get_default_dtype()
+    try:
+        torch.set_default_dtype(torch.bfloat16)
+        actual, _ = quantize_iq1_s(weight)
+    finally:
+        torch.set_default_dtype(original_dtype)
+
+    assert torch.equal(actual, expected)
+
+
 def test_iq1_s_requires_complete_last_dimension_blocks():
     with pytest.raises(ValueError, match="last weight dimension"):
         quantize_iq1_s(torch.ones(2, 257))
@@ -155,3 +169,30 @@ def test_iq1_s_fake_quant_reuses_cached_reconstruction(monkeypatch):
 
     quantizer(weight.clone())
     assert calls == 4
+
+
+def test_iq1_s_fake_quant_handles_inference_tensors_without_a_version(monkeypatch):
+    calls = 0
+    original_quantize = iq1_s_module.quantize_iq1_s
+
+    def counting_quantize(weight):
+        nonlocal calls
+        calls += 1
+        return original_quantize(weight)
+
+    monkeypatch.setattr(iq1_s_module, "quantize_iq1_s", counting_quantize)
+    quantizer = TensorQuantizer(
+        QuantizerAttributeConfig(
+            num_bits="iq1_s",
+            block_sizes={-1: 256},
+            backend="ggml",
+            backend_extra_args={"search_impl": "auto"},
+        )
+    ).eval()
+
+    with torch.inference_mode():
+        weight = torch.randn(1, 256)
+        quantizer(weight)
+        quantizer(weight)
+
+    assert calls == 2

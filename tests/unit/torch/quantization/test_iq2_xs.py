@@ -36,6 +36,7 @@ def test_iq2_xs_canonical_grid():
     assert set(grid.unique().tolist()) == {8.0, 25.0, 43.0}
     assert grid[0].tolist() == [8.0] * 8
     assert grid[-1].tolist() == [43.0] * 8
+    assert grid.unique(dim=0).shape[0] == grid.shape[0]
 
 
 def test_iq2_xs_zero_block_has_canonical_zero_encoding():
@@ -69,6 +70,19 @@ def test_iq2_xs_round_trip_and_payload_fields():
     codes = blocks[:, 2:66:2].to(torch.int64) | (blocks[:, 3:66:2].to(torch.int64) << 8)
     assert torch.all((codes & 0x1FF) < 512)
     assert torch.all((codes >> 9) < 128)
+
+
+def test_iq2_xs_encoding_is_independent_of_default_dtype():
+    weight = torch.randn((1, 256), generator=torch.Generator().manual_seed(4321))
+    expected, _ = quantize_iq2_xs(weight)
+    original_dtype = torch.get_default_dtype()
+    try:
+        torch.set_default_dtype(torch.bfloat16)
+        actual, _ = quantize_iq2_xs(weight)
+    finally:
+        torch.set_default_dtype(original_dtype)
+
+    assert torch.equal(actual, expected)
 
 
 def test_iq2_xs_requires_complete_last_dimension_blocks():
@@ -125,3 +139,30 @@ def test_iq2_xs_fake_quant_reuses_cached_reconstruction(monkeypatch):
 
     quantizer(weight.clone())
     assert calls == 4
+
+
+def test_iq2_xs_fake_quant_handles_inference_tensors_without_a_version(monkeypatch):
+    calls = 0
+    original_quantize = iq2_xs_module.quantize_iq2_xs
+
+    def counting_quantize(weight):
+        nonlocal calls
+        calls += 1
+        return original_quantize(weight)
+
+    monkeypatch.setattr(iq2_xs_module, "quantize_iq2_xs", counting_quantize)
+    quantizer = TensorQuantizer(
+        QuantizerAttributeConfig(
+            num_bits="iq2_xs",
+            block_sizes={-1: 256},
+            backend="ggml",
+            backend_extra_args={"search_impl": "auto"},
+        )
+    ).eval()
+
+    with torch.inference_mode():
+        weight = torch.randn(1, 256)
+        quantizer(weight)
+        quantizer(weight)
+
+    assert calls == 2

@@ -173,7 +173,7 @@ def _encode_blocks(blocks: torch.Tensor, grid: torch.Tensor) -> torch.Tensor:
     d = ((amax / _IQ1_S_NATIVE_MAX) * _IQ1_S_SCALE_ANCHOR).clamp(max=65504.0).to(torch.float16)
     d_float = d.float()
 
-    best_error = torch.full((block_count, 32, 16), torch.inf, device=x.device)
+    best_error = torch.full((block_count, 32, 16), torch.inf, dtype=torch.float32, device=x.device)
     best_entry = torch.zeros((block_count, 32, 16), dtype=torch.int64, device=x.device)
     grid_norm = grid.square().sum(dim=-1)
     grid_sum = grid.sum(dim=-1)
@@ -233,7 +233,7 @@ def _encode_blocks(blocks: torch.Tensor, grid: torch.Tensor) -> torch.Tensor:
 
 @torch.no_grad()
 def quantize_iq1_s(
-    weight: torch.Tensor, *, block_chunk_size: int = 64
+    weight: torch.Tensor, *, block_chunk_size: int | None = None
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Pack a floating-point weight into GGML-compatible IQ1_S blocks.
 
@@ -241,6 +241,8 @@ def quantize_iq1_s(
     and ``[weight.ndim]``. Both tensors remain on the weight's device.
     """
     validate_weight(weight, "IQ1_S")
+    if block_chunk_size is None:
+        block_chunk_size = 4096 if weight.is_cuda else 64
     if block_chunk_size <= 0:
         raise ValueError(f"block_chunk_size must be positive, got {block_chunk_size}")
 
@@ -276,7 +278,7 @@ def quantize_iq1_s(
 @torch.no_grad()
 def dequantize_iq1_s(
     packed_weights: torch.Tensor,
-    weight_shape: torch.Tensor,
+    weight_shape: torch.Tensor | tuple[int, ...],
     *,
     dtype: torch.dtype = torch.bfloat16,
 ) -> torch.Tensor:

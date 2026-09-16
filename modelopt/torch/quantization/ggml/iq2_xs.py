@@ -227,7 +227,7 @@ def _encode_blocks(blocks: torch.Tensor, grid: torch.Tensor) -> torch.Tensor:
 
 @torch.no_grad()
 def quantize_iq2_xs(
-    weight: torch.Tensor, *, block_chunk_size: int = 64
+    weight: torch.Tensor, *, block_chunk_size: int | None = None
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Pack a floating-point weight into GGML-compatible IQ2_XS blocks.
 
@@ -235,6 +235,8 @@ def quantize_iq2_xs(
     and ``[weight.ndim]``. Both tensors remain on the weight's device.
     """
     validate_weight(weight, "IQ2_XS")
+    if block_chunk_size is None:
+        block_chunk_size = 4096 if weight.is_cuda else 64
     if block_chunk_size <= 0:
         raise ValueError(f"block_chunk_size must be positive, got {block_chunk_size}")
 
@@ -270,7 +272,7 @@ def quantize_iq2_xs(
 @torch.no_grad()
 def dequantize_iq2_xs(
     packed_weights: torch.Tensor,
-    weight_shape: torch.Tensor,
+    weight_shape: torch.Tensor | tuple[int, ...],
     *,
     dtype: torch.dtype = torch.bfloat16,
 ) -> torch.Tensor:

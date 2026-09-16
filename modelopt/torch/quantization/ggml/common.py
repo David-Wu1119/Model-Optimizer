@@ -25,6 +25,19 @@ import torch
 GGML_BLOCK_SIZE = 256
 
 
+def _cache_anchor(inputs: torch.Tensor) -> tuple[torch.Tensor, int] | None:
+    """Return an owning tensor and version, or ``None`` when no stable key exists."""
+    anchor = inputs
+    while (base := getattr(anchor, "_base", None)) is not None:
+        anchor = base
+    try:
+        version = anchor._version
+    except RuntimeError:
+        # Tensors created in inference mode do not track a version counter.
+        return None
+    return anchor, version
+
+
 def cached_reconstruction(
     inputs: torch.Tensor,
     quantizer: Any,
@@ -51,19 +64,21 @@ def cached_reconstruction(
     packed_key = f"{cache_namespace}_packed"
     shape_key = f"{cache_namespace}_shape"
 
-    anchor = inputs
-    while anchor._base is not None:
-        anchor = anchor._base
-    signature = (
-        anchor._version,
-        tuple(inputs.shape),
-        tuple(inputs.stride()),
-        inputs.dtype,
-        inputs.device,
-    )
+    anchor_info = _cache_anchor(inputs)
+    anchor = anchor_info[0] if anchor_info is not None else None
+    signature = None
+    if anchor_info is not None:
+        signature = (
+            anchor_info[1],
+            tuple(inputs.shape),
+            tuple(inputs.stride()),
+            inputs.dtype,
+            inputs.device,
+        )
     input_ref = cache.get(input_key)
     cache_hit = (
-        not getattr(quantizer, "training", True)
+        anchor is not None
+        and not getattr(quantizer, "training", True)
         and isinstance(input_ref, weakref.ReferenceType)
         and input_ref() is anchor
         and cache.get(signature_key) == signature
@@ -72,12 +87,18 @@ def cached_reconstruction(
     if cache_hit:
         packed, shape = cache[packed_key], cache[shape_key]
     else:
-        packed, shape = quantize(inputs)
-        if not getattr(quantizer, "training", True):
+        packed, _ = quantize(inputs)
+        # The backend receives the final logical block view, so its Python shape is the exact
+        # metadata needed by the decoder and avoids a device-to-host copy on every cache hit.
+        shape = tuple(inputs.shape)
+        if anchor is not None and not getattr(quantizer, "training", True):
             cache[input_key] = weakref.ref(anchor)
             cache[signature_key] = signature
             cache[packed_key] = packed
             cache[shape_key] = shape
+        elif not getattr(quantizer, "training", True):
+            for key in (input_key, signature_key, packed_key, shape_key):
+                cache.pop(key, None)
         else:
             quantizer._quantizer_cache = None
     reconstructed = dequantize(packed, shape, dtype=inputs.dtype)
@@ -101,7 +122,7 @@ def validate_weight(weight: torch.Tensor, format_name: str) -> None:
 
 def validate_packed_weights(
     packed_weights: torch.Tensor,
-    weight_shape: torch.Tensor,
+    weight_shape: torch.Tensor | tuple[int, ...],
     *,
     block_bytes: int,
     format_name: str,
@@ -112,7 +133,10 @@ def validate_packed_weights(
             f"packed_weights must be uint8 with last dimension {block_bytes}, "
             f"got {packed_weights.dtype} {tuple(packed_weights.shape)}"
         )
-    shape = tuple(int(v) for v in weight_shape.detach().cpu().tolist())
+    if isinstance(weight_shape, torch.Tensor):
+        shape = tuple(int(v) for v in weight_shape.detach().cpu().tolist())
+    else:
+        shape = tuple(int(v) for v in weight_shape)
     if not shape or shape[-1] % GGML_BLOCK_SIZE:
         raise ValueError(f"invalid {format_name} logical weight shape: {shape}")
     expected_payload_values = math.prod(shape) // GGML_BLOCK_SIZE * block_bytes
