@@ -15,7 +15,9 @@
 
 """Module to load C++ / CUDA extensions."""
 
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from modelopt.torch.utils import load_cpp_extension
 
@@ -31,6 +33,7 @@ __all__ = [
 path = Path(__file__).parent
 kernels_gemm = path.parent / "kernels" / "quantization" / "gemm"
 kernels_ggml = path.parent / "kernels" / "quantization" / "ggml"
+_NOT_BUILT = object()
 
 
 def get_cuda_ext(raise_if_failed: bool = False):
@@ -80,38 +83,30 @@ def get_cuda_ext_mx(raise_if_failed: bool = False):
     return get_cuda_ext_mx.extension  # type:ignore[attr-defined]
 
 
-def get_cuda_ext_iq1_s(raise_if_failed: bool = False):
-    """Return the GGML-compatible IQ1_S packing extension."""
+def _get_ggml_ext(getter: Callable[..., Any], stem: str, label: str, raise_if_failed: bool):
     # A strict caller may follow an optional build that cached ``None``; retry so it fails loudly.
-    if not hasattr(get_cuda_ext_iq1_s, "extension") or (
-        raise_if_failed and get_cuda_ext_iq1_s.extension is None
-    ):
-        get_cuda_ext_iq1_s.extension = load_cpp_extension(  # type:ignore[attr-defined]
-            name="modelopt_cuda_ext_iq1_s",
-            sources=[kernels_ggml / "iq1_s.cpp", kernels_ggml / "iq1_s.cu"],
+    extension = getattr(getter, "extension", _NOT_BUILT)
+    if extension is _NOT_BUILT or (raise_if_failed and extension is None):
+        extension = load_cpp_extension(
+            name=f"modelopt_cuda_ext_{stem}",
+            sources=[kernels_ggml / f"{stem}.cpp", kernels_ggml / f"{stem}.cu"],
             cuda_version_specifiers=">=11.8",
-            fail_msg="IQ1_S CUDA packing is unavailable; using the PyTorch reference encoder.",
+            fail_msg=f"{label} CUDA packing is unavailable; using the PyTorch reference encoder.",
             extra_cuda_cflags=["-O3"],
             raise_if_failed=raise_if_failed,
         )
-    return get_cuda_ext_iq1_s.extension  # type:ignore[attr-defined]
+        setattr(getter, "extension", extension)
+    return extension
+
+
+def get_cuda_ext_iq1_s(raise_if_failed: bool = False):
+    """Return the GGML-compatible IQ1_S packing extension."""
+    return _get_ggml_ext(get_cuda_ext_iq1_s, "iq1_s", "IQ1_S", raise_if_failed)
 
 
 def get_cuda_ext_iq2_xs(raise_if_failed: bool = False):
     """Return the GGML-compatible IQ2_XS packing extension."""
-    # A strict caller may follow an optional build that cached ``None``; retry so it fails loudly.
-    if not hasattr(get_cuda_ext_iq2_xs, "extension") or (
-        raise_if_failed and get_cuda_ext_iq2_xs.extension is None
-    ):
-        get_cuda_ext_iq2_xs.extension = load_cpp_extension(  # type:ignore[attr-defined]
-            name="modelopt_cuda_ext_iq2_xs",
-            sources=[kernels_ggml / "iq2_xs.cpp", kernels_ggml / "iq2_xs.cu"],
-            cuda_version_specifiers=">=11.8",
-            fail_msg="IQ2_XS CUDA packing is unavailable; using the PyTorch reference encoder.",
-            extra_cuda_cflags=["-O3"],
-            raise_if_failed=raise_if_failed,
-        )
-    return get_cuda_ext_iq2_xs.extension  # type:ignore[attr-defined]
+    return _get_ggml_ext(get_cuda_ext_iq2_xs, "iq2_xs", "IQ2_XS", raise_if_failed)
 
 
 def __getattr__(name):
@@ -131,5 +126,3 @@ def precompile():
     print(get_cuda_ext())
     print(get_cuda_ext_fp8())
     print(get_cuda_ext_mx())
-    print(get_cuda_ext_iq1_s())
-    print(get_cuda_ext_iq2_xs())

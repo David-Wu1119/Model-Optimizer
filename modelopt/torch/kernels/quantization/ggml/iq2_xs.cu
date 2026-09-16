@@ -101,10 +101,6 @@ __global__ void find_scale(const scalar_t *input, int64_t num_blocks, int16_t *s
     amax = fmaxf(amax, fabsf(value));
     sumsq = fmaf(value, value, sumsq);
   }
-  if (amax == 0.0f) {
-    scale_bits[block] = 0;
-    return;
-  }
   const float rms = sqrtf(sumsq / kBlockSize);
   const float peak_to_rms = rms > 0.0f ? amax / rms : 0.0f;
   const float anchor = fminf(kMaxAnchor, fmaxf(kMinAnchor, 1.0f - kPeakToRmsSlope * peak_to_rms));
