@@ -16,6 +16,7 @@
 import pytest
 import torch
 
+import modelopt.torch.quantization.extensions as extensions
 from modelopt.torch.quantization.extensions import get_cuda_ext_iq2_xs
 from modelopt.torch.quantization.ggml.iq2_xs import dequantize_iq2_xs, iq2_xs_grid, quantize_iq2_xs
 
@@ -58,6 +59,21 @@ def test_iq2_xs_cuda_underflowed_scale_has_canonical_zero_encoding():
     packed = _extension().pack(weight, iq2_xs_grid("cuda")).reshape(1, 1, 74)
 
     assert not packed.any()
+
+
+def test_iq2_xs_cuda_falls_back_to_pytorch_encoder(monkeypatch):
+    monkeypatch.setattr(extensions, "get_cuda_ext_iq2_xs", lambda: None)
+    generator = torch.Generator(device="cuda").manual_seed(1234)
+    weight = torch.randn((2, 256), generator=generator, device="cuda", dtype=torch.bfloat16)
+
+    packed, shape = quantize_iq2_xs(weight)
+    reconstructed = dequantize_iq2_xs(packed, shape)
+    normalized_mse = (
+        reconstructed.float() - weight.float()
+    ).square().mean() / weight.float().square().mean()
+
+    assert packed.shape == (2, 1, 74)
+    assert normalized_mse < 0.1
 
 
 def test_iq2_xs_cuda_extension_rejects_unsupported_input():

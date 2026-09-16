@@ -16,6 +16,7 @@
 import pytest
 import torch
 
+import modelopt.torch.quantization.extensions as extensions
 from modelopt.torch.quantization.extensions import get_cuda_ext_iq1_s
 from modelopt.torch.quantization.ggml.iq1_s import dequantize_iq1_s, iq1_s_grid, quantize_iq1_s
 
@@ -51,6 +52,21 @@ def test_iq1_s_cuda_zero_encoding_matches_ggml_block_layout():
 
     assert not packed.any()
     assert torch.equal(dequantize_iq1_s(packed, shape), weight)
+
+
+def test_iq1_s_cuda_falls_back_to_pytorch_encoder(monkeypatch):
+    monkeypatch.setattr(extensions, "get_cuda_ext_iq1_s", lambda: None)
+    generator = torch.Generator(device="cuda").manual_seed(1234)
+    weight = torch.randn((2, 256), generator=generator, device="cuda", dtype=torch.bfloat16)
+
+    packed, shape = quantize_iq1_s(weight)
+    reconstructed = dequantize_iq1_s(packed, shape)
+    normalized_mse = (
+        reconstructed.float() - weight.float()
+    ).square().mean() / weight.float().square().mean()
+
+    assert packed.shape == (2, 1, 50)
+    assert normalized_mse < 0.25
 
 
 def test_iq1_s_cuda_extension_rejects_unsupported_input():
