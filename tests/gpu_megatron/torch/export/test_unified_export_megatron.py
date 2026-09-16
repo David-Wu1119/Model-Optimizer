@@ -160,16 +160,16 @@ def test_megatron_iq_export_rejects_tensor_parallelism():
         exporter.save_pretrained("unused", "unused")
 
 
-def test_megatron_iq_tensor_parallel_guard_is_collective():
-    def report_remote_iq(flag, **_kwargs):
-        flag.fill_(1)
+def test_megatron_iq_export_guard_uses_one_collective_for_both_flags():
+    def report_remote_iq(flags, **_kwargs):
+        flags.copy_(torch.tensor([1, 0], dtype=flags.dtype, device=flags.device))
 
     with (
         patch.object(torch.distributed, "is_initialized", return_value=True),
         patch.object(torch.distributed, "get_backend", return_value=torch.distributed.Backend.GLOO),
         patch.object(torch.distributed, "all_reduce", side_effect=report_remote_iq),
     ):
-        assert GPTModelExporter._collective_any_iq(False)
+        assert GPTModelExporter._collective_iq_export_flags(False, False) == (True, False)
 
 
 def test_megatron_iq_tensor_parallel_guard_finds_later_mixed_format():
@@ -194,7 +194,7 @@ def test_megatron_iq_tensor_parallel_guard_covers_extra_modules():
     with (
         patch.object(uem, "get_tensor_model_parallel_world_size", return_value=2),
         patch.object(exporter, "_model_has_iq_quantizer", return_value=True),
-        patch.object(exporter, "_collective_any_iq", return_value=True),
+        patch.object(exporter, "_collective_iq_export_flags", return_value=(True, False)),
         pytest.raises(NotImplementedError, match="tensor model parallel size 1"),
     ):
         exporter.save_pretrained_extra_modules("unused")
@@ -206,11 +206,29 @@ def test_vllm_fakequant_export_skips_iq_packing_guard():
 
     with (
         patch.object(uem, "get_tensor_model_parallel_world_size", return_value=2),
-        patch.object(exporter, "_collective_any_iq") as collective,
+        patch.object(exporter, "_collective_iq_export_flags") as collective,
     ):
-        exporter._validate_iq_tensor_parallelism()
+        exporter._validate_iq_export()
 
     collective.assert_not_called()
+
+
+def test_megatron_non_iq_export_skips_shape_scan():
+    exporter = object.__new__(GPTModelExporter)
+    exporter.model = torch.nn.Module()
+
+    with (
+        patch.object(uem, "get_tensor_model_parallel_world_size", return_value=1),
+        patch.object(exporter, "_model_has_iq_quantizer", return_value=False),
+        patch.object(
+            exporter, "_collective_iq_export_flags", return_value=(False, False)
+        ) as collective,
+        patch.object(uem, "_iq_export_weight_shape_errors") as shape_errors,
+    ):
+        exporter._validate_iq_export()
+
+    collective.assert_called_once_with(False, False)
+    shape_errors.assert_not_called()
 
 
 def test_megatron_iq_shape_guard_fails_all_ranks_before_packing():
@@ -225,12 +243,15 @@ def test_megatron_iq_shape_guard_fails_all_ranks_before_packing():
     )
 
     with (
-        patch.object(exporter, "_collective_any_iq", return_value=True) as collective,
+        patch.object(uem, "get_tensor_model_parallel_world_size", return_value=1),
+        patch.object(
+            exporter, "_collective_iq_export_flags", return_value=(True, True)
+        ) as collective,
         pytest.raises(ValueError, match=r"weight: \(2, 192\)"),
     ):
-        exporter._validate_iq_weight_shapes_collectively()
+        exporter._validate_iq_export()
 
-    collective.assert_called_once_with(True)
+    collective.assert_called_once_with(True, True)
 
 
 def test_megatron_iq_shape_guard_reports_another_rank():
@@ -238,10 +259,11 @@ def test_megatron_iq_shape_guard_reports_another_rank():
     exporter.model = torch.nn.Module()
 
     with (
-        patch.object(exporter, "_collective_any_iq", return_value=True),
+        patch.object(uem, "get_tensor_model_parallel_world_size", return_value=1),
+        patch.object(exporter, "_collective_iq_export_flags", return_value=(True, True)),
         pytest.raises(ValueError, match="Another distributed rank"),
     ):
-        exporter._validate_iq_weight_shapes_collectively()
+        exporter._validate_iq_export()
 
 
 def test_megatron_iq_packer_rejects_tensor_parallelism():

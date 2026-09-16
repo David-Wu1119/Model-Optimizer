@@ -525,14 +525,21 @@ class TestExportFusedExperts:
             for quantizer in quantizers:
                 quantizer.set_from_attribute_config(config)
 
-            monkeypatch.setattr(
-                "modelopt.torch.export.unified_export_hf._pack_iq_weight",
-                lambda weight, *_args: torch.zeros(
+            labels = []
+
+            def fake_pack(weight, *_args):
+                labels.append(_args[-1])
+                return torch.zeros(
                     (weight.numel() // 256, 74), dtype=torch.uint8, device=weight.device
-                ),
+                )
+
+            monkeypatch.setattr(
+                "modelopt.torch.export.unified_export_hf._pack_iq_weight", fake_pack
             )
 
-            _export_fused_experts(converted, torch.float16)
+            _export_fused_experts(
+                converted, torch.float16, module_name="model.layers.0.mlp.experts"
+            )
 
             state_dict = converted.state_dict()
             for idx in range(NUM_EXPERTS):
@@ -543,6 +550,11 @@ class TestExportFusedExperts:
                     assert isinstance(
                         getattr(getattr(converted, str(idx)), projection).weight, nn.Parameter
                     )
+            assert labels == [
+                f"model.layers.0.mlp.experts.{idx}.{projection}.weight"
+                for idx in range(NUM_EXPERTS)
+                for projection in ("gate_proj", "up_proj", "down_proj")
+            ]
         finally:
             self._cleanup_registry(expert_type)
 

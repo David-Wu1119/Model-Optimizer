@@ -38,12 +38,14 @@ def _export_weight(
     module: nn.Module,
     ctx: ExportContext,
     weight_name: str = "weight",
+    module_name: str | None = None,
 ) -> None:
     # Imported lazily to avoid a cycle: unified_export_hf imports this module to
     # install the built-in handlers while retaining this legacy helper's import path.
     from .unified_export_hf import _export_quantized_weight
 
-    _export_quantized_weight(module, ctx.dtype, weight_name)
+    describe_as = f"{module_name}.{weight_name}" if module_name else None
+    _export_quantized_weight(module, ctx.dtype, weight_name, describe_as)
 
 
 # Preparation handlers are registered in the same precedence as the legacy MoE prepass.
@@ -155,7 +157,7 @@ def _export_fused_experts_module(name: str, module: nn.Module, ctx: ExportContex
     Tied experts are packed independently and their duplicate keys are dropped by name
     in postprocess_state_dict; no per-module dedup cache is used.
     """
-    _export_fused_experts(module, ctx.dtype)
+    _export_fused_experts(module, ctx.dtype, module_name=name)
 
 
 @ExportModuleRegistry.register(predicate=is_quantlinear)
@@ -168,7 +170,7 @@ def _export_quant_linear(name: str, module: nn.Module, ctx: ExportContext) -> No
     if get_quantization_format(module) == QUANTIZATION_NONE:
         return
     try:
-        _export_weight(module, ctx)
+        _export_weight(module, ctx, module_name=name)
     except AssertionError as e:
         raise AssertionError(
             f"Failed to export module '{name}' (type={type(module).__name__}): {e}"
@@ -198,7 +200,7 @@ def _export_quant_embedding(name: str, module: nn.Module, ctx: ExportContext) ->
         )
         return
     try:
-        _export_weight(module, ctx)
+        _export_weight(module, ctx, module_name=name)
     except AssertionError as e:
         raise AssertionError(
             f"Failed to export embedding '{name}' (type={type(module).__name__}): {e}"
@@ -224,4 +226,4 @@ def _export_bmm_experts(name: str, module: nn.Module, ctx: ExportContext) -> Non
         quantizer_attrs=["gate_up_proj_input_quantizer", "down_proj_input_quantizer"],
     )
     for weight_name in ["gate_up_proj", "down_proj"]:
-        _export_weight(module, ctx, weight_name)
+        _export_weight(module, ctx, weight_name, module_name=name)

@@ -50,6 +50,7 @@ def _delete_fused_moe_source_attrs(module: nn.Module) -> None:
 def _export_fused_experts(
     module: nn.Module,
     dtype: torch.dtype,
+    module_name: str | None = None,
 ) -> None:
     """Split fused MoE expert weights and export per-expert quantization scales.
 
@@ -225,7 +226,10 @@ def _export_fused_experts(
             wrapper.weight_quantizer = w_quantizer
             wrapper.input_quantizer = i_quantizer
 
-            _export_quantized_weight(wrapper, dtype)
+            describe_as = (
+                f"{module_name}.{idx}.{proj_name}.weight" if module_name is not None else None
+            )
+            _export_quantized_weight(wrapper, dtype, describe_as=describe_as)
 
             proj = nn.Module()
             proj.weight = wrapper.weight

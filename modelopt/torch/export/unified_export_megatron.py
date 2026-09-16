@@ -275,8 +275,7 @@ class GPTModelExporter:
         save_directory: str | os.PathLike,
     ):
         """Save a EAGLE or Medusa checkpoints which can be deployed by vLLM and TensorRT-LLM."""
-        self._validate_iq_tensor_parallelism()
-        self._validate_iq_weight_shapes_collectively()
+        self._validate_iq_export()
         # We use the last PP rank to write the config because
         # medusa_heads and eagle_module only exist in the last stage.
         pp_rank = get_pipeline_model_parallel_rank()
@@ -311,37 +310,40 @@ class GPTModelExporter:
         )
 
     @staticmethod
-    def _collective_any_iq(local_iq: bool) -> bool:
-        """Return whether any distributed rank owns an IQ-quantized module."""
+    def _collective_iq_export_flags(local_iq: bool, local_bad_shape: bool) -> tuple[bool, bool]:
+        """Combine IQ presence and incompatible-shape flags across all ranks."""
         if not torch.distributed.is_initialized():
-            return local_iq
+            return local_iq, local_bad_shape
         device = (
             torch.device("cuda", torch.cuda.current_device())
             if torch.distributed.get_backend() == torch.distributed.Backend.NCCL
             else torch.device("cpu")
         )
-        any_iq = torch.tensor(int(local_iq), dtype=torch.int32, device=device)
-        torch.distributed.all_reduce(any_iq, op=torch.distributed.ReduceOp.MAX)
-        return bool(any_iq.item())
+        flags = torch.tensor(
+            [int(local_iq), int(local_bad_shape)], dtype=torch.int32, device=device
+        )
+        torch.distributed.all_reduce(flags, op=torch.distributed.ReduceOp.MAX)
+        return bool(flags[0].item()), bool(flags[1].item())
 
-    def _validate_iq_tensor_parallelism(self) -> None:
-        """Fail collectively when this exporter would pack IQ weights across TP ranks."""
-        if (
-            self._packs_iq_weights
-            and get_tensor_model_parallel_world_size() != 1
-            and self._collective_any_iq(self._model_has_iq_quantizer(self.model))
-        ):
+    def _validate_iq_export(self) -> None:
+        """Reject unsupported IQ export configurations in one collective preflight."""
+        if not self._packs_iq_weights:
+            return
+
+        local_iq = self._model_has_iq_quantizer(self.model)
+        tp_size = get_tensor_model_parallel_world_size()
+        local_errors = (
+            _iq_export_weight_shape_errors(self.model) if local_iq and tp_size == 1 else []
+        )
+        any_iq, any_bad_shape = self._collective_iq_export_flags(local_iq, bool(local_errors))
+        if not any_iq:
+            return
+        if tp_size != 1:
             raise NotImplementedError(
                 "Megatron IQ1_S/IQ2_XS unified export currently requires tensor model "
                 "parallel size 1"
             )
-
-    def _validate_iq_weight_shapes_collectively(self) -> None:
-        """Fail every rank before packing when any rank owns an incompatible IQ weight."""
-        if not self._packs_iq_weights:
-            return
-        local_errors = _iq_export_weight_shape_errors(self.model)
-        if not self._collective_any_iq(bool(local_errors)):
+        if not any_bad_shape:
             return
         if local_errors:
             details = "\n  - ".join(local_errors)
@@ -361,8 +363,7 @@ class GPTModelExporter:
         Args:
             save_directory: Directory to which to save. Will be created if it doesn't exist.
         """
-        self._validate_iq_tensor_parallelism()
-        self._validate_iq_weight_shapes_collectively()
+        self._validate_iq_export()
 
         pp_rank = get_pipeline_model_parallel_rank()
         pp_size = get_pipeline_model_parallel_world_size()

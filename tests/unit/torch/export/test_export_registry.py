@@ -40,6 +40,8 @@ from modelopt.torch.export.registry import (
     _ExportHandlerRegistryCls,
 )
 from modelopt.torch.export.unified_export_hf import _process_quantized_modules
+from modelopt.torch.quantization.config import QuantizerAttributeConfig
+from modelopt.torch.quantization.nn import TensorQuantizer
 
 
 class _Experts(nn.Module):
@@ -301,6 +303,22 @@ def test_process_quantized_modules_exports_via_registry():
     for key in fp8_weights:
         weight = state_dict[key.replace("weight_scale", "weight")]
         assert weight.dtype == torch.float8_e4m3fn
+
+
+def test_iq_handler_attributes_configuration_error_to_qualified_weight():
+    linear = nn.Linear(256, 4, bias=False, dtype=torch.bfloat16)
+    linear.weight_quantizer = TensorQuantizer(
+        QuantizerAttributeConfig(
+            num_bits="iq2_xs",
+            block_sizes={-1: 256},
+            backend="ggml",
+        )
+    )
+    linear.input_quantizer = TensorQuantizer(QuantizerAttributeConfig(num_bits=8, axis=None))
+    ctx = ExportContext(model=linear, dtype=torch.bfloat16)
+
+    with pytest.raises(NotImplementedError, match=r"model\.layers\.3\.mlp\.down_proj\.weight"):
+        _export_quant_linear("model.layers.3.mlp.down_proj", linear, ctx)
 
 
 def test_export_context_carries_no_resolver():

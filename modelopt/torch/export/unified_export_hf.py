@@ -597,6 +597,7 @@ def _export_quantized_weight(
     sub_module: nn.Module,
     dtype: torch.dtype,
     weight_name: str = "weight",
+    describe_as: str | None = None,
 ):
     """For the given weight attr of the sub_module, export the quantization info of it.
 
@@ -631,7 +632,7 @@ def _export_quantized_weight(
                 f"attribute, got {weight_name!r} on {type(sub_module).__name__}"
             )
         packed_weight = _pack_iq_weight(
-            weight.to(dtype), quantization_format, sub_module, weight_name
+            weight.to(dtype), quantization_format, sub_module, weight_name, describe_as
         )
         setattr(sub_module, weight_name, nn.Parameter(packed_weight, requires_grad=False))
         maybe_clear_cuda_cache()

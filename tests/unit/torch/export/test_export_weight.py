@@ -182,6 +182,13 @@ def test_export_iq_dtype_error_identifies_weight(num_bits):
         _pack_iq_weight(weight, num_bits, describe_as="model.layers.0.weight")
 
 
+def test_iq_packer_rejects_non_iq_format_before_inspecting_module():
+    linear = nn.Linear(256, 4, bias=False, dtype=torch.bfloat16)
+
+    with pytest.raises(ValueError, match="Unsupported IQ quantization format: fp8"):
+        _pack_iq_weight(linear.weight, "fp8", module=linear)
+
+
 def test_export_iq_shape_preflight_reports_every_incompatible_weight():
     model = nn.Sequential(
         nn.Linear(192, 4, bias=False, dtype=torch.bfloat16),
