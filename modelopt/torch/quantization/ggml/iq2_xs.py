@@ -71,7 +71,6 @@ from .common import (
 __all__ = [
     "IQ2_XS_BLOCK_BYTES",
     "IQ2_XS_BLOCK_SIZE",
-    "IQ2_XS_EFFECTIVE_BITS",
     "dequantize_iq2_xs",
     "iq2_xs_fake_quant",
     "iq2_xs_grid",
@@ -80,7 +79,6 @@ __all__ = [
 
 IQ2_XS_BLOCK_SIZE = GGML_BLOCK_SIZE
 IQ2_XS_BLOCK_BYTES = 74
-IQ2_XS_EFFECTIVE_BITS = IQ2_XS_BLOCK_BYTES * 8 / IQ2_XS_BLOCK_SIZE
 _IQ2_XS_NATIVE_MAX = 43 * 31 / 8
 _IQ2_XS_PEAK_TO_RMS_SLOPE = 0.035
 _IQ2_XS_MIN_ANCHOR = 0.65
@@ -323,7 +321,7 @@ def iq2_xs_fake_quant(inputs: torch.Tensor, quantizer) -> torch.Tensor:
         inputs,
         quantizer,
         cache_namespace="iq2_xs",
-        quantize=lambda weight: (_quantize_iq2_xs_packed(weight), None),
+        quantize=_quantize_iq2_xs_packed,
         dequantize=dequantize_iq2_xs,
     )
     return inputs + (reconstructed - inputs).detach()

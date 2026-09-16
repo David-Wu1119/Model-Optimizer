@@ -353,7 +353,7 @@ def test_cached_reconstruction_bypasses_storage_identity_in_fake_mode(monkeypatc
         inputs,
         quantizer,
         cache_namespace="test",
-        quantize=lambda value: (value, torch.empty(0)),
+        quantize=lambda value: value,
         dequantize=lambda packed, _shape, dtype: packed.to(dtype),
     )
 

@@ -91,7 +91,7 @@ def cached_reconstruction(
     quantizer: Any,
     *,
     cache_namespace: str,
-    quantize: Callable[[torch.Tensor], tuple[torch.Tensor, torch.Tensor]],
+    quantize: Callable[[torch.Tensor], torch.Tensor],
     dequantize: Callable[..., torch.Tensor],
 ) -> torch.Tensor:
     """Return a reconstruction, caching only after the quantizer marks weights frozen.
@@ -140,8 +140,9 @@ def cached_reconstruction(
             f"{cache_namespace}: reconstruction cache abandoned because the source weight "
             "storage was replaced or freed (for example, by a device or dtype move, or "
             "per-forward weight materialization under CPU offload). Every forward will now "
-            "rerun the full codebook search. Call clear_reconstruction_cache() and then "
-            "freeze_reconstruction_cache() after the move to re-enable caching."
+            "rerun the full codebook search. Call clear_reconstruction_cache() after the move "
+            "to re-enable caching (and freeze_reconstruction_cache() too if the quantizer was "
+            "re-calibrated in between)."
         )
 
     cache_active = cache_enabled and not cache.get("abandoned", False)
@@ -157,7 +158,7 @@ def cached_reconstruction(
     if cache_hit:
         packed, shape = cache[packed_key], cache[shape_key]
     else:
-        packed, _ = quantize(inputs)
+        packed = quantize(inputs)
         # The backend receives the final logical block view, so its Python shape is the exact
         # metadata needed by the decoder and avoids a device-to-host copy on every cache hit.
         shape = tuple(inputs.shape)

@@ -75,7 +75,6 @@ from .common import (
 __all__ = [
     "IQ1_S_BLOCK_BYTES",
     "IQ1_S_BLOCK_SIZE",
-    "IQ1_S_EFFECTIVE_BITS",
     "dequantize_iq1_s",
     "iq1_s_fake_quant",
     "iq1_s_grid",
@@ -84,7 +83,6 @@ __all__ = [
 
 IQ1_S_BLOCK_SIZE = GGML_BLOCK_SIZE
 IQ1_S_BLOCK_BYTES = 50
-IQ1_S_EFFECTIVE_BITS = IQ1_S_BLOCK_BYTES * 8 / IQ1_S_BLOCK_SIZE
 _IQ1_S_DELTA = 0.125
 _IQ1_S_NATIVE_MAX = 16.875
 _IQ1_S_SCALE_ANCHOR = 0.61
@@ -319,7 +317,7 @@ def iq1_s_fake_quant(inputs: torch.Tensor, quantizer) -> torch.Tensor:
         inputs,
         quantizer,
         cache_namespace="iq1_s",
-        quantize=lambda weight: (_quantize_iq1_s_packed(weight), None),
+        quantize=_quantize_iq1_s_packed,
         dequantize=dequantize_iq1_s,
     )
     return inputs + (reconstructed - inputs).detach()

@@ -5,6 +5,7 @@
 
 # modelopt-schema: modelopt.torch.quantization.config.QuantizerAttributeConfig
 num_bits: iq1_s
+# Storage cost: 50 packed bytes * 8 / 256 weights. Keep in sync with IQ1_S_BLOCK_BYTES.
 effective_bits: 1.5625
 block_sizes:
   -1: 256
