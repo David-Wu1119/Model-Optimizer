@@ -111,6 +111,15 @@ def test_iq2_xs_zero_block_has_canonical_zero_encoding():
     assert torch.equal(dequantize_iq2_xs(packed, shape), weight)
 
 
+def test_iq2_xs_underflowed_scale_has_canonical_zero_encoding():
+    weight = torch.full((1, 256), -1e-6, dtype=torch.bfloat16)
+
+    packed, shape = quantize_iq2_xs(weight)
+
+    assert not packed.any()
+    assert torch.equal(dequantize_iq2_xs(packed, shape), torch.zeros_like(weight))
+
+
 def test_iq2_xs_round_trip_and_payload_fields():
     generator = torch.Generator().manual_seed(1234)
     weight = torch.randn((2, 512), generator=generator, dtype=torch.bfloat16)

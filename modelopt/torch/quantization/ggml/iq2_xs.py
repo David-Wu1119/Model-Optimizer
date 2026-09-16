@@ -248,7 +248,7 @@ def _encode_blocks(blocks: torch.Tensor, grid: torch.Tensor) -> torch.Tensor:
     packed[:, 2:66:2] = (codes & 0xFF).to(torch.uint8)
     packed[:, 3:66:2] = (codes >> 8).to(torch.uint8)
     packed[:, 66:] = (selected_local[:, 0::2] | (selected_local[:, 1::2] << 4)).to(torch.uint8)
-    return packed
+    return torch.where((d_float == 0).unsqueeze(1), 0, packed)
 
 
 @torch.no_grad()
