@@ -981,11 +981,11 @@ def test_grouped_mlp_slicing_maps_local_to_global_expert_ids():
     assert "experts.1.gate_up_proj.weight" not in exporter._state_dict
 
 
-def test_grouped_mlp_slicing_formats_quantized_state_prefix_per_expert():
+def test_grouped_mlp_slicing_preserves_exclusion_prefix_and_formats_iq_label():
     exporter = _make_exporter_for_grouped_mlp()
-    prefixes = []
+    calls = []
     exporter._get_quantized_state = lambda *a, **k: (
-        prefixes.append(k["prefix"]) or {},
+        calls.append((k["prefix"], k["describe_as"])) or {},
         None,
         0,
     )
@@ -993,7 +993,10 @@ def test_grouped_mlp_slicing_formats_quantized_state_prefix_per_expert():
 
     exporter._grouped_mlp_slicing(module, "experts.{}.gate_up_proj")
 
-    assert prefixes == ["experts.4.gate_up_proj.", "experts.5.gate_up_proj."]
+    assert calls == [
+        ("experts.{}.gate_up_proj", "experts.4.gate_up_proj.weight"),
+        ("experts.{}.gate_up_proj", "experts.5.gate_up_proj.weight"),
+    ]
 
 
 def test_grouped_mlp_slicing_normalizes_tensor_local_expert_indices():

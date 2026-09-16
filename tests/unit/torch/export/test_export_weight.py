@@ -235,6 +235,17 @@ def test_export_iq_shape_preflight_reports_every_incompatible_weight():
     assert "1.weight" not in message
 
 
+def test_export_iq_shape_preflight_skips_detailed_scan_without_iq(monkeypatch):
+    model = nn.Sequential(nn.Linear(32, 16), nn.ReLU())
+    monkeypatch.setattr(
+        quant_utils,
+        "_iq_export_weight_shape_errors",
+        lambda _model: pytest.fail("non-IQ export must skip the detailed weight scan"),
+    )
+
+    _validate_iq_export_weight_shapes(model)
+
+
 def test_export_iq_shape_preflight_reports_grouped_weights():
     class GroupedLinear(nn.Module):
         def __init__(self):

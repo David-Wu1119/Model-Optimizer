@@ -1144,6 +1144,7 @@ class GPTModelExporter:
         module: torch.nn.Module,
         dtype: torch.dtype = torch.float16,
         prefix: str = "",
+        describe_as: str | None = None,
     ) -> tuple[dict[str, torch.Tensor], str, int]:
         """Return a state_dict, quantization format, and block_size of the module.
 
@@ -1151,6 +1152,7 @@ class GPTModelExporter:
             module: The target module to perform real quantization.
             dtype: The default data type.
             prefix: The prefix of the layer.
+            describe_as: Optional logical weight label used only in IQ diagnostics.
 
         Returns:
             Tuple: state_dict, quantization format, and block_size of the module.
@@ -1163,9 +1165,8 @@ class GPTModelExporter:
 
         is_iq = qformat in IQ_FORMATS
         if is_iq:
-            _validate_iq_quantizer_config(
-                module, qformat, describe_as=f"{prefix}weight" if prefix else "weight"
-            )
+            weight_label = describe_as or (f"{prefix}weight" if prefix else "weight")
+            _validate_iq_quantizer_config(module, qformat, describe_as=weight_label)
         name_to_value = self._get_weight_bias(
             module, dtype, name_to_value, keep_weight_device=is_iq
         )
@@ -1516,7 +1517,10 @@ class GPTModelExporter:
                         temp_amax_wqs.append(_wq)
 
                 name_to_value, qformat, block_size = self._get_quantized_state(
-                    module, self.dtype, prefix=expert_prefix
+                    module,
+                    self.dtype,
+                    prefix=prefix,
+                    describe_as=expert_prefix + "weight",
                 )
                 weight_scale, weight_scale_2 = self._get_weight_scales(name_to_value, qformat)
                 name_to_value.pop("weight", None)

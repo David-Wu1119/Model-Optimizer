@@ -154,6 +154,11 @@ def _iq_export_weight_shape_errors(model: nn.Module) -> list[str]:
 
 def _validate_iq_export_weight_shapes(model: nn.Module) -> None:
     """Reject all unsupported IQ weights before export mutates the model."""
+    if not any(
+        isinstance(module, TensorQuantizer) and module.is_enabled and module.num_bits in IQ_FORMATS
+        for module in model.modules()
+    ):
+        return
     incompatible = _iq_export_weight_shape_errors(model)
 
     if incompatible:
