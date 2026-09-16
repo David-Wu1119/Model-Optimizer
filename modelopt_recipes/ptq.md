@@ -138,11 +138,12 @@ activations and tensor-core math are what deliver the throughput.
   activations. Needs no calibration forward pass; the QAT starting point for the
   GPT-OSS family (see `examples/gpt-oss`).
 - **`iq1_s` / `iq2_xs`** — GGML-compatible IQ1_S or IQ2_XS weights on all linear
-  layers, with BF16 activations. No calibration data is required. Prefer weights whose final
-  dimension is divisible by 256: the fake-quant path pads other shapes with zeros, which
-  prevents reconstruction-cache reuse and can degrade the fit in the final partial block. These
-  recipes configure simulated weight quantization only; packed checkpoint export is added
-  separately.
+  layers, with BF16 activations. Unified export replaces each logical weight with a shaped
+  `uint8` tensor whose final axis contains 50 or 74 bytes per 256-value block; there is no
+  separate shape tensor. No calibration data is required. Every selected weight's final
+  dimension must be divisible by 256 for packed export. Exclude other layers: the fake-quant
+  path pads them with zeros, which prevents reconstruction-cache reuse and can degrade the fit
+  in the final partial block.
 
 ---
 

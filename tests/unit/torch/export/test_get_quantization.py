@@ -94,6 +94,8 @@ def test_iq_quantization_config(num_bits, quantization_format, payload_bytes, st
         "num_bits": storage_bits,
         "type": "int",
         "group_size": 256,
+        "packing": "ggml",
+        "block_payload_bytes": payload_bytes,
     }
 
 

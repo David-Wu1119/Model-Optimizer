@@ -127,6 +127,8 @@ def _quant_algo_to_group_config(quant_algo: str, group_size: int | None = None) 
                 "num_bits": spec["num_bits"],
                 "type": "int",
                 "group_size": spec["group_size"],
+                "packing": spec["packing"],
+                "block_payload_bytes": spec["block_payload_bytes"],
             }
         }
     else:

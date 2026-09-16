@@ -1160,7 +1160,12 @@ class GPTModelExporter:
     def _get_iq_weight_state(
         weight_key: str, weight: torch.Tensor, qformat: str
     ) -> dict[str, torch.Tensor]:
-        """Pack one final-layout weight into the IQ unified-checkpoint representation."""
+        """Pack one final-layout weight into the IQ unified-checkpoint representation.
+
+        Every caller reaches this helper through :meth:`_get_quantized_state`, which validates
+        the owning module before its final-layout tensor is packed. A new direct caller must run
+        ``_validate_iq_quantizer_config`` before calling this helper.
+        """
         if get_tensor_model_parallel_world_size() != 1:
             raise NotImplementedError(
                 "Megatron IQ1_S/IQ2_XS unified export currently requires tensor model "

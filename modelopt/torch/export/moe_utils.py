@@ -162,9 +162,13 @@ def _export_fused_experts(
             is_iq = getattr(w_quantizer_src, "num_bits", None) in IQ_FORMATS
             i_quantizer = first_proj_input_q if uses_first_proj_quantizers else down_input_q
 
-            # gate/up share a weight quantizer — clone so each gets independent amax.
+            # Formats that export amax need independent gate/up copies before slicing it. IQ
+            # packing derives metadata from each weight directly, so retaining the source avoids
+            # duplicating a potentially populated reconstruction cache.
             w_quantizer = (
-                copy.deepcopy(w_quantizer_src) if uses_first_proj_quantizers else w_quantizer_src
+                copy.deepcopy(w_quantizer_src)
+                if uses_first_proj_quantizers and not is_iq
+                else w_quantizer_src
             )
 
             # For per-channel amax (dim >= 1), proportionally slice dim-0
