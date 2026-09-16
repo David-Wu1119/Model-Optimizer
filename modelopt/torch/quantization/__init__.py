@@ -28,4 +28,6 @@ from .model_quant import *
 from .nn.modules.quant_module import QuantModuleRegistry
 from .utils import update_quant_cfg_with_kv_cache_quant
 
+# Loading this before the core imports above creates a cycle through quantization.qtensor.
 ggml = _import_module(".ggml", __name__)
+del _import_module

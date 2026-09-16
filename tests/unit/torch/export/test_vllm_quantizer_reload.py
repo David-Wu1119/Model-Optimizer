@@ -24,8 +24,10 @@ from modelopt.torch.export.plugins.vllm_fakequant_hf import (
     _resmooth_experts_for_export,
     infer_quantizer_prefix_remap,
     merge_amax_tensors_for_group,
+    requant_weights_for_export,
 )
-from modelopt.torch.quantization.nn import QuantModuleRegistry
+from modelopt.torch.quantization.config import QuantizerAttributeConfig
+from modelopt.torch.quantization.nn import QuantModuleRegistry, TensorQuantizer
 
 
 def _map_backbone_to_model(sd: dict) -> dict:
@@ -188,3 +190,13 @@ def test_inplace_resmooth_clears_weight_reconstruction_caches(monkeypatch):
 
     assert all(linear.weight_quantizer._quantizer_cache is None for linear in linears)
     assert all(linear.weight_quantizer._reconstruction_cache_frozen for linear in linears)
+
+
+def test_inplace_requantization_restores_frozen_cache_declaration():
+    quantizer = TensorQuantizer(QuantizerAttributeConfig(num_bits=8, axis=None)).eval()
+    quantizer.freeze_quantizer_cache()
+
+    requant_weights_for_export(quantizer, torch.randn(4, 4), copy_quantizer=False)
+
+    assert quantizer._reconstruction_cache_frozen
+    assert quantizer._quantizer_cache is None

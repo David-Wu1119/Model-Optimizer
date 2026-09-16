@@ -21,6 +21,7 @@ import torch
 
 import modelopt.torch.quantization as mtq
 import modelopt.torch.quantization.ggml as ggml
+import modelopt.torch.quantization.ggml.common as ggml_common
 import modelopt.torch.quantization.ggml.iq1_s as iq1_s_module
 from modelopt.torch.quantization.config import QuantizerAttributeConfig
 from modelopt.torch.quantization.ggml.iq1_s import (
@@ -41,6 +42,7 @@ def test_ggml_public_api_excludes_internal_modules():
     assert mtq.ggml is ggml
     assert not hasattr(mtq, "quantize_iq1_s")
     assert not hasattr(mtq, "quantize_iq2_xs")
+    assert not hasattr(mtq, "_import_module")
 
 
 def test_iq1_s_canonical_grid():
@@ -230,6 +232,42 @@ def test_iq1_s_fake_quant_preserves_a_foreign_cache_object():
     quantizer(torch.randn(1, 256))
 
     assert quantizer._quantizer_cache is foreign_cache
+
+
+def test_iq1_s_fake_quant_preserves_foreign_dict_entries_when_cache_is_disabled():
+    quantizer = TensorQuantizer(
+        QuantizerAttributeConfig(
+            num_bits="iq1_s",
+            block_sizes={-1: 256},
+            backend="ggml",
+            backend_extra_args={"search_impl": "auto"},
+        )
+    ).eval()
+    foreign_value = object()
+    quantizer._quantizer_cache = {"foreign": foreign_value, "iq1_s_packed": torch.empty(0)}
+
+    quantizer(torch.randn(1, 256))
+
+    assert quantizer._quantizer_cache == {"foreign": foreign_value}
+
+
+def test_iq1_s_fake_quant_skips_storage_identity_when_cache_is_disabled(monkeypatch):
+    quantizer = TensorQuantizer(
+        QuantizerAttributeConfig(
+            num_bits="iq1_s",
+            block_sizes={-1: 256},
+            backend="ggml",
+            backend_extra_args={"search_impl": "auto"},
+        )
+    ).eval()
+
+    monkeypatch.setattr(
+        ggml_common,
+        "_cache_identity",
+        lambda _inputs: pytest.fail("storage identity must not run while caching is disabled"),
+    )
+
+    quantizer(torch.randn(1, 256))
 
 
 def test_iq1_s_frozen_cache_requires_explicit_clear_after_data_write():

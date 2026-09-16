@@ -16,7 +16,6 @@
 
 import copy
 import logging
-import re
 import warnings
 from collections.abc import Callable
 from contextlib import ExitStack, contextmanager
@@ -36,6 +35,7 @@ from modelopt.torch.quantization.nn import (
     QuantModule,
     SequentialQuantizer,
     TensorQuantizer,
+    is_weight_quantizer_path,
 )
 from modelopt.torch.quantization.utils import get_quantizer_state_dict
 from modelopt.torch.quantization.utils.core_utils import (
@@ -57,10 +57,6 @@ __all__ = [
     "merge_amax_tensors_for_group",
 ]
 
-# Matches ``…weight_quantizer``, ``…weight_quantizer.0``, ``…w13_weight_quantizer.0``,
-# and the plural fused-experts form ``…weight_quantizers.0`` (per-expert ModuleList).
-_WEIGHT_QUANTIZER_STATE_KEY = re.compile(r"(?:^|\.)(?:\w+_)?weight_quantizers?(?:\.\d+)*$")
-
 
 def is_weight_quantizer_state_key(key: str) -> bool:
     """Return True for weight-quantizer state keys.
@@ -70,7 +66,7 @@ def is_weight_quantizer_state_key(key: str) -> bool:
     ``w13_weight_quantizer``, ``weight_quantizer.0``,
     ``gate_up_proj_weight_quantizers.0``, etc.
     """
-    return bool(_WEIGHT_QUANTIZER_STATE_KEY.search(key))
+    return is_weight_quantizer_path(key)
 
 
 def _clear_weight_quantizer_caches(module: nn.Module) -> None:
@@ -322,22 +318,32 @@ def requant_weights_for_export(
     quantizers: list[TensorQuantizer] = (
         list(copied) if isinstance(copied, SequentialQuantizer) else [copied]
     )
+    frozen_cache_states = [
+        getattr(quantizer_copy, "_reconstruction_cache_frozen", False)
+        for quantizer_copy in quantizers
+    ]
 
-    for quantizer_copy in quantizers:
-        quantizer_copy.eval()
-        quantizer_copy.reset_amax()
-        enable_stats_collection(quantizer_copy)
-    weight_quantized = weight
-    for quantizer_copy in quantizers:
-        weight_quantized = quantizer_copy(weight_quantized)
-    for quantizer_copy in quantizers:
-        finish_stats_collection(quantizer_copy)
-    # Re-run application pass to get the quantized output with the freshly collected amax.
-    # The calibration forward above only collected stats; its output is intentionally discarded.
-    weight_quantized = weight
-    for quantizer_copy in quantizers:
-        weight_quantized = quantizer_copy(weight_quantized)
-    return weight_quantized.to(weight.dtype)
+    try:
+        for quantizer_copy in quantizers:
+            quantizer_copy.eval()
+            quantizer_copy.reset_amax()
+            enable_stats_collection(quantizer_copy)
+        weight_quantized = weight
+        for quantizer_copy in quantizers:
+            weight_quantized = quantizer_copy(weight_quantized)
+        for quantizer_copy in quantizers:
+            finish_stats_collection(quantizer_copy)
+        # Re-run application pass to get the quantized output with the freshly collected amax.
+        # The calibration forward above only collected stats; its output is intentionally discarded.
+        weight_quantized = weight
+        for quantizer_copy in quantizers:
+            weight_quantized = quantizer_copy(weight_quantized)
+        return weight_quantized.to(weight.dtype)
+    finally:
+        if not copy_quantizer:
+            for quantizer_copy, was_frozen in zip(quantizers, frozen_cache_states):
+                if was_frozen:
+                    quantizer_copy.freeze_quantizer_cache()
 
 
 def merge_amax_tensors_for_group(tensors: list[torch.Tensor]) -> torch.Tensor:

@@ -17,6 +17,7 @@
 
 import contextlib
 import math
+import re
 import warnings
 from collections.abc import Callable
 from typing import Any, Protocol
@@ -80,6 +81,7 @@ __all__ = [
     "TensorQuantizerCache",
     "freeze_reconstruction_caches",
     "is_registered_quant_backend",
+    "is_weight_quantizer_path",
     "quant_backend_caches_reconstruction",
     "register_quant_backend",
     "unregister_quant_backend",
@@ -90,6 +92,7 @@ QuantBackendEntrypoint = Callable[[torch.Tensor, "TensorQuantizer"], torch.Tenso
 
 _QUANT_FUNCTIONAL_BACKENDS: dict[str, QuantBackendEntrypoint] = {}
 _RECONSTRUCTION_CACHE_BACKENDS: set[str] = set()
+_WEIGHT_QUANTIZER_PATH = re.compile(r"(?:^|\.)(?:\w+_)?weight_quantizers?(?:\.\d+)*$")
 
 
 def register_quant_backend(
@@ -146,21 +149,29 @@ def quant_backend_caches_reconstruction(name: str | None) -> bool:
     return name in _RECONSTRUCTION_CACHE_BACKENDS if name is not None else False
 
 
+def is_weight_quantizer_path(path: str) -> bool:
+    """Return whether a module or state path identifies a weight quantizer."""
+    return bool(_WEIGHT_QUANTIZER_PATH.search(path))
+
+
 def freeze_reconstruction_caches(model: nn.Module) -> None:
     """Declare weights frozen for quantizers whose backends cache reconstructions."""
     for name, module in model.named_modules():
         if (
             isinstance(module, TensorQuantizer)
-            and any(
-                part.endswith(("weight_quantizer", "weight_quantizers")) for part in name.split(".")
-            )
+            and is_weight_quantizer_path(name)
             and quant_backend_caches_reconstruction(module.backend)
         ):
             module.freeze_quantizer_cache()
 
 
 class TensorQuantizerCache(Protocol):
-    """A protocol for a cache interface for TensorQuantizer."""
+    """A protocol for a cache interface for TensorQuantizer.
+
+    The cache slot is shared by quantization backends and may be dropped after calibration,
+    configuration changes, or supported in-place weight rewrites. Backends must rebuild their
+    cache lazily on the next forward.
+    """
 
 
 class TensorQuantizer(nn.Module):
@@ -416,7 +427,7 @@ class TensorQuantizer(nn.Module):
             self._amax.data.copy_(value.clone().detach().to(self._amax.device))
 
     def reset_amax(self):
-        """Reset amax to None."""
+        """Reset amax and discard the shared backend cache slot."""
         self.unfreeze_quantizer_cache()
         if hasattr(self, "_amax"):
             delattr(self, "_amax")
@@ -424,7 +435,10 @@ class TensorQuantizer(nn.Module):
         self.reset_bias()
 
     def clear_quantizer_cache(self):
-        """Discard cached payloads while preserving frozen-cache eligibility."""
+        """Drop the shared backend cache slot while preserving frozen-cache eligibility.
+
+        Any backend using ``_quantizer_cache`` must rebuild its cache lazily on the next forward.
+        """
         self._quantizer_cache = None
 
     def freeze_quantizer_cache(self):

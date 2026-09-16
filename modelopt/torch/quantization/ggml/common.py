@@ -70,20 +70,20 @@ def cached_reconstruction(
         and getattr(quantizer, "_reconstruction_cache_frozen", False)
         and (raw_cache is None or isinstance(raw_cache, dict))
     )
-    cache: dict[str, Any] = raw_cache if isinstance(raw_cache, dict) else {}
-    if cache_enabled and raw_cache is None:
-        quantizer._quantizer_cache = cache
-    elif not cache_enabled and isinstance(raw_cache, dict):
-        cache = {}
-        quantizer._quantizer_cache = None
-
     storage_key = f"{cache_namespace}_storage"
     signature_key = f"{cache_namespace}_signature"
     packed_key = f"{cache_namespace}_packed"
     shape_key = f"{cache_namespace}_shape"
 
-    storage, signature = _cache_identity(inputs)
-    cached_storage_ref = cache.get(storage_key)
+    cache: dict[str, Any] = raw_cache if isinstance(raw_cache, dict) else {}
+    if cache_enabled and raw_cache is None:
+        quantizer._quantizer_cache = cache
+    elif not cache_enabled and isinstance(raw_cache, dict):
+        for key in (storage_key, signature_key, packed_key, shape_key):
+            raw_cache.pop(key, None)
+
+    storage, signature = _cache_identity(inputs) if cache_enabled else (None, None)
+    cached_storage_ref = cache.get(storage_key) if cache_enabled else None
     cache_hit = (
         cache_enabled
         and isinstance(cached_storage_ref, weakref.ReferenceType)

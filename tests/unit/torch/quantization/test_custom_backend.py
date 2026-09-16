@@ -27,6 +27,7 @@ from modelopt.torch.quantization.nn import (
     TensorQuantizer,
     TensorQuantizerCache,
     freeze_reconstruction_caches,
+    is_weight_quantizer_path,
     quant_backend_caches_reconstruction,
     register_quant_backend,
     unregister_quant_backend,
@@ -128,6 +129,14 @@ def test_freezing_reconstruction_cache_skips_activation_quantizers():
         assert not model.input_quantizer._reconstruction_cache_frozen
     finally:
         unregister_quant_backend(backend_name)
+
+
+def test_weight_quantizer_path_requires_a_terminal_weight_quantizer():
+    assert is_weight_quantizer_path("layers.0.weight_quantizer")
+    assert is_weight_quantizer_path("layers.0.w13_weight_quantizer.1")
+    assert is_weight_quantizer_path("experts.weight_quantizers.3")
+    assert not is_weight_quantizer_path("layers.0.weight_quantizer.child")
+    assert not is_weight_quantizer_path("layers.0.input_quantizer")
 
 
 def test_quantizer_config_edits_clear_payload_without_unfreezing_weight_cache():
