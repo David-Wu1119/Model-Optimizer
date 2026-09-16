@@ -41,6 +41,11 @@ constexpr int kWarpSize = 32;
 constexpr int kWarps = kThreads / kWarpSize;
 // Largest grid value times the largest local multiplier, divided by 8.
 constexpr float kNativeMax = 43.0f * 31.0f / 8.0f;
+// Peak-clipping heuristic mirrored from the reference encoder: the anchor backs off from 1.0 as
+// the block's peak-to-RMS ratio grows, bounded to this interval.
+constexpr float kPeakToRmsSlope = 0.035f;
+constexpr float kMinAnchor = 0.65f;
+constexpr float kMaxAnchor = 0.92f;
 static_assert(kThreads % kWarpSize == 0);
 
 template <typename scalar_t> __device__ __forceinline__ float load_float(const scalar_t *input) {
@@ -87,7 +92,7 @@ __global__ void find_scale(const scalar_t *input, int64_t num_blocks, int16_t *s
   }
   const float rms = sqrtf(sumsq / kBlockSize);
   const float peak_to_rms = rms > 0.0f ? amax / rms : 0.0f;
-  const float anchor = fminf(0.92f, fmaxf(0.65f, 1.0f - 0.035f * peak_to_rms));
+  const float anchor = fminf(kMaxAnchor, fmaxf(kMinAnchor, 1.0f - kPeakToRmsSlope * peak_to_rms));
   const __half scale = __float2half_rn(fminf((amax / kNativeMax) * anchor, 65504.0f));
   scale_bits[block] = static_cast<int16_t>(__half_as_ushort(scale));
 }
