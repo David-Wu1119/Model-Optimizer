@@ -148,9 +148,13 @@ def quant_backend_caches_reconstruction(name: str | None) -> bool:
 
 def freeze_reconstruction_caches(model: nn.Module) -> None:
     """Declare weights frozen for quantizers whose backends cache reconstructions."""
-    for module in model.modules():
-        if isinstance(module, TensorQuantizer) and quant_backend_caches_reconstruction(
-            module.backend
+    for name, module in model.named_modules():
+        if (
+            isinstance(module, TensorQuantizer)
+            and any(
+                part.endswith(("weight_quantizer", "weight_quantizers")) for part in name.split(".")
+            )
+            and quant_backend_caches_reconstruction(module.backend)
         ):
             module.freeze_quantizer_cache()
 

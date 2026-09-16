@@ -38,6 +38,9 @@ def test_ggml_public_api_excludes_internal_modules():
     assert "common" not in ggml.__all__
     assert "iq1_s" not in ggml.__all__
     assert "iq2_xs" not in ggml.__all__
+    assert mtq.ggml is ggml
+    assert not hasattr(mtq, "quantize_iq1_s")
+    assert not hasattr(mtq, "quantize_iq2_xs")
 
 
 def test_iq1_s_canonical_grid():

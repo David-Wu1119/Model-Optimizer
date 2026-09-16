@@ -22,9 +22,11 @@ import torch
 
 import modelopt.torch.opt as mto
 import modelopt.torch.quantization as mtq
+from modelopt.torch.quantization.config import QuantizerAttributeConfig
 from modelopt.torch.quantization.nn import (
     TensorQuantizer,
     TensorQuantizerCache,
+    freeze_reconstruction_caches,
     quant_backend_caches_reconstruction,
     register_quant_backend,
     unregister_quant_backend,
@@ -107,6 +109,25 @@ def test_freezing_reconstruction_cache_preserves_custom_backend_cache():
 
     assert quantizer._reconstruction_cache_frozen
     assert quantizer._quantizer_cache is backend_cache
+
+
+def test_freezing_reconstruction_cache_skips_activation_quantizers():
+    backend_name = "weight_only_reconstruction_cache_backend"
+    register_quant_backend(
+        backend_name, lambda inputs, _quantizer: inputs, caches_reconstruction=True
+    )
+    model = torch.nn.Module()
+    quantizer_config = QuantizerAttributeConfig(num_bits=8, backend=backend_name)
+    model.weight_quantizer = TensorQuantizer(quantizer_config)
+    model.input_quantizer = TensorQuantizer(quantizer_config)
+
+    try:
+        freeze_reconstruction_caches(model)
+
+        assert model.weight_quantizer._reconstruction_cache_frozen
+        assert not model.input_quantizer._reconstruction_cache_frozen
+    finally:
+        unregister_quant_backend(backend_name)
 
 
 def test_custom_backend_via_quantize():

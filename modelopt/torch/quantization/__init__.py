@@ -15,6 +15,8 @@
 
 """Quantization package."""
 
+from importlib import import_module as _import_module
+
 # Initialize mode and plugins
 from . import mode, plugins, utils
 
@@ -22,7 +24,8 @@ from . import mode, plugins, utils
 from .compress import *
 from .config import *
 from .conversion import *
-from .ggml import *
 from .model_quant import *
 from .nn.modules.quant_module import QuantModuleRegistry
 from .utils import update_quant_cfg_with_kv_cache_quant
+
+ggml = _import_module(".ggml", __name__)
