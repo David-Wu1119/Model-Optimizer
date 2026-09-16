@@ -83,6 +83,8 @@ __all__ = [
 
 IQ1_S_BLOCK_SIZE = GGML_BLOCK_SIZE
 IQ1_S_BLOCK_BYTES = 50
+_IQ1_S_DECODE_BLOCK_CHUNK_SIZE = 4096
+_IQ1_S_SUPPORTED_BACKEND_EXTRA_ARGS = frozenset({"search_impl"})
 _IQ1_S_DELTA = 0.125
 _IQ1_S_NATIVE_MAX = 16.875
 _IQ1_S_SCALE_ANCHOR = 0.61
@@ -283,6 +285,7 @@ def dequantize_iq1_s(
     weight_shape: torch.Tensor | tuple[int, ...],
     *,
     dtype: torch.dtype = torch.bfloat16,
+    block_chunk_size: int | None = None,
 ) -> torch.Tensor:
     """Decode GGML-compatible IQ1_S payload bytes."""
     shape = validate_packed_weights(
@@ -290,19 +293,34 @@ def dequantize_iq1_s(
     )
 
     blocks = packed_weights.contiguous().reshape(-1, IQ1_S_BLOCK_BYTES)
-    d = blocks[:, :2].contiguous().view(torch.float16).reshape(-1).float()
-    low = blocks[:, 2:34].to(torch.int32).reshape(-1, 8, 4)
-    qh = blocks[:, 34:50:2].to(torch.int32) | (blocks[:, 35:50:2].to(torch.int32) << 8)
-    shifts = torch.tensor([0, 3, 6, 9], dtype=torch.int32, device=blocks.device)
-    high = (qh.unsqueeze(-1) >> shifts) & 0x7
-    entries = low | (high << 8)
+    if block_chunk_size is None:
+        block_chunk_size = (
+            max(1, blocks.shape[0])
+            if detect_fake_mode(packed_weights) is not None
+            else _IQ1_S_DECODE_BLOCK_CHUNK_SIZE
+        )
+    if block_chunk_size <= 0:
+        raise ValueError(f"block_chunk_size must be positive, got {block_chunk_size}")
 
-    local = (qh >> 12) & 0x7
-    delta = torch.where((qh & 0x8000).bool(), -_IQ1_S_DELTA, _IQ1_S_DELTA)
-    values = _cached_iq1_s_grid(blocks.device)[entries] + delta.unsqueeze(-1).unsqueeze(-1)
-    scales = d.unsqueeze(-1) * (2 * local + 1).float()
-    decoded = values * scales.unsqueeze(-1).unsqueeze(-1)
-    return decoded.reshape(shape).to(dtype)
+    decoded = torch.empty((blocks.shape[0], IQ1_S_BLOCK_SIZE), dtype=dtype, device=blocks.device)
+    shifts = torch.tensor([0, 3, 6, 9], dtype=torch.int32, device=blocks.device)
+    grid = _cached_iq1_s_grid(blocks.device)
+    for start in range(0, blocks.shape[0], block_chunk_size):
+        chunk = blocks[start : start + block_chunk_size]
+        d = chunk[:, :2].contiguous().view(torch.float16).reshape(-1).float()
+        low = chunk[:, 2:34].to(torch.int32).reshape(-1, 8, 4)
+        qh = chunk[:, 34:50:2].to(torch.int32) | (chunk[:, 35:50:2].to(torch.int32) << 8)
+        high = (qh.unsqueeze(-1) >> shifts) & 0x7
+        entries = low | (high << 8)
+
+        local = (qh >> 12) & 0x7
+        delta = torch.where((qh & 0x8000).bool(), -_IQ1_S_DELTA, _IQ1_S_DELTA)
+        values = grid[entries]
+        values.add_(delta.unsqueeze(-1).unsqueeze(-1))
+        scales = d.unsqueeze(-1) * (2 * local + 1).float()
+        values.mul_(scales.unsqueeze(-1).unsqueeze(-1))
+        decoded[start : start + chunk.shape[0]].copy_(values.reshape(-1, IQ1_S_BLOCK_SIZE))
+    return decoded.reshape(shape)
 
 
 def iq1_s_fake_quant(inputs: torch.Tensor, quantizer) -> torch.Tensor:
@@ -310,6 +328,12 @@ def iq1_s_fake_quant(inputs: torch.Tensor, quantizer) -> torch.Tensor:
     if getattr(quantizer, "num_bits", None) != "iq1_s":
         raise ValueError("The ggml IQ1_S backend requires num_bits='iq1_s'")
     extra_args = getattr(quantizer, "backend_extra_args", None) or {}
+    unknown_keys = set(extra_args) - _IQ1_S_SUPPORTED_BACKEND_EXTRA_ARGS
+    if unknown_keys:
+        raise ValueError(
+            f"Unsupported IQ1_S backend_extra_args keys: {sorted(unknown_keys)}; "
+            f"supported: {sorted(_IQ1_S_SUPPORTED_BACKEND_EXTRA_ARGS)}"
+        )
     search_impl = extra_args.get("search_impl", "auto")
     if search_impl != "auto":
         raise NotImplementedError("Only IQ1_S search_impl='auto' is currently supported")

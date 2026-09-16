@@ -132,6 +132,22 @@ def test_iq2_xs_round_trip_and_payload_fields():
     assert torch.all((codes >> 9) < 128)
 
 
+def test_iq2_xs_chunked_decode_matches_single_chunk():
+    weight = torch.randn((2, 512), generator=torch.Generator().manual_seed(71))
+    packed, shape = quantize_iq2_xs(weight, block_chunk_size=2)
+
+    expected = dequantize_iq2_xs(packed, shape, dtype=torch.float32, block_chunk_size=4)
+    actual = dequantize_iq2_xs(packed, shape, dtype=torch.float32, block_chunk_size=1)
+
+    assert torch.equal(actual, expected)
+
+
+def test_iq2_xs_rejects_nonpositive_decode_chunk_size():
+    packed = torch.zeros((1, 1, IQ2_XS_BLOCK_BYTES), dtype=torch.uint8)
+    with pytest.raises(ValueError, match="block_chunk_size must be positive"):
+        dequantize_iq2_xs(packed, (1, 256), block_chunk_size=0)
+
+
 def test_iq2_xs_dequantizes_ggml_metadata_bit_fields():
     packed = torch.zeros((1, 1, IQ2_XS_BLOCK_BYTES), dtype=torch.uint8)
     packed[0, 0, :2] = torch.tensor([4.0], dtype=torch.float16).view(torch.uint8)
@@ -187,6 +203,15 @@ def test_iq2_xs_fake_quant_has_pass_through_gradient():
     output.sum().backward()
 
     assert torch.equal(weight.grad, torch.ones_like(weight))
+
+
+def test_iq2_xs_fake_quant_rejects_unknown_backend_extra_args():
+    class Quantizer:
+        num_bits = "iq2_xs"
+        backend_extra_args = {"search_impls": "auto"}
+
+    with pytest.raises(ValueError, match=r"Unsupported IQ2_XS.*search_impls"):
+        iq2_xs_fake_quant(torch.randn(1, 256), Quantizer())
 
 
 def test_iq2_xs_fake_quant_reuses_cached_reconstruction(monkeypatch):

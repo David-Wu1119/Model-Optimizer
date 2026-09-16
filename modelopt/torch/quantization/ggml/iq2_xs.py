@@ -79,6 +79,8 @@ __all__ = [
 
 IQ2_XS_BLOCK_SIZE = GGML_BLOCK_SIZE
 IQ2_XS_BLOCK_BYTES = 74
+_IQ2_XS_DECODE_BLOCK_CHUNK_SIZE = 4096
+_IQ2_XS_SUPPORTED_BACKEND_EXTRA_ARGS = frozenset({"search_impl"})
 _IQ2_XS_NATIVE_MAX = 43 * 31 / 8
 _IQ2_XS_PEAK_TO_RMS_SLOPE = 0.035
 _IQ2_XS_MIN_ANCHOR = 0.65
@@ -298,6 +300,7 @@ def dequantize_iq2_xs(
     weight_shape: torch.Tensor | tuple[int, ...],
     *,
     dtype: torch.dtype = torch.bfloat16,
+    block_chunk_size: int | None = None,
 ) -> torch.Tensor:
     """Decode GGML-compatible IQ2_XS payload bytes."""
     shape = validate_packed_weights(
@@ -305,21 +308,35 @@ def dequantize_iq2_xs(
     )
 
     blocks = packed_weights.contiguous().reshape(-1, IQ2_XS_BLOCK_BYTES)
-    d = blocks[:, :2].contiguous().view(torch.float16).reshape(-1).float()
-    codes = blocks[:, 2:66:2].to(torch.int32) | (blocks[:, 3:66:2].to(torch.int32) << 8)
-    entries = codes & 0x1FF
-    sign_index = codes >> 9
+    if block_chunk_size is None:
+        block_chunk_size = (
+            max(1, blocks.shape[0])
+            if detect_fake_mode(packed_weights) is not None
+            else _IQ2_XS_DECODE_BLOCK_CHUNK_SIZE
+        )
+    if block_chunk_size <= 0:
+        raise ValueError(f"block_chunk_size must be positive, got {block_chunk_size}")
 
-    signs = _cached_iq2_xs_sign_table(blocks.device)[sign_index]
+    decoded = torch.empty((blocks.shape[0], IQ2_XS_BLOCK_SIZE), dtype=dtype, device=blocks.device)
+    grid = _cached_iq2_xs_grid(blocks.device)
+    sign_table = _cached_iq2_xs_sign_table(blocks.device)
+    for start in range(0, blocks.shape[0], block_chunk_size):
+        chunk = blocks[start : start + block_chunk_size]
+        d = chunk[:, :2].contiguous().view(torch.float16).reshape(-1).float()
+        codes = chunk[:, 2:66:2].to(torch.int32) | (chunk[:, 3:66:2].to(torch.int32) << 8)
+        entries = codes & 0x1FF
+        signs = sign_table[codes >> 9]
 
-    scale_bytes = blocks[:, 66:].to(torch.int32)
-    local = torch.empty((blocks.shape[0], 16), dtype=torch.int32, device=blocks.device)
-    local[:, 0::2] = scale_bytes & 0x0F
-    local[:, 1::2] = scale_bytes >> 4
-    scales = d.unsqueeze(-1) * (2 * local + 1).float() / 8.0
-    values = _cached_iq2_xs_grid(blocks.device)[entries] * signs
-    decoded = values * scales.repeat_interleave(2, dim=1).unsqueeze(-1)
-    return decoded.reshape(shape).to(dtype)
+        scale_bytes = chunk[:, 66:].to(torch.int32)
+        local = torch.empty((chunk.shape[0], 16), dtype=torch.int32, device=blocks.device)
+        local[:, 0::2] = scale_bytes & 0x0F
+        local[:, 1::2] = scale_bytes >> 4
+        scales = d.unsqueeze(-1) * (2 * local + 1).float() / 8.0
+        values = grid[entries]
+        values.mul_(signs)
+        values.mul_(scales.repeat_interleave(2, dim=1).unsqueeze(-1))
+        decoded[start : start + chunk.shape[0]].copy_(values.reshape(-1, IQ2_XS_BLOCK_SIZE))
+    return decoded.reshape(shape)
 
 
 def iq2_xs_fake_quant(inputs: torch.Tensor, quantizer) -> torch.Tensor:
@@ -327,6 +344,12 @@ def iq2_xs_fake_quant(inputs: torch.Tensor, quantizer) -> torch.Tensor:
     if getattr(quantizer, "num_bits", None) != "iq2_xs":
         raise ValueError("The ggml IQ2_XS backend requires num_bits='iq2_xs'")
     extra_args = getattr(quantizer, "backend_extra_args", None) or {}
+    unknown_keys = set(extra_args) - _IQ2_XS_SUPPORTED_BACKEND_EXTRA_ARGS
+    if unknown_keys:
+        raise ValueError(
+            f"Unsupported IQ2_XS backend_extra_args keys: {sorted(unknown_keys)}; "
+            f"supported: {sorted(_IQ2_XS_SUPPORTED_BACKEND_EXTRA_ARGS)}"
+        )
     search_impl = extra_args.get("search_impl", "auto")
     if search_impl != "auto":
         raise NotImplementedError("Only IQ2_XS search_impl='auto' is currently supported")
