@@ -299,6 +299,7 @@ def test_export_iq_preflight_rejects_nonstandard_weight_before_mutation(tmp_path
 
     model = nn.Module()
     model.block = CustomWeightModule()
+    model.config = SimpleNamespace(torch_dtype=torch.bfloat16)
     original_weight = model.block.proj.detach().clone()
 
     with pytest.raises(ValueError, match=r"block\.proj: nonstandard weight"):
@@ -325,6 +326,7 @@ def test_export_hf_checkpoint_runs_iq_shape_preflight_before_mutation(tmp_path):
             backend="ggml",
         )
     )
+    linear.config = SimpleNamespace(torch_dtype=torch.bfloat16)
     original_weight = linear.weight.detach().clone()
 
     with pytest.raises(ValueError, match=r"weight: \(4, 192\)"):

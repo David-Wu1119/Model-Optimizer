@@ -1688,8 +1688,6 @@ def export_hf_checkpoint(
         )
         return
 
-    _validate_iq_export_weight_shapes(model)
-
     is_fsdp2_sharded = (
         torch.distributed.is_available()
         and torch.distributed.is_initialized()

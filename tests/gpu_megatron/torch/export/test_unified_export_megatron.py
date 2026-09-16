@@ -981,6 +981,21 @@ def test_grouped_mlp_slicing_maps_local_to_global_expert_ids():
     assert "experts.1.gate_up_proj.weight" not in exporter._state_dict
 
 
+def test_grouped_mlp_slicing_formats_quantized_state_prefix_per_expert():
+    exporter = _make_exporter_for_grouped_mlp()
+    prefixes = []
+    exporter._get_quantized_state = lambda *a, **k: (
+        prefixes.append(k["prefix"]) or {},
+        None,
+        0,
+    )
+    module = _FakeTEGroupedMLP(num_gemms=2, local_expert_indices=[4, 5])
+
+    exporter._grouped_mlp_slicing(module, "experts.{}.gate_up_proj")
+
+    assert prefixes == ["experts.4.gate_up_proj.", "experts.5.gate_up_proj."]
+
+
 def test_grouped_mlp_slicing_normalizes_tensor_local_expert_indices():
     """local_expert_indices may arrive as a torch.Tensor (Megatron path). It must be
     normalized to list[int] -- a naive `bool(tensor)` on a multi-element tensor raises.

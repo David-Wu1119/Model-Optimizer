@@ -1516,7 +1516,7 @@ class GPTModelExporter:
                         temp_amax_wqs.append(_wq)
 
                 name_to_value, qformat, block_size = self._get_quantized_state(
-                    module, self.dtype, prefix=prefix
+                    module, self.dtype, prefix=expert_prefix
                 )
                 weight_scale, weight_scale_2 = self._get_weight_scales(name_to_value, qformat)
                 name_to_value.pop("weight", None)
