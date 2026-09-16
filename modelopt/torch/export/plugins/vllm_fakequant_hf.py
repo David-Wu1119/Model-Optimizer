@@ -73,6 +73,13 @@ def is_weight_quantizer_state_key(key: str) -> bool:
     return bool(_WEIGHT_QUANTIZER_STATE_KEY.search(key))
 
 
+def _clear_weight_quantizer_caches(module: nn.Module) -> None:
+    """Invalidate reconstruction payloads after an in-place weight rewrite."""
+    for name, quantizer in module.named_modules():
+        if isinstance(quantizer, TensorQuantizer) and is_weight_quantizer_state_key(name):
+            quantizer.clear_quantizer_cache()
+
+
 def infer_quantizer_prefix_remap(
     quantizer_keys: dict[str, Any],
     map_fun: Callable[[dict[str, Any]], dict[str, Any]],
@@ -183,6 +190,7 @@ def _fakequant_fused_experts_weights(
                     continue
                 slice_ = w.data[idx]
                 slice_.copy_(q(slice_.float()).to(w.dtype))
+            _clear_weight_quantizer_caches(module)
         else:
             if state_dict is None or sd_key not in state_dict:
                 continue
@@ -265,6 +273,7 @@ def _fakequant_module_weights(
 
         if inplace:
             w.data.copy_(w_quant)
+            quantizer.clear_quantizer_cache()
         else:
             if state_dict is None:
                 raise RuntimeError("state_dict is required when inplace=False for fakequant export")
@@ -447,6 +456,7 @@ def _resmooth_experts_for_export(
                     device=w_param.device
                 )
                 w_param.data.copy_((w_param.to(torch.float32) * ratio).to(w_param.dtype))
+                _clear_weight_quantizer_caches(m)
             else:
                 if state_dict is None:
                     raise RuntimeError(

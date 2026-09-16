@@ -97,6 +97,15 @@ def test_quantizer_container_base_delegates_shared_contract(
     assert rotate_container.disable_rotate() == expected_disable_result
     assert not any(quantizer.rotate_is_enabled for quantizer in rotate_quantizers)
 
+    for quantizer in quantizers:
+        quantizer._quantizer_cache = {"payload": torch.tensor(1)}
+    container.freeze_quantizer_cache()
+    assert all(quantizer._reconstruction_cache_frozen for quantizer in quantizers)
+    container.clear_quantizer_cache()
+    assert all(quantizer._quantizer_cache is None for quantizer in quantizers)
+    container.unfreeze_quantizer_cache()
+    assert not any(quantizer._reconstruction_cache_frozen for quantizer in quantizers)
+
 
 @pytest.mark.parametrize("container_cls", [SequentialQuantizer, GroupedQuantizer])
 def test_quantizer_container_base_sets_attribute_config(container_cls):

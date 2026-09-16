@@ -1791,6 +1791,9 @@ class _QuantizerContainerBase:
         "enable",
         "load_calib_amax",
         "load_calib_bias",
+        "clear_quantizer_cache",
+        "freeze_quantizer_cache",
+        "unfreeze_quantizer_cache",
     ]
 
     def __getitem__(self, idx) -> Any:
