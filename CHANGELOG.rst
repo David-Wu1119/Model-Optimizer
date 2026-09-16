@@ -16,6 +16,10 @@ Changelog
 
 **Backward Breaking Changes**
 
+- ``TrtExecBenchmark`` with ``--remoteAutoTuningConfig`` and TensorRT < 10.15 now raises ``ImportError`` at construction time instead of silently falling back. Re-install a TensorRT >= 10.15 build to use remote autotuning.
+- ``TrtExecBenchmark`` with ``--remoteAutoTuningConfig`` will use ``GPU Compute Time`` for latency measurements instead of ``Latency`` since trtexec_safe does not produce a latency output.  This should not break any existing workflows since this workflow is being enabled in this release.
+- ``--plugin_libraries`` combined with ``--remoteAutoTuningConfig`` now raises ``ValueError`` at construction time; the combination was silently broken before (local ``.so`` paths were forwarded to the local build but not to the remote measurement, so plugin-dependent engines always returned ``inf``).
+
 **Deprecations**
 
 - The TensorRT-LLM checkpoint export format is deprecated and will be removed in 0.49.0: ``export_tensorrt_llm_checkpoint`` and ``torch_to_tensorrt_llm_checkpoint`` now emit a ``DeprecationWarning`` on use. Use ``export_hf_checkpoint``, which exports a unified Hugging Face checkpoint deployable on TensorRT-LLM, vLLM and SGLang. Its implementation moved to ``modelopt.torch.export.trtllm``, so import those two functions from there and the ``ModelConfig`` dataclasses from ``modelopt.torch.export.trtllm.model_config``; both functions remain importable from ``modelopt.torch.export`` for this release only.

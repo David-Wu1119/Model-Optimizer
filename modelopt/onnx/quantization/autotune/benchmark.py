@@ -417,6 +417,12 @@ class TrtExecBenchmark(Benchmark):
                 )
                 raise
             self.trtexec_args = _ensure_remote_autotuning_flags(self.trtexec_args, log=self.logger)
+            if self.plugin_libraries:
+                raise ValueError(
+                    "plugin_libraries cannot be used with --remoteAutoTuningConfig: the local "
+                    ".so paths are not available on the remote device. Pass plugin paths via "
+                    "LD_LIBRARY_PATH in the remote environment instead."
+                )
 
         self._base_cmd.extend(self.trtexec_args)
 
@@ -612,7 +618,12 @@ class TrtExecBenchmark(Benchmark):
                     f"{_redact_url_password(result.stdout)}\n{_redact_url_password(result.stderr)}"
                 )
                 return float("inf")
-            _latency_pattern = r"\[I\]\s+GPU Compute Time:.*?median\s*=\s*([\d.]+)\s*ms"
+            # trtexec_safe / trtexec --safe emit "GPU Compute Time"; local trtexec emits "Latency"
+            _latency_pattern = (
+                r"\[I\]\s+GPU Compute Time:.*?median\s*=\s*([\d.]+)\s*ms"
+                if self._remote_use_trtexec_safe
+                else r"\[I\]\s+Latency:.*?median\s*=\s*([\d.]+)\s*ms"
+            )
             if not (match := re.search(_latency_pattern, result.stdout, re.IGNORECASE)):
                 # this could be due to creating a degenerate onnx file that can't be engine built.
                 # thus not a hard failure

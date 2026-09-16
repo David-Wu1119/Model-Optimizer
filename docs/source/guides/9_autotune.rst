@@ -261,13 +261,11 @@ To use remote autotuning during Q/DQ placement optimization, run with ``trtexec`
 
 .. note::
 
-   **Latency metric change:** The latency reported by ``--use_trtexec`` now uses the
-   ``[I] GPU Compute Time: … median`` line instead of the legacy ``[I] Latency: … median``
-   line. GPU Compute Time measures pure GPU execution, excluding CPU/GPU data transfer
-   overhead, and is available in TensorRT 10.x builds. Absolute baseline latencies will
-   shift compared with results from earlier ModelOpt versions.
+   ``--plugin_libraries`` is not compatible with ``--remoteAutoTuningConfig``: local ``.so``
+   paths cannot be transferred to the remote device automatically. Remote plugin support will be 
+   added in the future.
 
-Replace ``<remote autotuning config>`` with an actual remote autotuning configuration string (see ``trtexec --help`` for more details). Other TensorRT benchmark options (e.g. ``--timing_cache``, ``--warmup_runs``, ``--timing_runs``, ``--plugin_libraries``) are also available; run ``--help`` for details.
+Replace ``<remote autotuning config>`` with an actual remote autotuning configuration string (see ``trtexec --help`` for more details). Other TensorRT benchmark options (e.g. ``--timing_cache``, ``--warmup_runs``, ``--timing_runs``) are also available; run ``--help`` for details.
 
 Low-Level API Usage
 ===================

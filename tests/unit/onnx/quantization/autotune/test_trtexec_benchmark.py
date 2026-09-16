@@ -29,8 +29,8 @@ invoked. They cover:
   otherwise.  All candidates in an autotune run use the same binary so
   latency measurements are comparable.
 - SSH key-based auth only: no sshpass prefixes in any subprocess command.
-- Latency parsing via ``[I] GPU Compute Time: … median``, used for both
-  local and remote paths.
+- Latency parsing via ``[I] Latency: … median`` for local trtexec and
+  ``[I] GPU Compute Time: … median`` for remote trtexec_safe / trtexec --safe.
 - Error paths: non-zero trtexec returncode, scp failure, missing trtexec
   binary, unparseable stdout, ssh failure (stderr logged, not silently
   retried with a different binary).
@@ -465,6 +465,21 @@ def test_remote_config_validation_errors(tmp_path, bad_args, match):
         )
 
 
+@pytest.mark.usefixtures("trtexec_version_ok")
+def test_remote_config_rejects_plugin_libraries(tmp_path):
+    """``plugin_libraries`` combined with ``--remoteAutoTuningConfig`` raises ``ValueError``.
+
+    Local ``.so`` paths cannot be transferred to the remote device, so the combination
+    was silently broken (remote measurement always returned inf). Raising early is safer.
+    """
+    with pytest.raises(ValueError, match="plugin_libraries cannot be used"):
+        TrtExecBenchmark(
+            timing_cache_file=str(tmp_path / "cache.bin"),
+            trtexec_args=[f"--remoteAutoTuningConfig={_REMOTE_URL}"],
+            plugin_libraries=["/some/local/plugin.so"],
+        )
+
+
 def test_remote_config_requires_trtexec_10_15(tmp_path):
     """When trtexec is too old, remote autotuning surfaces an ImportError."""
     with (
@@ -488,7 +503,7 @@ def test_run_invokes_trtexec_with_onnx_path(bench, tmp_path):
     model = tmp_path / "model.onnx"
     model.write_bytes(b"")
 
-    proc = _make_proc(stdout="[I] GPU Compute Time: min = 1.0 ms, max = 2.0 ms, median = 1.5 ms")
+    proc = _make_proc(stdout="[I] Latency: min = 1.0 ms, max = 2.0 ms, median = 1.5 ms")
     with patch("subprocess.run", return_value=proc) as run_mock:
         latency = bench.run(str(model))
 
@@ -500,7 +515,7 @@ def test_run_invokes_trtexec_with_onnx_path(bench, tmp_path):
 
 def test_run_writes_bytes_to_temp_file_before_invoking(bench):
     """``run(bytes)`` writes the bytes to disk and points trtexec at that file."""
-    proc = _make_proc(stdout="[I] GPU Compute Time: min = 1.0 ms, max = 2.0 ms, median = 4.25 ms")
+    proc = _make_proc(stdout="[I] Latency: min = 1.0 ms, max = 2.0 ms, median = 4.25 ms")
     with patch("subprocess.run", return_value=proc) as run_mock:
         latency = bench.run(b"\x08onnx-bytes")
 
@@ -513,7 +528,7 @@ def test_run_writes_log_file_when_requested(bench, tmp_path):
     """``log_file`` receives stdout, stderr and the constructed command."""
     log_file = tmp_path / "logs" / "trtexec.log"
     proc = _make_proc(
-        stdout="[I] GPU Compute Time: median = 2.0 ms",
+        stdout="[I] Latency: median = 2.0 ms",
         stderr="some warning",
     )
     with patch("subprocess.run", return_value=proc):
@@ -553,7 +568,7 @@ def test_run_returns_inf_on_unexpected_exception(bench, tmp_path):
 
 def test_call_dunder_forwards_to_run(bench, tmp_path):
     """Calling the benchmark instance directly invokes ``run`` and returns its result."""
-    proc = _make_proc(stdout="[I] GPU Compute Time: median = 9.81 ms")
+    proc = _make_proc(stdout="[I] Latency: median = 9.81 ms")
     with patch("subprocess.run", return_value=proc):
         latency = bench(str(tmp_path / "m.onnx"))
     assert latency == pytest.approx(9.81)
@@ -567,10 +582,10 @@ def test_del_swallows_cleanup_errors(tmp_path):
 
 
 def test_run_parses_std_pattern(bench, tmp_path):
-    """``_STD_PATTERN`` matches the real ``GPU Compute Time`` line."""
+    """Latency pattern matches the real ``[I] Latency:`` line."""
     stdout = (
         "[01/15/2026-12:00:00] [I] === Performance summary ===\n"
-        "[I] GPU Compute Time: min = 0.8 ms, max = 1.2 ms, mean = 0.95 ms, "
+        "[I] Latency: min = 0.8 ms, max = 1.2 ms, mean = 0.95 ms, "
         "median = 0.92 ms, percentile(99%) = 1.18 ms\n"
     )
     with patch("subprocess.run", return_value=_make_proc(stdout=stdout)):
@@ -911,7 +926,7 @@ def test_network_timeout_custom_value_stored(tmp_path):
 
 def test_local_trtexec_call_uses_no_timeout(bench, tmp_path):
     """The local engine build path passes ``timeout=None`` (engine builds can be long)."""
-    proc = _make_proc(stdout="[I] GPU Compute Time: median = 1.0 ms")
+    proc = _make_proc(stdout="[I] Latency: median = 1.0 ms")
     with patch("subprocess.run", return_value=proc) as run_mock:
         bench.run(str(tmp_path / "m.onnx"))
 
