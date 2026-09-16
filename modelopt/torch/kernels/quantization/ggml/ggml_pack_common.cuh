@@ -112,7 +112,9 @@ __device__ __forceinline__ void accumulate_choice_min(const float (&local_best)[
 //   * Threads = Warps * warpSize, and warp_keys has at least Warps elements.
 //
 // Postconditions:
-//   * Only thread 0 receives the block minimum; other threads retain their warp-local value.
+//   * Only thread 0 receives the block minimum. Every other thread holds the value returned by
+//     warp_min_key -- a partial reduction over its suffix of the warp that is meaningful only on
+//     lane 0 -- and must not use it.
 //   * No trailing barrier: the caller must consume the result in thread 0 and reach a
 //     __syncthreads() before any thread overwrites warp_keys.
 template <int Warps>
