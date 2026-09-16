@@ -79,8 +79,8 @@ template <typename scalar_t>
 __global__ void encode(const scalar_t *input, int64_t num_blocks, const float *grid,
                        const int16_t *scale_bits, uint8_t *output) {
   __shared__ int8_t shared_grid[kEntries * kVectorSize];
-  __shared__ float grid_norm[kEntries];
-  __shared__ float grid_sum[kEntries];
+  __shared__ uint8_t grid_norm[kEntries];
+  __shared__ int8_t grid_sum[kEntries];
   __shared__ float shared_input[kBlockSize];
   __shared__ float vector_norm[kBlockSize / kVectorSize];
   __shared__ float vector_sum[kBlockSize / kVectorSize];
@@ -113,17 +113,18 @@ __global__ void encode(const scalar_t *input, int64_t num_blocks, const float *g
 
   for (int i = tid; i < kEntries * kVectorSize; i += kThreads)
     shared_grid[i] = static_cast<int8_t>(grid[i]);
+  __syncthreads();
   for (int entry = tid; entry < kEntries; entry += kThreads) {
-    float norm = 0.0f;
-    float sum = 0.0f;
+    int norm = 0;
+    int sum = 0;
 #pragma unroll
     for (int j = 0; j < kVectorSize; ++j) {
-      const float q = static_cast<float>(shared_grid[entry * kVectorSize + j]);
-      norm = fmaf(q, q, norm);
+      const int q = static_cast<int>(shared_grid[entry * kVectorSize + j]);
+      norm += q * q;
       sum += q;
     }
-    grid_norm[entry] = norm;
-    grid_sum[entry] = sum;
+    grid_norm[entry] = static_cast<uint8_t>(norm);
+    grid_sum[entry] = static_cast<int8_t>(sum);
   }
   if (tid < kBlockSize)
     shared_input[tid] = load_float(source + tid);
@@ -159,14 +160,14 @@ __global__ void encode(const scalar_t *input, int64_t num_blocks, const float *g
 #pragma unroll
       for (int choice = 0; choice < kChoices; ++choice)
         local_best[choice] = FLT_MAX;
-      for (int entry = tid; entry < kEntries; entry += blockDim.x) {
+      for (int entry = tid; entry < kEntries; entry += kThreads) {
         const int8_t *q = shared_grid + entry * kVectorSize;
         float dot = 0.0f;
 #pragma unroll
         for (int j = 0; j < kVectorSize; ++j)
           dot = fmaf(x[j], static_cast<float>(q[j]), dot);
-        const float qnorm = grid_norm[entry];
-        const float qsum = grid_sum[entry];
+        const float qnorm = static_cast<float>(grid_norm[entry]);
+        const float qsum = static_cast<float>(grid_sum[entry]);
 #pragma unroll
         for (int choice = 0; choice < kChoices; ++choice) {
           const int local = choice & (kLocalScales - 1);
@@ -223,10 +224,10 @@ __global__ void encode(const scalar_t *input, int64_t num_blocks, const float *g
       const float xnorm = vector_norm[vector_index];
       const float xsum = vector_sum[vector_index];
       unsigned long long key = ~0ULL;
-      for (int entry = tid; entry < kEntries; entry += blockDim.x) {
-        const float error =
-            quant_error(xnorm, xsum, x, shared_grid + entry * kVectorSize, grid_norm[entry],
-                        grid_sum[entry], selected_scale, selected_delta);
+      for (int entry = tid; entry < kEntries; entry += kThreads) {
+        const float error = quant_error(
+            xnorm, xsum, x, shared_grid + entry * kVectorSize, static_cast<float>(grid_norm[entry]),
+            static_cast<float>(grid_sum[entry]), selected_scale, selected_delta);
         const unsigned long long candidate =
             (static_cast<unsigned long long>(__float_as_uint(error)) << 32) |
             static_cast<unsigned long long>(entry);

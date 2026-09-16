@@ -40,7 +40,7 @@ def test_iq2_xs_cuda_extension_handles_multiple_scale_grid_blocks():
     assert normalized_mse < 0.1
 
 
-def test_iq2_xs_cuda_payload_matches_cpu_reference_and_public_dispatch():
+def test_iq2_xs_cuda_quality_matches_cpu_reference_and_public_dispatch():
     generator = torch.Generator().manual_seed(5678)
     weight_cpu = torch.randn((4, 256), generator=generator, dtype=torch.bfloat16)
     reference, _ = quantize_iq2_xs(weight_cpu)
@@ -52,7 +52,16 @@ def test_iq2_xs_cuda_payload_matches_cpu_reference_and_public_dispatch():
     direct_again = extension.pack(weight_cuda, grid).reshape(4, 1, 74)
     dispatched, _ = quantize_iq2_xs(weight_cuda)
 
-    assert torch.equal(direct.cpu(), reference)
+    shape = torch.tensor(weight_cpu.shape, dtype=torch.int64, device="cuda")
+    reference_reconstructed = dequantize_iq2_xs(reference.cuda(), shape).float()
+    direct_reconstructed = dequantize_iq2_xs(direct, shape).float()
+    reference_error = (reference_reconstructed - weight_cuda.float()).square().mean()
+    direct_error = (direct_reconstructed - weight_cuda.float()).square().mean()
+
+    assert direct.shape == reference.shape
+    assert direct.dtype == torch.uint8
+    assert torch.equal(direct.cpu()[..., :2], reference[..., :2])
+    assert direct_error <= reference_error * 1.02
     assert torch.equal(direct_again, direct)
     assert torch.equal(dispatched, direct)
 

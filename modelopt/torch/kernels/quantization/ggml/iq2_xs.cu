@@ -93,6 +93,9 @@ __global__ void encode(const scalar_t *input, int64_t num_blocks, const float *g
                        const int16_t *scale_bits, uint8_t *output) {
   __shared__ int8_t shared_grid[kEntries * kVectorSize];
   __shared__ float grid_norm[kEntries];
+  __shared__ float shared_input[kBlockSize];
+  __shared__ float vector_norm[kBlockSize / kVectorSize];
+  __shared__ uint8_t vector_odd_parity[kBlockSize / kVectorSize];
   __shared__ float warp_best[kWarps * kLocalScales];
   __shared__ float group_error[kLocalScales];
   __shared__ unsigned long long warp_keys[kWarps];
@@ -102,10 +105,10 @@ __global__ void encode(const scalar_t *input, int64_t num_blocks, const float *g
   const int tid = threadIdx.x;
   const int lane = tid & (kWarpSize - 1);
   const int warp = tid / kWarpSize;
-  for (int i = tid; i < kEntries * kVectorSize; i += blockDim.x)
+  for (int i = tid; i < kEntries * kVectorSize; i += kThreads)
     shared_grid[i] = static_cast<int8_t>(grid[i]);
   __syncthreads();
-  for (int entry = tid; entry < kEntries; entry += blockDim.x) {
+  for (int entry = tid; entry < kEntries; entry += kThreads) {
     float norm = 0.0f;
 #pragma unroll
     for (int j = 0; j < kVectorSize; ++j) {
@@ -127,6 +130,22 @@ __global__ void encode(const scalar_t *input, int64_t num_blocks, const float *g
     payload[0] = static_cast<uint8_t>(d_bits);
     payload[1] = static_cast<uint8_t>(d_bits >> 8);
   }
+  if (tid < kBlockSize)
+    shared_input[tid] = load_float(source + tid);
+  __syncthreads();
+  if (tid < kBlockSize / kVectorSize) {
+    float norm = 0.0f;
+    int negative_count = 0;
+#pragma unroll
+    for (int j = 0; j < kVectorSize; ++j) {
+      const float x = shared_input[tid * kVectorSize + j];
+      norm = fmaf(x, x, norm);
+      negative_count += x < 0.0f;
+    }
+    vector_norm[tid] = norm;
+    vector_odd_parity[tid] = static_cast<uint8_t>(negative_count & 1);
+  }
+  __syncthreads();
 
 #pragma unroll 1
   for (int group = 0; group < kGroups; ++group) {
@@ -136,22 +155,16 @@ __global__ void encode(const scalar_t *input, int64_t num_blocks, const float *g
 
 #pragma unroll
     for (int vector = 0; vector < 2; ++vector) {
-      float x[kVectorSize];
-      float xnorm = 0.0f;
-      int negative_count = 0;
       const int offset = group * 16 + vector * 8;
-#pragma unroll
-      for (int j = 0; j < kVectorSize; ++j) {
-        x[j] = load_float(source + offset + j);
-        xnorm = fmaf(x[j], x[j], xnorm);
-        negative_count += x[j] < 0.0f;
-      }
-      const bool odd_parity = (negative_count & 1) != 0;
+      const int vector_index = offset / kVectorSize;
+      const float *x = shared_input + offset;
+      const float xnorm = vector_norm[vector_index];
+      const bool odd_parity = vector_odd_parity[vector_index] != 0;
       float local_best[kLocalScales];
 #pragma unroll
       for (int local = 0; local < kLocalScales; ++local)
         local_best[local] = FLT_MAX;
-      for (int entry = tid; entry < kEntries; entry += blockDim.x) {
+      for (int entry = tid; entry < kEntries; entry += kThreads) {
         const int8_t *q = shared_grid + entry * kVectorSize;
         const float dot = even_parity_dot(x, q, odd_parity);
 #pragma unroll
@@ -198,19 +211,13 @@ __global__ void encode(const scalar_t *input, int64_t num_blocks, const float *g
 
 #pragma unroll
     for (int vector = 0; vector < 2; ++vector) {
-      float x[kVectorSize];
-      float xnorm = 0.0f;
-      int negative_count = 0;
       const int offset = group * 16 + vector * 8;
-#pragma unroll
-      for (int j = 0; j < kVectorSize; ++j) {
-        x[j] = load_float(source + offset + j);
-        xnorm = fmaf(x[j], x[j], xnorm);
-        negative_count += x[j] < 0.0f;
-      }
-      const bool odd_parity = (negative_count & 1) != 0;
+      const int vector_index = offset / kVectorSize;
+      const float *x = shared_input + offset;
+      const float xnorm = vector_norm[vector_index];
+      const bool odd_parity = vector_odd_parity[vector_index] != 0;
       unsigned long long key = ~0ULL;
-      for (int entry = tid; entry < kEntries; entry += blockDim.x) {
+      for (int entry = tid; entry < kEntries; entry += kThreads) {
         const float error =
             quant_error(xnorm, even_parity_dot(x, shared_grid + entry * kVectorSize, odd_parity),
                         grid_norm[entry], selected_scale);
