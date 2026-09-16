@@ -16,10 +16,53 @@
 """Shared validation for GGML-compatible block quantizers."""
 
 import math
+import weakref
+from collections.abc import Callable
+from typing import Any
 
 import torch
 
 GGML_BLOCK_SIZE = 256
+
+
+def cached_reconstruction(
+    inputs: torch.Tensor,
+    quantizer: Any,
+    *,
+    cache_namespace: str,
+    quantize: Callable[[torch.Tensor], tuple[torch.Tensor, torch.Tensor]],
+    dequantize: Callable[..., torch.Tensor],
+) -> torch.Tensor:
+    """Return a cached reconstruction while an input tensor remains unchanged."""
+    cache = getattr(quantizer, "_quantizer_cache", None)
+    if not isinstance(cache, dict):
+        cache = {}
+        quantizer._quantizer_cache = cache
+
+    input_key = f"{cache_namespace}_input"
+    signature_key = f"{cache_namespace}_signature"
+    value_key = f"{cache_namespace}_value"
+    signature = (
+        inputs._version,
+        tuple(inputs.shape),
+        tuple(inputs.stride()),
+        inputs.dtype,
+        inputs.device,
+    )
+    input_ref = cache.get(input_key)
+    if (
+        isinstance(input_ref, weakref.ReferenceType)
+        and input_ref() is inputs
+        and cache.get(signature_key) == signature
+    ):
+        return cache[value_key]
+
+    packed, shape = quantize(inputs)
+    reconstructed = dequantize(packed, shape, dtype=inputs.dtype)
+    cache[input_key] = weakref.ref(inputs)
+    cache[signature_key] = signature
+    cache[value_key] = reconstructed
+    return reconstructed
 
 
 def validate_weight(weight: torch.Tensor, format_name: str) -> None:

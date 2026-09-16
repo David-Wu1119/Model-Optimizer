@@ -16,6 +16,7 @@
 import pytest
 import torch
 
+import modelopt.torch.quantization.ggml.iq2_xs as iq2_xs_module
 from modelopt.torch.quantization.ggml.iq2_xs import (
     IQ2_XS_BLOCK_BYTES,
     dequantize_iq2_xs,
@@ -77,9 +78,41 @@ def test_iq2_xs_fake_quant_has_pass_through_gradient():
     class Quantizer:
         num_bits = "iq2_xs"
         backend_extra_args = {"search_impl": "auto"}
+        _quantizer_cache = None
 
     weight = torch.randn(1, 256, requires_grad=True)
     output = iq2_xs_fake_quant(weight, Quantizer())
     output.sum().backward()
 
     assert torch.equal(weight.grad, torch.ones_like(weight))
+
+
+def test_iq2_xs_fake_quant_reuses_cached_reconstruction(monkeypatch):
+    class Quantizer:
+        num_bits = "iq2_xs"
+        backend_extra_args = {"search_impl": "auto"}
+        _quantizer_cache = None
+
+    calls = 0
+    original_quantize = iq2_xs_module.quantize_iq2_xs
+
+    def counting_quantize(weight):
+        nonlocal calls
+        calls += 1
+        return original_quantize(weight)
+
+    monkeypatch.setattr(iq2_xs_module, "quantize_iq2_xs", counting_quantize)
+    quantizer = Quantizer()
+    weight = torch.randn(1, 256)
+
+    iq2_xs_module.iq2_xs_fake_quant(weight, quantizer)
+    iq2_xs_module.iq2_xs_fake_quant(weight, quantizer)
+    assert calls == 1
+
+    with torch.no_grad():
+        weight.add_(1)
+    iq2_xs_module.iq2_xs_fake_quant(weight, quantizer)
+    assert calls == 2
+
+    iq2_xs_module.iq2_xs_fake_quant(weight.clone(), quantizer)
+    assert calls == 3

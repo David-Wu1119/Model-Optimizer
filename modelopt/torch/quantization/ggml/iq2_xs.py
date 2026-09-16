@@ -40,23 +40,26 @@
 
 """IQ2_XS fake quantization and GGML-compatible block packing.
 
-The encoder follows the built-in GGML IQ search_impl="auto" search. Every 256
-logical values become one 74-byte block_iq2_xs payload:
+The encoder jointly searches grid rows, local scales, and sign patterns using
+a heuristic super-block scale. Every 256 logical values become one 74-byte
+block_iq2_xs payload:
 
 * bytes 0..1: little-endian FP16 super-block scale d
 * bytes 2..65: 32 little-endian uint16 codes (9-bit grid + 7-bit sign)
 * bytes 66..73: 16 four-bit local scales, two per byte
 
 The canonical 512 x 8 magnitude grid below comes from llama.cpp
-ggml-common.h revision 9b05354ec6fb58b4e665e9a39ebc40285c015638.
+ggml-common.h revision 9b05354ec6fb58b4e665e9a39ebc40285c015638. The payload layout is compatible
+with GGML readers, but another encoder may choose different valid entries.
 """
 
 import base64
+import hashlib
 from functools import cache
 
 import torch
 
-from .common import GGML_BLOCK_SIZE, validate_packed_weights, validate_weight
+from .common import GGML_BLOCK_SIZE, cached_reconstruction, validate_packed_weights, validate_weight
 
 __all__ = [
     "IQ2_XS_BLOCK_BYTES",
@@ -71,6 +74,11 @@ __all__ = [
 IQ2_XS_BLOCK_SIZE = GGML_BLOCK_SIZE
 IQ2_XS_BLOCK_BYTES = 74
 IQ2_XS_EFFECTIVE_BITS = IQ2_XS_BLOCK_BYTES * 8 / IQ2_XS_BLOCK_SIZE
+_IQ2_XS_NATIVE_MAX = 43 * 31 / 8
+_IQ2_XS_PEAK_TO_RMS_SLOPE = 0.035
+_IQ2_XS_MIN_ANCHOR = 0.65
+_IQ2_XS_MAX_ANCHOR = 0.92
+_IQ2_XS_GRID_SHA256 = "06e47aaca60b4dc1d9b5a3f34540437058a6b142b4d7a59d5ded769b4d1bf1de"
 
 # Compact byte representation of the canonical [512, 8] grid. Values are only
 # 8, 25, and 43. Keeping this as checkpoint-independent package data avoids
@@ -138,7 +146,10 @@ _GRID_CACHE: dict[torch.device, torch.Tensor] = {}
 
 @cache
 def _grid_bytes() -> bytes:
-    return base64.b64decode(_IQ2_XS_GRID_B64)
+    raw = base64.b64decode(_IQ2_XS_GRID_B64)
+    if hashlib.sha256(raw).hexdigest() != _IQ2_XS_GRID_SHA256:
+        raise RuntimeError("IQ2_XS grid checksum mismatch")
+    return raw
 
 
 def iq2_xs_grid(device: torch.device | str | None = None) -> torch.Tensor:
@@ -162,8 +173,10 @@ def _encode_blocks(blocks: torch.Tensor, grid: torch.Tensor) -> torch.Tensor:
     amax = x.abs().amax(dim=1)
     rms = x.square().mean(dim=1).sqrt()
     peak_to_rms = torch.where(rms > 0, amax / rms, torch.zeros_like(rms))
-    anchor_ratio = (1.0 - 0.035 * peak_to_rms).clamp(0.65, 0.92)
-    d = ((amax / 166.625) * anchor_ratio).clamp(max=65504.0).to(torch.float16)
+    anchor_ratio = (1.0 - _IQ2_XS_PEAK_TO_RMS_SLOPE * peak_to_rms).clamp(
+        _IQ2_XS_MIN_ANCHOR, _IQ2_XS_MAX_ANCHOR
+    )
+    d = ((amax / _IQ2_XS_NATIVE_MAX) * anchor_ratio).clamp(max=65504.0).to(torch.float16)
     d_float = d.float()
 
     xnorm = vectors.square().sum(dim=-1)
@@ -297,6 +310,11 @@ def iq2_xs_fake_quant(inputs: torch.Tensor, quantizer) -> torch.Tensor:
     search_impl = extra_args.get("search_impl", extra_args.get("iq_search_impl", "auto"))
     if search_impl != "auto":
         raise NotImplementedError("Only IQ2_XS search_impl='auto' is currently supported")
-    packed, shape = quantize_iq2_xs(inputs)
-    reconstructed = dequantize_iq2_xs(packed, shape, dtype=inputs.dtype)
+    reconstructed = cached_reconstruction(
+        inputs,
+        quantizer,
+        cache_namespace="iq2_xs",
+        quantize=quantize_iq2_xs,
+        dequantize=dequantize_iq2_xs,
+    )
     return inputs + (reconstructed - inputs).detach()

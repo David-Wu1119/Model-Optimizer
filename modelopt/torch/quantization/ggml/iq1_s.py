@@ -40,8 +40,9 @@
 
 """IQ1_S fake quantization and GGML-compatible block packing.
 
-The encoder follows the built-in GGML IQ ``search_impl="auto"`` search. Every 256
-logical values become one 50-byte ``block_iq1_s`` payload:
+The encoder performs a joint search over grid entries, local scales, and delta
+signs using a heuristic super-block scale. Every 256 logical values become one
+50-byte ``block_iq1_s`` payload:
 
 * bytes 0..1: little-endian FP16 super-block scale ``d``
 * bytes 2..33: low eight bits of 32 codebook indices
@@ -51,16 +52,18 @@ Each metadata word describes four consecutive eight-value vectors. Bits 0..11
 hold the three high index bits, bits 12..14 select one of eight local scales,
 and bit 15 selects the shared -0.125 rather than +0.125 delta. The canonical
 2048 x 8 ternary grid below comes from llama.cpp ``ggml-common.h`` revision
-9b05354ec6fb58b4e665e9a39ebc40285c015638.
+9b05354ec6fb58b4e665e9a39ebc40285c015638. The payload layout is compatible
+with GGML readers, but another encoder may choose different valid entries.
 """
 
 import base64
+import hashlib
 import zlib
 from functools import cache
 
 import torch
 
-from .common import GGML_BLOCK_SIZE, validate_packed_weights, validate_weight
+from .common import GGML_BLOCK_SIZE, cached_reconstruction, validate_packed_weights, validate_weight
 
 __all__ = [
     "IQ1_S_BLOCK_BYTES",
@@ -77,6 +80,8 @@ IQ1_S_BLOCK_BYTES = 50
 IQ1_S_EFFECTIVE_BITS = IQ1_S_BLOCK_BYTES * 8 / IQ1_S_BLOCK_SIZE
 _IQ1_S_DELTA = 0.125
 _IQ1_S_NATIVE_MAX = 16.875
+_IQ1_S_SCALE_ANCHOR = 0.61
+_IQ1_S_GRID_SHA256 = "07540ffc1aeaf6ad4d97e96b0fcc765aae39671d4ae4a27bbd0e796fde167c6a"
 
 # zlib-compressed little-endian bytes of the canonical uint64_t table. The
 # decoded int8 values are -1, 0, and 1.
@@ -138,7 +143,10 @@ _GRID_CACHE: dict[torch.device, torch.Tensor] = {}
 
 @cache
 def _grid_bytes() -> bytes:
-    return zlib.decompress(base64.b64decode(_IQ1_S_GRID_ZLIB_B64))
+    raw = zlib.decompress(base64.b64decode(_IQ1_S_GRID_ZLIB_B64))
+    if hashlib.sha256(raw).hexdigest() != _IQ1_S_GRID_SHA256:
+        raise RuntimeError("IQ1_S grid checksum mismatch")
+    return raw
 
 
 def iq1_s_grid(device: torch.device | str | None = None) -> torch.Tensor:
@@ -161,7 +169,8 @@ def _encode_blocks(blocks: torch.Tensor, grid: torch.Tensor) -> torch.Tensor:
     xsum = vectors.sum(dim=-1)
 
     amax = x.abs().amax(dim=1)
-    d = ((amax / _IQ1_S_NATIVE_MAX) * 0.61).clamp(max=65504.0).to(torch.float16)
+    # This heuristic clips peaks to favor lower aggregate reconstruction error.
+    d = ((amax / _IQ1_S_NATIVE_MAX) * _IQ1_S_SCALE_ANCHOR).clamp(max=65504.0).to(torch.float16)
     d_float = d.float()
 
     best_error = torch.full((block_count, 32, 16), torch.inf, device=x.device)
@@ -186,7 +195,7 @@ def _encode_blocks(blocks: torch.Tensor, grid: torch.Tensor) -> torch.Tensor:
                 scale = d_float.reshape(-1, 1, 1) * (2 * local + 1)
                 error = (
                     xnorm.unsqueeze(-1) - 2 * scale * shifted_dot + scale.square() * shifted_norm
-                )
+                ).clamp_min_(0)
                 tile_error, tile_index = error.min(dim=-1)
                 replace = tile_error < best_error[:, :, choice]
                 best_error[:, :, choice] = torch.where(
@@ -224,7 +233,7 @@ def _encode_blocks(blocks: torch.Tensor, grid: torch.Tensor) -> torch.Tensor:
 
 @torch.no_grad()
 def quantize_iq1_s(
-    weight: torch.Tensor, *, block_chunk_size: int = 4
+    weight: torch.Tensor, *, block_chunk_size: int = 64
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Pack a floating-point weight into GGML-compatible IQ1_S blocks.
 
@@ -300,6 +309,11 @@ def iq1_s_fake_quant(inputs: torch.Tensor, quantizer) -> torch.Tensor:
     search_impl = extra_args.get("search_impl", extra_args.get("iq_search_impl", "auto"))
     if search_impl != "auto":
         raise NotImplementedError("Only IQ1_S search_impl='auto' is currently supported")
-    packed, shape = quantize_iq1_s(inputs)
-    reconstructed = dequantize_iq1_s(packed, shape, dtype=inputs.dtype)
+    reconstructed = cached_reconstruction(
+        inputs,
+        quantizer,
+        cache_namespace="iq1_s",
+        quantize=quantize_iq1_s,
+        dequantize=dequantize_iq1_s,
+    )
     return inputs + (reconstructed - inputs).detach()

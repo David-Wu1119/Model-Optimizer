@@ -16,6 +16,8 @@
 import pytest
 import torch
 
+import modelopt.torch.quantization.ggml as ggml
+import modelopt.torch.quantization.ggml.iq1_s as iq1_s_module
 from modelopt.torch.quantization.ggml.iq1_s import (
     IQ1_S_BLOCK_BYTES,
     dequantize_iq1_s,
@@ -23,6 +25,13 @@ from modelopt.torch.quantization.ggml.iq1_s import (
     iq1_s_grid,
     quantize_iq1_s,
 )
+
+
+def test_ggml_public_api_excludes_internal_modules():
+    assert "backend" not in ggml.__all__
+    assert "common" not in ggml.__all__
+    assert "iq1_s" not in ggml.__all__
+    assert "iq2_xs" not in ggml.__all__
 
 
 def test_iq1_s_canonical_grid():
@@ -99,9 +108,41 @@ def test_iq1_s_fake_quant_has_pass_through_gradient():
     class Quantizer:
         num_bits = "iq1_s"
         backend_extra_args = {"search_impl": "auto"}
+        _quantizer_cache = None
 
     weight = torch.randn(1, 256, requires_grad=True)
     output = iq1_s_fake_quant(weight, Quantizer())
     output.sum().backward()
 
     assert torch.equal(weight.grad, torch.ones_like(weight))
+
+
+def test_iq1_s_fake_quant_reuses_cached_reconstruction(monkeypatch):
+    class Quantizer:
+        num_bits = "iq1_s"
+        backend_extra_args = {"search_impl": "auto"}
+        _quantizer_cache = None
+
+    calls = 0
+    original_quantize = iq1_s_module.quantize_iq1_s
+
+    def counting_quantize(weight):
+        nonlocal calls
+        calls += 1
+        return original_quantize(weight)
+
+    monkeypatch.setattr(iq1_s_module, "quantize_iq1_s", counting_quantize)
+    quantizer = Quantizer()
+    weight = torch.randn(1, 256)
+
+    iq1_s_module.iq1_s_fake_quant(weight, quantizer)
+    iq1_s_module.iq1_s_fake_quant(weight, quantizer)
+    assert calls == 1
+
+    with torch.no_grad():
+        weight.add_(1)
+    iq1_s_module.iq1_s_fake_quant(weight, quantizer)
+    assert calls == 2
+
+    iq1_s_module.iq1_s_fake_quant(weight.clone(), quantizer)
+    assert calls == 3
