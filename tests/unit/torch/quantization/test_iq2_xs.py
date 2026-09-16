@@ -132,6 +132,32 @@ def test_iq2_xs_round_trip_and_payload_fields():
     assert torch.all((codes >> 9) < 128)
 
 
+def test_iq2_xs_dequantizes_ggml_metadata_bit_fields():
+    packed = torch.zeros((1, 1, IQ2_XS_BLOCK_BYTES), dtype=torch.uint8)
+    packed[0, 0, :2] = torch.tensor([4.0], dtype=torch.float16).view(torch.uint8)
+    entries = torch.tensor([0, 1, 300, 511], dtype=torch.int64)
+    sign_indices = torch.tensor([0, 1, 64, 127], dtype=torch.int64)
+    codes = entries | (sign_indices << 9)
+    packed[0, 0, 2:10:2] = (codes & 0xFF).to(torch.uint8)
+    packed[0, 0, 3:10:2] = (codes >> 8).to(torch.uint8)
+    packed[0, 0, 66] = 3 | (10 << 4)
+
+    decoded = dequantize_iq2_xs(packed, torch.tensor([1, 256]), dtype=torch.float32)
+
+    local_scales = torch.tensor([3, 3, 10, 10], dtype=torch.float32)
+    signs = torch.tensor(
+        [
+            [1, 1, 1, 1, 1, 1, 1, 1],
+            [-1, 1, 1, 1, 1, 1, 1, -1],
+            [1, 1, 1, 1, 1, 1, -1, -1],
+            [-1, -1, -1, -1, -1, -1, -1, -1],
+        ],
+        dtype=torch.float32,
+    )
+    expected = iq2_xs_grid()[entries] * signs * (4.0 * (2 * local_scales + 1) / 8.0).unsqueeze(-1)
+    assert torch.equal(decoded[0, :32].reshape(4, 8), expected)
+
+
 def test_iq2_xs_encoding_is_independent_of_default_dtype():
     weight = torch.randn((1, 256), generator=torch.Generator().manual_seed(4321))
     expected, _ = quantize_iq2_xs(weight)

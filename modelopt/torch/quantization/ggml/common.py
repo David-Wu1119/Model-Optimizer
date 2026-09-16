@@ -138,11 +138,13 @@ def cached_reconstruction(
         cache["abandoned"] = True
         warn_rank_0(
             f"{cache_namespace}: reconstruction cache abandoned because the source weight "
-            "storage was replaced or freed (for example, by a device or dtype move, or "
-            "per-forward weight materialization under CPU offload). Every forward will now "
-            "rerun the full codebook search. Call clear_reconstruction_cache() after the move "
-            "to re-enable caching (and freeze_reconstruction_cache() too if the quantizer was "
-            "re-calibrated in between)."
+            "storage was replaced or freed. Common causes are block padding when the last "
+            f"dimension is not a multiple of {GGML_BLOCK_SIZE}, a device or dtype move, or "
+            "per-forward weight materialization under CPU offload. Every forward will now "
+            "rerun the full codebook search. If this was a one-time move, call "
+            "clear_reconstruction_cache() to re-enable caching (and "
+            "freeze_reconstruction_cache() too if the quantizer was re-calibrated in between); "
+            "reuse is not recoverable for a padded weight shape."
         )
 
     cache_active = cache_enabled and not cache.get("abandoned", False)

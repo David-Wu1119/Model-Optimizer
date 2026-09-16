@@ -328,6 +328,8 @@ def test_iq1_s_fake_quant_abandons_cache_for_transient_inputs(monkeypatch):
     assert quantizer._reconstruction_cache == {"abandoned": True}
     assert len(warning_messages) == 1
     assert "reconstruction cache abandoned" in warning_messages[0]
+    assert "block padding" in warning_messages[0]
+    assert "not recoverable for a padded weight shape" in warning_messages[0]
 
     quantizer(torch.randn(1, 256, dtype=torch.bfloat16).float())
     assert calls == 3
