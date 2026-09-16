@@ -357,10 +357,6 @@ def iq1_s_fake_quant(inputs: torch.Tensor, quantizer) -> torch.Tensor:
             f"supported: {sorted(_IQ1_S_SUPPORTED_BACKEND_EXTRA_ARGS)}"
         )
     search_impl = extra_args.get("search_impl", "auto")
-    if search_impl not in {"auto", "reference"}:
-        raise NotImplementedError(
-            "Only IQ1_S search_impl='auto' or search_impl='reference' is supported"
-        )
     reconstructed = cached_reconstruction(
         inputs,
         quantizer,

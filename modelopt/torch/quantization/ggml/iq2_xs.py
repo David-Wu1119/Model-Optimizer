@@ -249,6 +249,7 @@ def _encode_blocks(blocks: torch.Tensor, grid: torch.Tensor) -> torch.Tensor:
     packed[:, 2:66:2] = (codes & 0xFF).to(torch.uint8)
     packed[:, 3:66:2] = (codes >> 8).to(torch.uint8)
     packed[:, 66:] = (selected_local[:, 0::2] | (selected_local[:, 1::2] << 4)).to(torch.uint8)
+    # A zero scale decodes to zero regardless of its codes; keep the byte encoding canonical.
     return torch.where((d_float == 0).unsqueeze(1), 0, packed)
 
 
@@ -373,10 +374,6 @@ def iq2_xs_fake_quant(inputs: torch.Tensor, quantizer) -> torch.Tensor:
             f"supported: {sorted(_IQ2_XS_SUPPORTED_BACKEND_EXTRA_ARGS)}"
         )
     search_impl = extra_args.get("search_impl", "auto")
-    if search_impl not in {"auto", "reference"}:
-        raise NotImplementedError(
-            "Only IQ2_XS search_impl='auto' or search_impl='reference' is supported"
-        )
     reconstructed = cached_reconstruction(
         inputs,
         quantizer,

@@ -266,7 +266,8 @@ at::Tensor iq1_s_pack_cuda(at::Tensor input, at::Tensor grid, bool validate_grid
   TORCH_CHECK(input.is_contiguous() && grid.is_contiguous(), "inputs must be contiguous");
   TORCH_CHECK(input.numel() > 0 && input.numel() % kBlockSize == 0,
               "input size must be a positive multiple of 256");
-  TORCH_CHECK(grid.scalar_type() == at::kFloat && grid.numel() == kEntries * kVectorSize,
+  TORCH_CHECK(grid.scalar_type() == at::kFloat && grid.dim() == 2 && grid.size(0) == kEntries &&
+                  grid.size(1) == kVectorSize,
               "grid must be float32 [2048, 8]");
   TORCH_CHECK(input.get_device() == grid.get_device(), "input and grid must share a device");
   c10::cuda::CUDAGuard guard(input.device());

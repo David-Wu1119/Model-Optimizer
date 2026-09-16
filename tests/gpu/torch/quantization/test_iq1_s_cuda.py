@@ -35,7 +35,7 @@ def _prebuild_iq1_s_extension():
     _extension()
 
 
-def test_iq1_s_cuda_extension_handles_multiple_scale_grid_blocks():
+def test_iq1_s_cuda_extension_handles_more_blocks_than_one_grid_wave():
     generator = torch.Generator(device="cuda").manual_seed(1234)
     weight = torch.randn((257, 256), generator=generator, device="cuda", dtype=torch.bfloat16)
 
@@ -139,4 +139,12 @@ def test_iq1_s_cuda_rejects_unrepresentable_grid_values(invalid_value):
     grid[0, 0] = invalid_value
 
     with pytest.raises(RuntimeError, match="grid values must be integral and within"):
+        _extension().pack(weight, grid)
+
+
+def test_iq1_s_cuda_rejects_grid_with_wrong_shape():
+    weight = torch.zeros((1, 256), device="cuda", dtype=torch.bfloat16)
+    grid = iq1_s_grid("cuda").T.contiguous()
+
+    with pytest.raises(RuntimeError, match=r"grid must be float32 \[2048, 8\]"):
         _extension().pack(weight, grid)
