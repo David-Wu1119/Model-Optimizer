@@ -94,20 +94,22 @@ def _validate_iq_quantizer_config(
             f"{quantization_format.upper()} export requires the matching ggml quantizer"
         )
     extra_args = quantizer.backend_extra_args or {}
-    search_impl = extra_args.get("search_impl", extra_args.get("iq_search_impl", "auto"))
+    search_impl = extra_args.get("search_impl", "auto")
     if search_impl != "auto":
         raise NotImplementedError(
             f"{quantization_format.upper()} export only supports search_impl='auto'"
         )
-    input_quantizer = getattr(module, quantizer_attr_names(weight_name).input_quantizer, None)
-    if input_quantizer is not None and (
-        getattr(input_quantizer, "is_enabled", False)
-        or getattr(input_quantizer, "pre_quant_scale", None) is not None
-    ):
-        raise NotImplementedError(
-            f"{quantization_format.upper()} export is weight-only; input quantization and "
-            "pre_quant_scale are not represented in the checkpoint"
-        )
+    quantizer_names = quantizer_attr_names(weight_name)
+    for quantizer_name in (quantizer_names.input_quantizer, quantizer_names.output_quantizer):
+        activation_quantizer = getattr(module, quantizer_name, None)
+        if activation_quantizer is not None and (
+            getattr(activation_quantizer, "is_enabled", False)
+            or getattr(activation_quantizer, "pre_quant_scale", None) is not None
+        ):
+            raise NotImplementedError(
+                f"{quantization_format.upper()} export is weight-only; activation quantization "
+                "and pre_quant_scale are not represented in the checkpoint"
+            )
 
 
 def _pack_iq_weight(

@@ -632,8 +632,7 @@ def _export_quantized_weight(
         packed_weight = _pack_iq_weight(
             weight.to(dtype), quantization_format, sub_module, weight_name
         )
-        delattr(sub_module, weight_name)
-        sub_module.register_buffer("weight", packed_weight)
+        setattr(sub_module, weight_name, nn.Parameter(packed_weight, requires_grad=False))
         maybe_clear_cuda_cache()
         return
 

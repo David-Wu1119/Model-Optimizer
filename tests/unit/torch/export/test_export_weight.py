@@ -122,6 +122,7 @@ def test_export_iq_payload_as_weight(num_bits, payload_bytes):
 
     assert state_dict["weight"].shape == (4, 1, payload_bytes)
     assert state_dict["weight"].dtype == torch.uint8
+    assert isinstance(linear.weight, nn.Parameter)
     assert "packed_weights" not in state_dict
     assert "weight_shape" not in state_dict
 
@@ -142,9 +143,16 @@ def test_export_iq_rejects_an_unhandled_search_impl(num_bits):
         _export_quantized_weight(linear, torch.bfloat16)
 
 
-@pytest.mark.parametrize("input_mode", ["enabled", "pre_quant_scale"])
+@pytest.mark.parametrize(
+    ("quantizer_name", "mode"),
+    [
+        ("input_quantizer", "enabled"),
+        ("input_quantizer", "pre_quant_scale"),
+        ("output_quantizer", "enabled"),
+    ],
+)
 @pytest.mark.parametrize("num_bits", ["iq1_s", "iq2_xs"])
-def test_export_iq_rejects_non_weight_only_config(num_bits, input_mode):
+def test_export_iq_rejects_non_weight_only_config(num_bits, quantizer_name, mode):
     linear = nn.Linear(256, 4, bias=False, dtype=torch.bfloat16)
     linear.weight_quantizer = TensorQuantizer(
         QuantizerAttributeConfig(
@@ -154,11 +162,12 @@ def test_export_iq_rejects_non_weight_only_config(num_bits, input_mode):
             backend_extra_args={"search_impl": "auto"},
         )
     )
-    linear.input_quantizer = TensorQuantizer(
-        QuantizerAttributeConfig(num_bits=8, axis=None, enable=input_mode == "enabled")
+    activation_quantizer = TensorQuantizer(
+        QuantizerAttributeConfig(num_bits=8, axis=None, enable=mode == "enabled")
     )
-    if input_mode == "pre_quant_scale":
-        linear.input_quantizer.pre_quant_scale = torch.ones(256)
+    setattr(linear, quantizer_name, activation_quantizer)
+    if mode == "pre_quant_scale":
+        activation_quantizer.pre_quant_scale = torch.ones(256)
 
     with pytest.raises(NotImplementedError, match="export is weight-only"):
         _export_quantized_weight(linear, torch.bfloat16)

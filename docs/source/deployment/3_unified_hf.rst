@@ -50,8 +50,8 @@ The unified HF export API supports the following quantization formats:
 4. NVFP4_AWQ - NVIDIA 4-bit floating point with AWQ optimization
 5. INT4_AWQ - 4-bit integer with AWQ optimization
 6. W4A8_AWQ - 4-bit weights and 8-bit activations with AWQ optimization
-7. IQ1_S - 1-bit importance-aware quantization using the GGML block layout
-8. IQ2_XS - 2-bit importance-aware quantization using the GGML block layout
+7. IQ1_S - GGML-compatible block format, 1.5625 bits per weight
+8. IQ2_XS - GGML-compatible block format, 2.3125 bits per weight
 
 .. note::
    GGML has no equivalent for ModelOpt's per-tensor FP8 weight-and-activation format. In particular,
@@ -68,6 +68,17 @@ For IQ1_S and IQ2_XS, unified export replaces each floating-point ``<module>.wei
 for IQ1_S and 74 for IQ2_XS. No separate shape tensor is stored: a loader recovers the logical
 shape as ``[*weight.shape[:-2], weight.shape[-2] * 256]``. This is unambiguous because IQ export
 requires the logical last dimension to be divisible by 256.
+
+Each 50-byte IQ1_S block represents 256 logical weights:
+
+* bytes 0--1 are the little-endian FP16 super-block scale ``d``;
+* bytes 2--33 are the low eight bits of 32 codebook indices, one per group of eight weights; and
+* bytes 34--49 are eight little-endian ``uint16`` metadata words, one per group of 32 weights. Each
+  word stores the remaining three bits of four codebook indices, a 3-bit local-scale code, and one
+  delta-shift bit.
+
+The canonical 2048-by-8 IQ1_S codebook is part of the implementation rather than the checkpoint.
+The complete block therefore costs ``50 * 8 / 256 = 1.5625`` bits per logical weight.
 
 Each 74-byte IQ2_XS block represents 256 logical weights:
 
