@@ -287,7 +287,7 @@ def dequantize_iq2_xs(
 
     blocks = packed_weights.contiguous().reshape(-1, IQ2_XS_BLOCK_BYTES)
     d = blocks[:, :2].contiguous().view(torch.float16).reshape(-1).float()
-    codes = blocks[:, 2:66:2].to(torch.int64) | (blocks[:, 3:66:2].to(torch.int64) << 8)
+    codes = blocks[:, 2:66:2].to(torch.int32) | (blocks[:, 3:66:2].to(torch.int32) << 8)
     entries = codes & 0x1FF
     sign_index = codes >> 9
 
@@ -295,11 +295,11 @@ def dequantize_iq2_xs(
     for bit in range(7):
         parity ^= (sign_index >> bit) & 1
     sign_mask = sign_index | (parity << 7)
-    bit_positions = torch.arange(8, dtype=torch.int64, device=blocks.device)
+    bit_positions = torch.arange(8, dtype=torch.int32, device=blocks.device)
     signs = 1.0 - 2.0 * ((sign_mask.unsqueeze(-1) >> bit_positions) & 1).float()
 
-    scale_bytes = blocks[:, 66:].to(torch.int64)
-    local = torch.empty((blocks.shape[0], 16), dtype=torch.int64, device=blocks.device)
+    scale_bytes = blocks[:, 66:].to(torch.int32)
+    local = torch.empty((blocks.shape[0], 16), dtype=torch.int32, device=blocks.device)
     local[:, 0::2] = scale_bytes & 0x0F
     local[:, 1::2] = scale_bytes >> 4
     scales = d.unsqueeze(-1) * (2 * local + 1).float() / 8.0

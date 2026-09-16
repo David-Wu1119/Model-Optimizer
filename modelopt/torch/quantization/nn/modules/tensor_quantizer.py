@@ -223,6 +223,7 @@ class TensorQuantizer(nn.Module):
         # quantizer cache for custom backends, like luts
         "_quantizer_cache",
         # Runtime-only packed reconstruction payload owned by ModelOpt.
+        # Any weight rewrite through ``.data`` must clear this cache explicitly.
         "_reconstruction_cache",
         # Runtime-only set of storage attributes tied to shared state. The tied
         # aliases are rebuilt from calibration config and tensor state during restore.

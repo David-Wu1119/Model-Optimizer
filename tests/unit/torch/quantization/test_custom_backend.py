@@ -32,6 +32,7 @@ from modelopt.torch.quantization.nn import (
     register_quant_backend,
     unregister_quant_backend,
 )
+from modelopt.torch.quantization.utils import enable_weight_access_and_writeback
 
 
 def test_backend_cache_capability_freezes_after_calibration():
@@ -129,6 +130,20 @@ def test_reconstruction_cache_lifecycle_preserves_custom_backend_cache():
     assert quantizer._quantizer_cache is backend_cache
     assert quantizer._reconstruction_cache is None
     assert not quantizer._reconstruction_cache_frozen
+
+
+def test_writable_weight_access_clears_only_reconstruction_cache():
+    model = torch.nn.Linear(4, 4)
+    model.weight_quantizer = TensorQuantizer()
+    backend_cache = object()
+    model.weight_quantizer._quantizer_cache = backend_cache
+    model.weight_quantizer._reconstruction_cache = {"payload": object()}
+
+    with enable_weight_access_and_writeback(model, model, writeback=True):
+        pass
+
+    assert model.weight_quantizer._reconstruction_cache is None
+    assert model.weight_quantizer._quantizer_cache is backend_cache
 
 
 def test_freezing_reconstruction_cache_skips_activation_quantizers():

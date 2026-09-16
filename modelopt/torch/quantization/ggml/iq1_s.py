@@ -236,8 +236,7 @@ def _encode_blocks(blocks: torch.Tensor, grid: torch.Tensor) -> torch.Tensor:
     packed[:, 2:34] = (selected_entry & 0xFF).to(torch.uint8)
     packed[:, 34:50:2] = (qh & 0xFF).to(torch.uint8)
     packed[:, 35:50:2] = (qh >> 8).to(torch.uint8)
-    packed[d_float == 0] = 0
-    return packed
+    return torch.where((d_float == 0).unsqueeze(1), 0, packed)
 
 
 @torch.no_grad()
@@ -293,9 +292,9 @@ def dequantize_iq1_s(
 
     blocks = packed_weights.contiguous().reshape(-1, IQ1_S_BLOCK_BYTES)
     d = blocks[:, :2].contiguous().view(torch.float16).reshape(-1).float()
-    low = blocks[:, 2:34].to(torch.int64).reshape(-1, 8, 4)
-    qh = blocks[:, 34:50:2].to(torch.int64) | (blocks[:, 35:50:2].to(torch.int64) << 8)
-    shifts = torch.tensor([0, 3, 6, 9], dtype=torch.int64, device=blocks.device)
+    low = blocks[:, 2:34].to(torch.int32).reshape(-1, 8, 4)
+    qh = blocks[:, 34:50:2].to(torch.int32) | (blocks[:, 35:50:2].to(torch.int32) << 8)
+    shifts = torch.tensor([0, 3, 6, 9], dtype=torch.int32, device=blocks.device)
     high = (qh.unsqueeze(-1) >> shifts) & 0x7
     entries = low | (high << 8)
 
