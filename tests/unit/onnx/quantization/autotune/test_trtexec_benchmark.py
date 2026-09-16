@@ -894,10 +894,10 @@ def test_cleanup_exception_is_swallowed_and_warned(remote_bench, tmp_path, caplo
 # --- network_timeout_seconds ---
 
 
-def test_network_timeout_default_is_five_minutes(tmp_path):
-    """Default network timeout is 5 minutes (300s)."""
+def test_network_timeout_default_is_ten_minutes(tmp_path):
+    """Default network timeout is 10 minutes (600s)."""
     b = TrtExecBenchmark(timing_cache_file=str(tmp_path / "cache.bin"))
-    assert b.network_timeout_seconds == 300
+    assert b.network_timeout_seconds == 600
 
 
 def test_network_timeout_custom_value_stored(tmp_path):
@@ -952,7 +952,10 @@ def test_remote_pipeline_passes_timeout_to_scp_and_ssh(tmp_path):
 
 @pytest.mark.usefixtures("trtexec_version_ok")
 def test_scp_timeout_returns_inf_and_logs(tmp_path, caplog):
-    """A ``subprocess.TimeoutExpired`` during the scp step returns ``inf`` and is logged."""
+    """A ``subprocess.TimeoutExpired`` during the scp step returns ``inf`` and is logged.
+
+    The scp call is inside the try/finally block, so a timeout still triggers remote cleanup.
+    """
     import subprocess
 
     b = TrtExecBenchmark(
@@ -962,10 +965,11 @@ def test_scp_timeout_returns_inf_and_logs(tmp_path, caplog):
     )
     trtexec_proc = _make_proc(stdout="")
     timeout_exc = subprocess.TimeoutExpired(cmd=["scp"], timeout=1.0)
+    cleanup_proc = _make_proc()
 
     with (
         caplog.at_level("ERROR", logger="modelopt.onnx"),
-        patch("subprocess.run", side_effect=[trtexec_proc, timeout_exc]),
+        patch("subprocess.run", side_effect=[trtexec_proc, timeout_exc, cleanup_proc]),
     ):
         assert b.run(str(tmp_path / "m.onnx")) == float("inf")
 

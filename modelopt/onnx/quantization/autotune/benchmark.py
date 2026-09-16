@@ -341,7 +341,7 @@ class TrtExecBenchmark(Benchmark):
         timing_runs: int = 10,
         plugin_libraries: list[str] | None = None,
         trtexec_args: list[str] | None = None,
-        network_timeout_seconds: float = 60 * 5,  # 5 minutes
+        network_timeout_seconds: float = 60 * 10,  # 10 minutes
         remote_engine_path: str | None = None,
     ):
         """Initialize the trtexec benchmark.
@@ -355,7 +355,7 @@ class TrtExecBenchmark(Benchmark):
                          These are appended after the standard arguments.
                          Example: ['--fp16', '--workspace=4096', '--verbose']
             network_timeout_seconds: Timeout for network operations in seconds.
-                                    Default is 5 minutes.  This is the timeout for uploading an
+                                    Default is 10 minutes.  This is the timeout for uploading an
                                     engine to the remote device and running trtexec_safe.
                                     If the timeout is exceeded, the benchmark will fail.
             remote_engine_path: Path on the remote device to store the TRT engine.
@@ -539,11 +539,13 @@ class TrtExecBenchmark(Benchmark):
                     self.engine_path,
                     f"{self.remote_user}@{self.remote_ip}:{shlex.quote(self.remote_engine_path)}",
                 ]
-                result = subprocess.run(
-                    scp_cmd, capture_output=True, text=True, timeout=self.network_timeout_seconds
-                )  # nosec B603 — list-form, no shell=True; user/host validated against leading -
-
                 try:
+                    result = subprocess.run(
+                        scp_cmd,
+                        capture_output=True,
+                        text=True,
+                        timeout=self.network_timeout_seconds,
+                    )  # nosec B603 — list-form, no shell=True; user/host validated against leading -
                     if result.returncode != 0:
                         self.logger.error(
                             f"Failed to push engine to remote device: {_redact_url_password(result.stderr)}"
@@ -621,8 +623,9 @@ class TrtExecBenchmark(Benchmark):
             self.logger.info(f"TrtExec benchmark (median): {latency:.2f} ms")
             return latency
         except FileNotFoundError as e:
+            binary = e.filename or "trtexec"
             self.logger.error(
-                f"{e.filename} not found, please ensure system dependencies are installed and in the PATH: \n"
+                f"{binary} not found, please ensure system dependencies are installed and in the PATH: \n"
                 "ssh, scp, trtexec"
             )
             return float("inf")
