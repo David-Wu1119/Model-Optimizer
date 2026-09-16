@@ -18,6 +18,7 @@ import weakref
 
 import pytest
 import torch
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 
 import modelopt.torch.quantization as mtq
 import modelopt.torch.quantization.ggml as ggml
@@ -53,6 +54,16 @@ def test_iq1_s_canonical_grid():
     assert set(grid.unique().tolist()) == {-1.0, 0.0, 1.0}
     assert grid[0].tolist() == [-1.0] * 8
     assert grid.unique(dim=0).shape[0] == grid.shape[0]
+
+
+def test_iq1_s_fake_grid_does_not_poison_real_grid_cache():
+    iq1_s_module._GRID_CACHE.clear()
+    with FakeTensorMode():
+        fake_grid = iq1_s_grid()
+
+    assert isinstance(fake_grid, FakeTensor)
+    assert not iq1_s_module._GRID_CACHE
+    assert not isinstance(iq1_s_grid(), FakeTensor)
 
 
 def test_iq1_s_zero_block_has_canonical_zero_encoding():

@@ -15,6 +15,7 @@
 
 import pytest
 import torch
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 
 import modelopt.torch.quantization.ggml.iq2_xs as iq2_xs_module
 from modelopt.torch.quantization.config import QuantizerAttributeConfig
@@ -37,6 +38,16 @@ def test_iq2_xs_canonical_grid():
     assert grid[0].tolist() == [8.0] * 8
     assert grid[-1].tolist() == [43.0] * 8
     assert grid.unique(dim=0).shape[0] == grid.shape[0]
+
+
+def test_iq2_xs_fake_grid_does_not_poison_real_grid_cache():
+    iq2_xs_module._GRID_CACHE.clear()
+    with FakeTensorMode():
+        fake_grid = iq2_xs_grid()
+
+    assert isinstance(fake_grid, FakeTensor)
+    assert not iq2_xs_module._GRID_CACHE
+    assert not isinstance(iq2_xs_grid(), FakeTensor)
 
 
 def test_iq2_xs_zero_block_has_canonical_zero_encoding():

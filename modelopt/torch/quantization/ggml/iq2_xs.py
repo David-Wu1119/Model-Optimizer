@@ -58,6 +58,7 @@ import hashlib
 from functools import cache
 
 import torch
+from torch._guards import detect_fake_mode
 
 from .common import GGML_BLOCK_SIZE, cached_reconstruction, validate_packed_weights, validate_weight
 
@@ -155,6 +156,9 @@ def _grid_bytes() -> bytes:
 def iq2_xs_grid(device: torch.device | str | None = None) -> torch.Tensor:
     """Return the canonical IQ2_XS magnitude grid as float32."""
     resolved_device = torch.device(device or "cpu")
+    if detect_fake_mode() is not None:
+        values = torch.tensor(list(_grid_bytes()), dtype=torch.float32)
+        return values.reshape(512, 8).to(device=resolved_device)
     if resolved_device not in _GRID_CACHE:
         values = torch.tensor(list(_grid_bytes()), dtype=torch.float32)
         _GRID_CACHE[resolved_device] = values.reshape(512, 8).to(device=resolved_device)

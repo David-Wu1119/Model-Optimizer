@@ -168,9 +168,9 @@ def freeze_reconstruction_caches(model: nn.Module) -> None:
 class TensorQuantizerCache(Protocol):
     """A protocol for a cache interface for TensorQuantizer.
 
-    The cache slot is shared by quantization backends and may be dropped after calibration,
-    configuration changes, or supported in-place weight rewrites. Backends must rebuild their
-    cache lazily on the next forward.
+    Dict-valued reconstruction caches may be dropped after calibration, configuration changes,
+    or supported in-place weight rewrites and must be rebuilt lazily. Other cache objects are
+    treated as owned by their custom backend and are preserved by the reconstruction lifecycle.
     """
 
 
@@ -427,7 +427,7 @@ class TensorQuantizer(nn.Module):
             self._amax.data.copy_(value.clone().detach().to(self._amax.device))
 
     def reset_amax(self):
-        """Reset amax and discard the shared backend cache slot."""
+        """Reset amax and discard a dict-valued reconstruction cache."""
         self.unfreeze_quantizer_cache()
         if hasattr(self, "_amax"):
             delattr(self, "_amax")
@@ -435,11 +435,12 @@ class TensorQuantizer(nn.Module):
         self.reset_bias()
 
     def clear_quantizer_cache(self):
-        """Drop the shared backend cache slot while preserving frozen-cache eligibility.
+        """Drop a dict-valued reconstruction cache while preserving frozen eligibility.
 
-        Any backend using ``_quantizer_cache`` must rebuild its cache lazily on the next forward.
+        A non-dict cache object belongs to another backend and is left intact.
         """
-        self._quantizer_cache = None
+        if isinstance(self._quantizer_cache, dict):
+            self._quantizer_cache = None
 
     def freeze_quantizer_cache(self):
         """Declare source weights frozen for a backend that caches reconstructions."""
@@ -448,7 +449,7 @@ class TensorQuantizer(nn.Module):
     def unfreeze_quantizer_cache(self):
         """Disable reconstruction cache reuse until the next completed calibration."""
         self._reconstruction_cache_frozen = False
-        self._quantizer_cache = None
+        self.clear_quantizer_cache()
 
     def reset_bias(self):
         """Reset bias to None."""

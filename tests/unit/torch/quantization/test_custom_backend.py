@@ -112,6 +112,21 @@ def test_freezing_reconstruction_cache_preserves_custom_backend_cache():
     assert quantizer._quantizer_cache is backend_cache
 
 
+def test_reconstruction_cache_lifecycle_preserves_custom_backend_cache():
+    quantizer = TensorQuantizer()
+    backend_cache = object()
+    quantizer._quantizer_cache = backend_cache
+    quantizer.freeze_quantizer_cache()
+
+    quantizer.clear_quantizer_cache()
+    assert quantizer._quantizer_cache is backend_cache
+    assert quantizer._reconstruction_cache_frozen
+
+    quantizer.unfreeze_quantizer_cache()
+    assert quantizer._quantizer_cache is backend_cache
+    assert not quantizer._reconstruction_cache_frozen
+
+
 def test_freezing_reconstruction_cache_skips_activation_quantizers():
     backend_name = "weight_only_reconstruction_cache_backend"
     register_quant_backend(
