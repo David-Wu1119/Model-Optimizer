@@ -139,6 +139,16 @@ def test_iq2_xs_cuda_zero_encoding_matches_ggml_block_layout():
     assert torch.equal(dequantize_iq2_xs(packed, shape), weight)
 
 
+def test_iq2_xs_cuda_underflowed_scale_matches_reference_zero_encoding():
+    weight = torch.full((1, 256), -1e-6, device="cuda", dtype=torch.bfloat16)
+    packed = _extension().pack(weight, iq2_xs_grid("cuda")).reshape(1, 1, 74)
+    reference, shape = quantize_iq2_xs(weight.cpu())
+
+    assert not packed.any()
+    assert torch.equal(packed.cpu(), reference)
+    assert torch.equal(dequantize_iq2_xs(packed, shape.cuda()), torch.zeros_like(weight))
+
+
 @pytest.mark.parametrize("invalid_value", [128, 1.5])
 def test_iq2_xs_cuda_rejects_unrepresentable_grid_values(invalid_value):
     weight = torch.zeros((1, 256), device="cuda", dtype=torch.bfloat16)

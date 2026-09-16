@@ -28,6 +28,8 @@
 #include <cstdint>
 #include <limits>
 
+#include "ggml_pack_common.cuh"
+
 namespace {
 
 constexpr int kBlockSize = 256;
@@ -55,6 +57,7 @@ constexpr float kMaxAnchor = 0.92f;
 static_assert(kThreads % kWarpSize == 0);
 static_assert(kWarpSize == 32, "the shuffle reductions below start at delta = 16");
 static_assert(kThreads >= kBlockSize, "shared_input is filled one value per thread");
+static_assert(kThreads >= kPayloadBytes, "the zero-block path writes one byte per thread");
 static_assert(kThreads >= kLocalScales, "local-scale reductions assign one thread per scale");
 static_assert(kThreads >= kGroups / 2, "local-scale bytes are written one per thread");
 static_assert(kEntries == 512, "the packed code stores a 9-bit grid index");
@@ -62,10 +65,6 @@ static_assert(kLocalScales <= 16, "each local scale must fit in one nibble");
 static_assert(kGroups * kGroupValues == kBlockSize, "group tiling must cover the block");
 static_assert(kPayloadBytes == kLocalScaleOffset + kGroups / 2,
               "payload layout must match scale, code, and local-scale fields");
-
-template <typename scalar_t> __device__ __forceinline__ float load_float(const scalar_t *input) {
-  return static_cast<float>(*input);
-}
 
 __device__ __forceinline__ float quant_error(float xnorm, float dot, float qnorm, float scale) {
   return fmaxf(fmaf(scale * scale, qnorm, fmaf(-2.0f * scale, dot, xnorm)), 0.0f);
@@ -87,30 +86,8 @@ __device__ __forceinline__ float even_parity_dot(const float *x, const int8_t *q
 }
 
 template <typename scalar_t>
-__global__ void find_scale(const scalar_t *input, int64_t num_blocks, int16_t *scale_bits) {
-  const int64_t block = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
-  if (block >= num_blocks)
-    return;
-
-  float amax = 0.0f;
-  float sumsq = 0.0f;
-  const scalar_t *values = input + block * kBlockSize;
-#pragma unroll 1
-  for (int i = 0; i < kBlockSize; ++i) {
-    const float value = load_float(values + i);
-    amax = fmaxf(amax, fabsf(value));
-    sumsq = fmaf(value, value, sumsq);
-  }
-  const float rms = sqrtf(sumsq / kBlockSize);
-  const float peak_to_rms = rms > 0.0f ? amax / rms : 0.0f;
-  const float anchor = fminf(kMaxAnchor, fmaxf(kMinAnchor, 1.0f - kPeakToRmsSlope * peak_to_rms));
-  const __half scale = __float2half_rn(fminf((amax / kNativeMax) * anchor, 65504.0f));
-  scale_bits[block] = static_cast<int16_t>(__half_as_ushort(scale));
-}
-
-template <typename scalar_t>
 __global__ void encode(const scalar_t *input, int64_t num_blocks, const float *grid,
-                       const int16_t *scale_bits, uint8_t *output) {
+                       uint8_t *output) {
   // Canonical IQ2_XS magnitudes are at most 43 and therefore fit in int8_t.
   __shared__ int8_t shared_grid[kEntries * kVectorSize];
   __shared__ float grid_norm[kEntries];
@@ -120,14 +97,56 @@ __global__ void encode(const scalar_t *input, int64_t num_blocks, const float *g
   __shared__ float warp_best[kWarps * kLocalScales];
   __shared__ float group_error[kLocalScales];
   __shared__ unsigned long long warp_keys[kWarps];
+  __shared__ float warp_amax[kWarps];
+  __shared__ float warp_sumsq[kWarps];
+  __shared__ uint16_t shared_d_bits;
   __shared__ int selected_local;
   __shared__ uint8_t locals[kGroups];
 
   const int tid = threadIdx.x;
   const int lane = tid & (kWarpSize - 1);
   const int warp = tid / kWarpSize;
-  for (int i = tid; i < kEntries * kVectorSize; i += kThreads)
-    shared_grid[i] = static_cast<int8_t>(grid[i]);
+  const int64_t block = blockIdx.x;
+  if (block >= num_blocks)
+    return;
+  const scalar_t *source = input + block * kBlockSize;
+  uint8_t *payload = output + block * kPayloadBytes;
+  const float value = tid < kBlockSize ? modelopt::ggml_pack::load_float(source + tid) : 0.0f;
+  if (tid < kBlockSize)
+    shared_input[tid] = value;
+  float amax = modelopt::ggml_pack::warp_max(fabsf(value));
+  float sumsq = modelopt::ggml_pack::warp_sum(value * value);
+  if (lane == 0) {
+    warp_amax[warp] = amax;
+    warp_sumsq[warp] = sumsq;
+  }
+  __syncthreads();
+  if (tid == 0) {
+    amax = warp_amax[0];
+    sumsq = warp_sumsq[0];
+#pragma unroll
+    for (int w = 1; w < kWarps; ++w) {
+      amax = fmaxf(amax, warp_amax[w]);
+      sumsq += warp_sumsq[w];
+    }
+    const float rms = sqrtf(sumsq / kBlockSize);
+    const float peak_to_rms = rms > 0.0f ? amax / rms : 0.0f;
+    const float anchor = fminf(kMaxAnchor, fmaxf(kMinAnchor, 1.0f - kPeakToRmsSlope * peak_to_rms));
+    const __half scale = __float2half_rn(fminf((amax / kNativeMax) * anchor, 65504.0f));
+    shared_d_bits = __half_as_ushort(scale);
+    payload[0] = static_cast<uint8_t>(shared_d_bits);
+    payload[1] = static_cast<uint8_t>(shared_d_bits >> 8);
+  }
+  __syncthreads();
+  const uint16_t d_bits = shared_d_bits;
+  if (d_bits == 0) {
+    if (tid < kPayloadBytes)
+      payload[tid] = 0;
+    return;
+  }
+  const float d = __half2float(__ushort_as_half(d_bits));
+
+  modelopt::ggml_pack::stage_grid_int8<kEntries * kVectorSize, kThreads>(grid, shared_grid, tid);
   __syncthreads();
   for (int entry = tid; entry < kEntries; entry += kThreads) {
     float norm = 0.0f;
@@ -138,21 +157,6 @@ __global__ void encode(const scalar_t *input, int64_t num_blocks, const float *g
     }
     grid_norm[entry] = norm;
   }
-  __syncthreads();
-
-  const int64_t block = blockIdx.x;
-  if (block >= num_blocks)
-    return;
-  const scalar_t *source = input + block * kBlockSize;
-  uint8_t *payload = output + block * kPayloadBytes;
-  const uint16_t d_bits = static_cast<uint16_t>(scale_bits[block]);
-  const float d = __half2float(__ushort_as_half(d_bits));
-  if (tid == 0) {
-    payload[0] = static_cast<uint8_t>(d_bits);
-    payload[1] = static_cast<uint8_t>(d_bits >> 8);
-  }
-  if (tid < kBlockSize)
-    shared_input[tid] = load_float(source + tid);
   __syncthreads();
   if (tid < kBlockSize / kVectorSize) {
     float norm = 0.0f;
@@ -170,9 +174,6 @@ __global__ void encode(const scalar_t *input, int64_t num_blocks, const float *g
 
 #pragma unroll 1
   for (int group = 0; group < kGroups; ++group) {
-    // A zero scale ties every candidate error, so the key selects entry 0 and local scale 0; an
-    // all-zero block additionally has no negative values, so its payload is all zero without a
-    // separate branch, matching the reference encoder.
     if (tid < kLocalScales)
       group_error[tid] = 0.0f;
     __syncthreads();
@@ -198,24 +199,8 @@ __global__ void encode(const scalar_t *input, int64_t num_blocks, const float *g
               fminf(local_best[local], quant_error(xnorm, dot, grid_norm[entry], scale));
         }
       }
-#pragma unroll
-      for (int local = 0; local < kLocalScales; ++local) {
-        float value = local_best[local];
-#pragma unroll
-        for (int delta = 16; delta > 0; delta >>= 1)
-          value = fminf(value, __shfl_down_sync(0xffffffff, value, delta));
-        if (lane == 0)
-          warp_best[warp * kLocalScales + local] = value;
-      }
-      __syncthreads();
-      if (tid < kLocalScales) {
-        float value = warp_best[tid];
-#pragma unroll
-        for (int w = 1; w < kWarps; ++w)
-          value = fminf(value, warp_best[w * kLocalScales + tid]);
-        group_error[tid] += value;
-      }
-      __syncthreads();
+      modelopt::ggml_pack::accumulate_choice_min<kLocalScales, kWarps>(
+          local_best, warp_best, group_error, tid, lane, warp);
     }
 
     if (tid == 0) {
@@ -250,19 +235,8 @@ __global__ void encode(const scalar_t *input, int64_t num_blocks, const float *g
             static_cast<unsigned long long>(entry);
         key = candidate < key ? candidate : key;
       }
-#pragma unroll
-      for (int delta = 16; delta > 0; delta >>= 1) {
-        const auto other = __shfl_down_sync(0xffffffff, key, delta);
-        key = other < key ? other : key;
-      }
-      if (lane == 0)
-        warp_keys[warp] = key;
-      __syncthreads();
+      key = modelopt::ggml_pack::block_min_key<kWarps>(key, warp_keys, tid, lane, warp);
       if (tid == 0) {
-        key = warp_keys[0];
-#pragma unroll
-        for (int w = 1; w < kWarps; ++w)
-          key = warp_keys[w] < key ? warp_keys[w] : key;
         const int entry = static_cast<int>(key & kEntryMask);
         const int8_t *q = shared_grid + entry * kVectorSize;
         int flip_index = 0;
@@ -317,19 +291,14 @@ at::Tensor iq2_xs_pack_cuda(at::Tensor input, at::Tensor grid, bool validate_gri
   }
   const int64_t num_blocks = input.numel() / kBlockSize;
   TORCH_CHECK(num_blocks <= std::numeric_limits<int>::max(), "IQ2_XS CUDA grid is too large");
-  auto scales = at::empty({num_blocks}, input.options().dtype(at::kShort));
   auto output = at::empty({num_blocks, kPayloadBytes}, input.options().dtype(at::kByte));
   const auto stream = c10::cuda::getCurrentCUDAStream();
-  const int scale_grid = static_cast<int>((num_blocks + kThreads - 1) / kThreads);
 
   AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half, at::ScalarType::BFloat16, input.scalar_type(), "iq2_xs_pack", [&] {
-        find_scale<scalar_t><<<scale_grid, kThreads, 0, stream>>>(
-            input.data_ptr<scalar_t>(), num_blocks, scales.data_ptr<int16_t>());
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
         encode<scalar_t><<<static_cast<int>(num_blocks), kThreads, 0, stream>>>(
             input.data_ptr<scalar_t>(), num_blocks, grid.data_ptr<float>(),
-            scales.data_ptr<int16_t>(), output.data_ptr<uint8_t>());
+            output.data_ptr<uint8_t>());
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
   return output;
