@@ -201,6 +201,35 @@ def test_iq2_xs_requires_complete_last_dimension_blocks():
         quantize_iq2_xs(torch.ones(2, 257))
 
 
+def test_iq2_xs_reference_search_is_selectable():
+    weight = torch.randn(2, 256, dtype=torch.bfloat16)
+
+    expected, expected_shape = quantize_iq2_xs(weight)
+    actual, actual_shape = quantize_iq2_xs(weight, search_impl="reference")
+
+    assert torch.equal(actual, expected)
+    assert torch.equal(actual_shape, expected_shape)
+
+
+def test_iq2_xs_rejects_unknown_search_implementation():
+    with pytest.raises(ValueError, match="Unsupported IQ2_XS search_impl"):
+        quantize_iq2_xs(torch.ones(1, 256), search_impl="unknown")
+
+
+def test_iq2_xs_backend_accepts_reference_search():
+    quantizer = TensorQuantizer(
+        QuantizerAttributeConfig(
+            num_bits="iq2_xs",
+            block_sizes={-1: 256},
+            backend="ggml",
+            backend_extra_args={"search_impl": "reference"},
+        )
+    )
+    weight = torch.randn(1, 256)
+
+    assert quantizer(weight).shape == weight.shape
+
+
 def test_iq2_xs_fake_quant_has_pass_through_gradient():
     class Quantizer:
         num_bits = "iq2_xs"

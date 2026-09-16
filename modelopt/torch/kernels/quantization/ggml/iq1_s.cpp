@@ -18,14 +18,22 @@
 #include <ATen/ATen.h>
 #include <torch/extension.h>
 
-at::Tensor iq1_s_pack_cuda(at::Tensor input, at::Tensor grid);
+at::Tensor iq1_s_pack_cuda(at::Tensor input, at::Tensor grid, bool validate_grid);
 
 at::Tensor iq1_s_pack(at::Tensor input, at::Tensor grid) {
   TORCH_CHECK(input.is_cuda(), "IQ1_S packing requires a CUDA input");
   TORCH_CHECK(grid.is_cuda(), "IQ1_S packing requires a CUDA grid");
-  return iq1_s_pack_cuda(input.contiguous(), grid.contiguous());
+  return iq1_s_pack_cuda(input.contiguous(), grid.contiguous(), true);
+}
+
+at::Tensor iq1_s_pack_canonical(at::Tensor input, at::Tensor grid) {
+  TORCH_CHECK(input.is_cuda(), "IQ1_S packing requires a CUDA input");
+  TORCH_CHECK(grid.is_cuda(), "IQ1_S packing requires a CUDA grid");
+  return iq1_s_pack_cuda(input.contiguous(), grid.contiguous(), false);
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, module) {
   module.def("pack", &iq1_s_pack, "Pack a tensor into GGML IQ1_S blocks");
+  module.def("_pack_canonical", &iq1_s_pack_canonical,
+             "Pack with the internally validated canonical grid");
 }

@@ -254,10 +254,15 @@ def _encode_blocks(blocks: torch.Tensor, grid: torch.Tensor) -> torch.Tensor:
 
 @torch.no_grad()
 def _quantize_iq2_xs_packed(
-    weight: torch.Tensor, *, block_chunk_size: int | None = None
+    weight: torch.Tensor,
+    *,
+    block_chunk_size: int | None = None,
+    search_impl: str = "auto",
 ) -> torch.Tensor:
     """Pack a weight without allocating the public logical-shape tensor."""
     validate_weight(weight, "IQ2_XS")
+    if search_impl not in {"auto", "reference"}:
+        raise ValueError(f"Unsupported IQ2_XS search_impl {search_impl!r}")
     if block_chunk_size is None:
         if detect_fake_mode(weight) is not None:
             # Tracing allocates no tensor storage, so chunking only unrolls the graph.
@@ -274,10 +279,10 @@ def _quantize_iq2_xs_packed(
         weight.shape[-1] // IQ2_XS_BLOCK_SIZE,
         IQ2_XS_BLOCK_BYTES,
     )
-    if weight.is_cuda:
+    if weight.is_cuda and search_impl == "auto":
         extension = extensions.get_cuda_ext_iq2_xs()
         if extension is not None:
-            packed = extension.pack(blocks, grid)
+            packed = extension._pack_canonical(blocks, grid)
             return packed.reshape(packed_shape)
 
     chunks = [
@@ -289,14 +294,24 @@ def _quantize_iq2_xs_packed(
 
 @torch.no_grad()
 def quantize_iq2_xs(
-    weight: torch.Tensor, *, block_chunk_size: int | None = None
+    weight: torch.Tensor,
+    *,
+    block_chunk_size: int | None = None,
+    search_impl: str = "auto",
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Pack a floating-point weight into GGML-compatible IQ2_XS blocks.
 
     Returned shapes are ``[*weight.shape[:-1], weight.shape[-1] // 256, 74]``
     and ``[weight.ndim]``. Both tensors remain on the weight's device.
+    ``search_impl="reference"`` selects the device-independent reference search;
+    ``"auto"`` uses CUDA when available. ``block_chunk_size`` applies only to the reference path.
+    CUDA and reference encoders target comparable reconstruction error but may select
+    different grid entries when candidate errors are within floating-point rounding, so
+    payload bytes need not match across devices.
     """
-    packed = _quantize_iq2_xs_packed(weight, block_chunk_size=block_chunk_size)
+    packed = _quantize_iq2_xs_packed(
+        weight, block_chunk_size=block_chunk_size, search_impl=search_impl
+    )
     logical_shape = torch.tensor(weight.shape, dtype=torch.int64, device=weight.device)
     return packed, logical_shape
 
@@ -358,13 +373,15 @@ def iq2_xs_fake_quant(inputs: torch.Tensor, quantizer) -> torch.Tensor:
             f"supported: {sorted(_IQ2_XS_SUPPORTED_BACKEND_EXTRA_ARGS)}"
         )
     search_impl = extra_args.get("search_impl", "auto")
-    if search_impl != "auto":
-        raise NotImplementedError("Only IQ2_XS search_impl='auto' is currently supported")
+    if search_impl not in {"auto", "reference"}:
+        raise NotImplementedError(
+            "Only IQ2_XS search_impl='auto' or search_impl='reference' is supported"
+        )
     reconstructed = cached_reconstruction(
         inputs,
         quantizer,
         cache_namespace="iq2_xs",
-        quantize=_quantize_iq2_xs_packed,
+        quantize=lambda weight: _quantize_iq2_xs_packed(weight, search_impl=search_impl),
         dequantize=dequantize_iq2_xs,
     )
     return inputs + (reconstructed - inputs).detach()

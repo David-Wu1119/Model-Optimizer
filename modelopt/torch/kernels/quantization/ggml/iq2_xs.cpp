@@ -17,14 +17,22 @@
 
 #include <torch/extension.h>
 
-at::Tensor iq2_xs_pack_cuda(at::Tensor input, at::Tensor grid);
+at::Tensor iq2_xs_pack_cuda(at::Tensor input, at::Tensor grid, bool validate_grid);
 
 at::Tensor iq2_xs_pack(at::Tensor input, at::Tensor grid) {
   TORCH_CHECK(input.is_cuda(), "IQ2_XS packing requires a CUDA input");
   TORCH_CHECK(grid.is_cuda(), "IQ2_XS packing requires a CUDA grid");
-  return iq2_xs_pack_cuda(input.contiguous(), grid.contiguous());
+  return iq2_xs_pack_cuda(input.contiguous(), grid.contiguous(), true);
+}
+
+at::Tensor iq2_xs_pack_canonical(at::Tensor input, at::Tensor grid) {
+  TORCH_CHECK(input.is_cuda(), "IQ2_XS packing requires a CUDA input");
+  TORCH_CHECK(grid.is_cuda(), "IQ2_XS packing requires a CUDA grid");
+  return iq2_xs_pack_cuda(input.contiguous(), grid.contiguous(), false);
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, module) {
   module.def("pack", &iq2_xs_pack, "Pack a tensor into GGML IQ2_XS blocks");
+  module.def("_pack_canonical", &iq2_xs_pack_canonical,
+             "Pack with the internally validated canonical grid");
 }

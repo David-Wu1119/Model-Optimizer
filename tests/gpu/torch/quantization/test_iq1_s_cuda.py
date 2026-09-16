@@ -109,6 +109,20 @@ def test_iq1_s_cuda_uses_reference_fallback_when_extension_is_unavailable(monkey
     assert fallback_error <= reference_error.cuda() * 1.02
 
 
+def test_iq1_s_cuda_reference_search_bypasses_extension(monkeypatch):
+    monkeypatch.setattr(
+        iq1_s_module.extensions,
+        "get_cuda_ext_iq1_s",
+        lambda *_args, **_kwargs: pytest.fail("reference search must not load the extension"),
+    )
+    weight = torch.randn((1, 256), device="cuda", dtype=torch.bfloat16)
+
+    packed, shape = quantize_iq1_s(weight, search_impl="reference")
+
+    assert packed.shape == (1, 1, 50)
+    assert torch.equal(shape, torch.tensor([1, 256], device="cuda"))
+
+
 def test_iq1_s_cuda_zero_encoding_matches_ggml_block_layout():
     weight = torch.zeros((1, 256), device="cuda", dtype=torch.bfloat16)
     packed = _extension().pack(weight, iq1_s_grid("cuda")).reshape(1, 1, 50)
@@ -118,10 +132,11 @@ def test_iq1_s_cuda_zero_encoding_matches_ggml_block_layout():
     assert torch.equal(dequantize_iq1_s(packed, shape), weight)
 
 
-def test_iq1_s_cuda_rejects_grid_values_outside_staging_range():
+@pytest.mark.parametrize("invalid_value", [6, 0.5])
+def test_iq1_s_cuda_rejects_unrepresentable_grid_values(invalid_value):
     weight = torch.zeros((1, 256), device="cuda", dtype=torch.bfloat16)
     grid = iq1_s_grid("cuda").clone()
-    grid[0, 0] = 6
+    grid[0, 0] = invalid_value
 
-    with pytest.raises(RuntimeError, match="grid values must be within"):
+    with pytest.raises(RuntimeError, match="grid values must be integral and within"):
         _extension().pack(weight, grid)
