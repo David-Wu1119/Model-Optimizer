@@ -81,18 +81,26 @@ def test_iq1_s_cuda_uses_reference_fallback_when_extension_is_unavailable(monkey
         getter_called = True
 
     monkeypatch.setattr(iq1_s_module.extensions, "get_cuda_ext_iq1_s", unavailable_extension)
-    weight = torch.randn((1, 256), device="cuda", dtype=torch.bfloat16)
+    generator = torch.Generator().manual_seed(4321)
+    weight_cpu = torch.randn((1, 512), generator=generator, dtype=torch.bfloat16)
+    weight = weight_cpu.cuda()
+    reference, _ = quantize_iq1_s(weight_cpu)
     expected = iq1_s_module._encode_blocks(weight.reshape(-1, 256), iq1_s_grid("cuda")).reshape(
-        1, 1, 50
+        1, 2, 50
     )
 
     packed, shape = quantize_iq1_s(weight, block_chunk_size=1)
+    reconstructed = dequantize_iq1_s(packed, shape).float()
+    reference_reconstructed = dequantize_iq1_s(reference, (1, 512)).float()
+    fallback_error = (reconstructed - weight.float()).square().mean()
+    reference_error = (reference_reconstructed - weight_cpu.float()).square().mean()
 
     assert getter_called
-    assert packed.shape == (1, 1, 50)
+    assert packed.shape == (1, 2, 50)
     assert torch.equal(packed, expected)
-    assert torch.equal(shape, torch.tensor([1, 256], device="cuda"))
-    assert dequantize_iq1_s(packed, shape).shape == weight.shape
+    assert torch.equal(shape, torch.tensor([1, 512], device="cuda"))
+    assert reconstructed.shape == weight.shape
+    assert fallback_error <= reference_error.cuda() * 1.02
 
 
 def test_iq1_s_cuda_zero_encoding_matches_ggml_block_layout():

@@ -115,6 +115,7 @@ __global__ void find_scale(const scalar_t *input, int64_t num_blocks, int16_t *s
 template <typename scalar_t>
 __global__ void encode(const scalar_t *input, int64_t num_blocks, const float *grid,
                        const int16_t *scale_bits, uint8_t *output) {
+  // Canonical IQ2_XS magnitudes are at most 43 and therefore fit in int8_t.
   __shared__ int8_t shared_grid[kEntries * kVectorSize];
   __shared__ float grid_norm[kEntries];
   __shared__ float shared_input[kBlockSize];

@@ -115,6 +115,7 @@ def get_cuda_ext_iq2_xs(raise_if_failed: bool = False):
 
 
 def __getattr__(name):
+    # Bare extension attributes are legacy compatibility aliases; new extensions expose getters.
     if name == "cuda_ext":
         return get_cuda_ext()
     elif name == "cuda_ext_fp8":

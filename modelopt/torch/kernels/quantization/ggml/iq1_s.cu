@@ -108,6 +108,7 @@ template <typename scalar_t>
 __global__ void encode(const scalar_t *input, int64_t num_blocks, const float *grid,
                        const int16_t *scale_bits, uint8_t *output) {
   __shared__ int8_t shared_grid[kEntries * kVectorSize];
+  // The canonical ternary grid has |q| <= 1, so its 8-value norm and sum fit below.
   __shared__ uint8_t grid_norm[kEntries];
   __shared__ int8_t grid_sum[kEntries];
   __shared__ float shared_input[kBlockSize];
