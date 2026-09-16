@@ -65,17 +65,15 @@ def cached_reconstruction(
     rewrite a frozen weight must clear its quantizer cache before the next forward.
     """
     raw_cache = getattr(quantizer, "_quantizer_cache", None)
-    cache_enabled = (
-        not getattr(quantizer, "training", True)
-        and isinstance(raw_cache, dict)
-        and raw_cache.get("_modelopt_cache_frozen") is True
+    cache_enabled = not getattr(quantizer, "training", True) and getattr(
+        quantizer, "_reconstruction_cache_frozen", False
     )
     cache: dict[str, Any] = raw_cache if isinstance(raw_cache, dict) else {}
-    if not cache_enabled:
+    if cache_enabled and not isinstance(raw_cache, dict):
+        quantizer._quantizer_cache = cache
+    elif not cache_enabled:
         cache = {}
-        if getattr(quantizer, "training", True):
-            frozen = isinstance(raw_cache, dict) and raw_cache.get("_modelopt_cache_frozen") is True
-            quantizer._quantizer_cache = {"_modelopt_cache_frozen": True} if frozen else None
+        quantizer._quantizer_cache = None
 
     storage_key = f"{cache_namespace}_storage"
     signature_key = f"{cache_namespace}_signature"

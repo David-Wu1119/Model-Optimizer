@@ -78,6 +78,7 @@ __all__ = [
     "StaticBlockScaleQuantizer",
     "TensorQuantizer",
     "TensorQuantizerCache",
+    "freeze_reconstruction_caches",
     "is_registered_quant_backend",
     "quant_backend_caches_reconstruction",
     "register_quant_backend",
@@ -145,6 +146,15 @@ def quant_backend_caches_reconstruction(name: str | None) -> bool:
     return name in _RECONSTRUCTION_CACHE_BACKENDS if name is not None else False
 
 
+def freeze_reconstruction_caches(model: nn.Module) -> None:
+    """Declare weights frozen for quantizers whose backends cache reconstructions."""
+    for module in model.modules():
+        if isinstance(module, TensorQuantizer) and quant_backend_caches_reconstruction(
+            module.backend
+        ):
+            module.freeze_quantizer_cache()
+
+
 class TensorQuantizerCache(Protocol):
     """A protocol for a cache interface for TensorQuantizer."""
 
@@ -200,6 +210,8 @@ class TensorQuantizer(nn.Module):
         # Runtime-only set of storage attributes tied to shared state. The tied
         # aliases are rebuilt from calibration config and tensor state during restore.
         "_shared_quant_tied_attrs",
+        # Runtime-only declaration used by reconstruction-caching backends.
+        "_reconstruction_cache_frozen",
     }
 
     def __setattr__(self, name, value):
@@ -240,6 +252,7 @@ class TensorQuantizer(nn.Module):
 
         # Optional quantizer cache for caching quantizer related encoding or tensors.
         self._quantizer_cache = None
+        self._reconstruction_cache_frozen = False
 
     def set_from_attribute_config(self, attribute_cfg: QuantizerAttributeConfig | dict[str, Any]):
         """Set quantizer attributes from attribute_cfg.
@@ -408,17 +421,15 @@ class TensorQuantizer(nn.Module):
 
     def clear_quantizer_cache(self):
         """Discard cached payloads while preserving frozen-cache eligibility."""
-        frozen = isinstance(self._quantizer_cache, dict) and self._quantizer_cache.get(
-            "_modelopt_cache_frozen"
-        )
-        self._quantizer_cache = {"_modelopt_cache_frozen": True} if frozen else None
+        self._quantizer_cache = None
 
     def freeze_quantizer_cache(self):
         """Declare source weights frozen for a backend that caches reconstructions."""
-        self._quantizer_cache = {"_modelopt_cache_frozen": True}
+        self._reconstruction_cache_frozen = True
 
     def unfreeze_quantizer_cache(self):
         """Disable reconstruction cache reuse until the next completed calibration."""
+        self._reconstruction_cache_frozen = False
         self._quantizer_cache = None
 
     def reset_bias(self):

@@ -43,7 +43,7 @@ from .nn import (
     StaticBlockScaleQuantizer,
     SVDQuantLinear,
     TensorQuantizer,
-    quant_backend_caches_reconstruction,
+    freeze_reconstruction_caches,
 )
 from .utils import is_quantized, is_quantized_linear
 from .utils.shared_input import SharedWeightGlobalAmaxState
@@ -170,11 +170,7 @@ def restore_quantizer_state(model: nn.Module, config: QuantizeConfig, metadata: 
     # Run this only after every per-module restore hook has completed. Some weight-bearing
     # subclasses replace ``modelopt_post_restore`` and may reset quantizer state without calling
     # the base implementation, so cache eligibility cannot safely live in that hook.
-    for module in model.modules():
-        if isinstance(module, TensorQuantizer) and quant_backend_caches_reconstruction(
-            getattr(module, "backend", None)
-        ):
-            module.freeze_quantizer_cache()
+    freeze_reconstruction_caches(model)
 
     return model
 

@@ -158,7 +158,8 @@ def test_iq1_s_cache_is_frozen_after_quantization():
 
     mtq.quantize(model, config)
 
-    assert model.weight_quantizer._quantizer_cache == {"_modelopt_cache_frozen": True}
+    assert model.weight_quantizer._reconstruction_cache_frozen
+    assert model.weight_quantizer._quantizer_cache is None
 
 
 def test_iq1_s_fake_quant_reuses_cached_reconstruction(monkeypatch):
@@ -202,11 +203,33 @@ def test_iq1_s_fake_quant_reuses_cached_reconstruction(monkeypatch):
     weight.data.add_(1)
     quantizer.reset_amax()
     assert quantizer._quantizer_cache is None
+    quantizer.freeze_quantizer_cache()
     quantizer(weight)
     assert calls == 6
 
     quantizer(weight.clone())
     assert calls == 7
+
+
+def test_iq1_s_frozen_cache_requires_explicit_clear_after_data_write():
+    """Document that data-mediated writes bypass the signature and require invalidation."""
+    quantizer = TensorQuantizer(
+        QuantizerAttributeConfig(
+            num_bits="iq1_s",
+            block_sizes={-1: 256},
+            backend="ggml",
+            backend_extra_args={"search_impl": "auto"},
+        )
+    ).eval()
+    weight = torch.randn(1, 256)
+    quantizer.freeze_quantizer_cache()
+
+    before = quantizer(weight)
+    weight.data.add_(1)
+    assert torch.allclose(quantizer(weight), before, rtol=1e-5, atol=1e-6)
+
+    quantizer.clear_quantizer_cache()
+    assert not torch.allclose(quantizer(weight), before, rtol=1e-5, atol=1e-6)
 
 
 def test_iq1_s_fake_quant_handles_inference_tensors_without_a_version(monkeypatch):

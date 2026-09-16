@@ -52,7 +52,8 @@ def test_backend_cache_capability_freezes_after_calibration():
     try:
         assert quant_backend_caches_reconstruction(backend_name)
         mtq.quantize(model, config)
-        assert model.weight_quantizer._quantizer_cache == {"_modelopt_cache_frozen": True}
+        assert model.weight_quantizer._reconstruction_cache_frozen
+        assert model.weight_quantizer._quantizer_cache is None
     finally:
         unregister_quant_backend(backend_name)
 
@@ -91,9 +92,21 @@ def test_backend_cache_capability_freezes_after_all_restore_hooks(monkeypatch):
 
         restored = torch.nn.Linear(16, 16, bias=False)
         mto.restore_from_modelopt_state(restored, modelopt_state)
-        assert restored.weight_quantizer._quantizer_cache == {"_modelopt_cache_frozen": True}
+        assert restored.weight_quantizer._reconstruction_cache_frozen
+        assert restored.weight_quantizer._quantizer_cache is None
     finally:
         unregister_quant_backend(backend_name)
+
+
+def test_freezing_reconstruction_cache_preserves_custom_backend_cache():
+    quantizer = TensorQuantizer()
+    backend_cache = object()
+    quantizer._quantizer_cache = backend_cache
+
+    quantizer.freeze_quantizer_cache()
+
+    assert quantizer._reconstruction_cache_frozen
+    assert quantizer._quantizer_cache is backend_cache
 
 
 def test_custom_backend_via_quantize():
