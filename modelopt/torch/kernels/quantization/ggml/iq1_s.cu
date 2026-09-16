@@ -41,7 +41,10 @@ constexpr int kThreads = 256;
 constexpr int kWarpSize = 32;
 constexpr int kWarps = kThreads / kWarpSize;
 constexpr float kDelta = 0.125f;
+// Largest shifted grid magnitude times the largest local multiplier: 1.125 * 15.
 constexpr float kNativeMax = 16.875f;
+// Mirrors the reference encoder's peak-clipping anchor.
+constexpr float kScaleAnchor = 0.61f;
 static_assert(kThreads % kWarpSize == 0);
 
 template <typename scalar_t> __device__ __forceinline__ float load_float(const scalar_t *input) {
@@ -71,7 +74,7 @@ __global__ void find_scale(const scalar_t *input, int64_t num_blocks, int16_t *s
 #pragma unroll 1
   for (int i = 0; i < kBlockSize; ++i)
     amax = fmaxf(amax, fabsf(load_float(values + i)));
-  const __half scale = __float2half_rn(fminf((amax / kNativeMax) * 0.61f, 65504.0f));
+  const __half scale = __float2half_rn(fminf((amax / kNativeMax) * kScaleAnchor, 65504.0f));
   scale_bits[block] = static_cast<int16_t>(__half_as_ushort(scale));
 }
 
