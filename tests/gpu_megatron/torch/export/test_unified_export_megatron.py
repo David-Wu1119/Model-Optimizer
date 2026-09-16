@@ -168,7 +168,22 @@ def test_megatron_iq_tensor_parallel_guard_is_collective():
         patch.object(torch.distributed, "get_backend", return_value=torch.distributed.Backend.GLOO),
         patch.object(torch.distributed, "all_reduce", side_effect=report_remote_iq),
     ):
-        assert GPTModelExporter._collective_any_iq(None)
+        assert GPTModelExporter._collective_any_iq(False)
+
+
+def test_megatron_iq_tensor_parallel_guard_finds_later_mixed_format():
+    fp8 = torch.nn.Linear(256, 2, bias=False, dtype=torch.bfloat16)
+    fp8.weight_quantizer = TensorQuantizer(QuantizerAttributeConfig(num_bits=(4, 3)))
+    iq = torch.nn.Linear(256, 2, bias=False, dtype=torch.bfloat16)
+    iq.weight_quantizer = TensorQuantizer(
+        QuantizerAttributeConfig(
+            num_bits="iq2_xs",
+            block_sizes={-1: 256},
+            backend="ggml",
+        )
+    )
+
+    assert GPTModelExporter._model_has_iq_quantizer(torch.nn.Sequential(fp8, iq))
 
 
 def test_megatron_iq_packer_rejects_tensor_parallelism():

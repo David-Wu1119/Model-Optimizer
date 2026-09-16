@@ -35,7 +35,10 @@ from safetensors import safe_open
 from safetensors.torch import save_file
 
 from modelopt import __version__
-from modelopt.torch.quantization.nn.modules.tensor_quantizer import GroupedQuantizer
+from modelopt.torch.quantization.nn.modules.tensor_quantizer import (
+    GroupedQuantizer,
+    TensorQuantizer,
+)
 from modelopt.torch.utils import import_plugin, warn_rank_0
 
 from .convert_hf_config import convert_hf_quant_config_format
@@ -293,9 +296,18 @@ class GPTModelExporter:
         )
 
     @staticmethod
-    def _collective_any_iq(quantization_format: str | None) -> bool:
+    def _model_has_iq_quantizer(model: torch.nn.Module) -> bool:
+        """Return whether this rank owns any enabled IQ weight quantizer."""
+        return any(
+            isinstance(module, TensorQuantizer)
+            and module.is_enabled
+            and module.num_bits in IQ_FORMATS
+            for module in model.modules()
+        )
+
+    @staticmethod
+    def _collective_any_iq(local_iq: bool) -> bool:
         """Return whether any distributed rank owns an IQ-quantized module."""
-        local_iq = quantization_format in IQ_FORMATS
         if not torch.distributed.is_initialized():
             return local_iq
         device = (
@@ -331,7 +343,7 @@ class GPTModelExporter:
 
         quantization_format = self._get_quantization_format(self.model)
         if get_tensor_model_parallel_world_size() != 1 and self._collective_any_iq(
-            quantization_format
+            self._model_has_iq_quantizer(self.model)
         ):
             raise NotImplementedError(
                 "Megatron IQ1_S/IQ2_XS unified export currently requires tensor model "
