@@ -20,10 +20,15 @@ import torch.nn as nn
 from _test_utils.torch.export.utils import ToyModel, partial_fp8_config, partial_w4a8_config
 
 import modelopt.torch.quantization as mtq
-from modelopt.torch.export.quant_utils import _pack_iq_weight, postprocess_state_dict
+from modelopt.torch.export.quant_utils import (
+    _pack_iq_weight,
+    _validate_iq_export_weight_shapes,
+    postprocess_state_dict,
+)
 from modelopt.torch.export.unified_export_hf import (
     _export_quantized_weight,
     _process_quantized_modules,
+    export_hf_checkpoint,
 )
 from modelopt.torch.quantization.config import QuantizerAttributeConfig
 from modelopt.torch.quantization.nn import TensorQuantizer
@@ -164,6 +169,48 @@ def test_export_iq_divisibility_error_identifies_weight(num_bits):
         match=rf"Failed to pack {num_bits.upper()} weight 'Linear.weight' with shape \(4, 192\)",
     ):
         _export_quantized_weight(linear, torch.bfloat16)
+
+
+def test_export_iq_shape_preflight_reports_every_incompatible_weight():
+    model = nn.Sequential(
+        nn.Linear(192, 4, bias=False, dtype=torch.bfloat16),
+        nn.Linear(256, 4, bias=False, dtype=torch.bfloat16),
+        nn.Linear(320, 4, bias=False, dtype=torch.bfloat16),
+    )
+    for linear in model:
+        linear.weight_quantizer = TensorQuantizer(
+            QuantizerAttributeConfig(
+                num_bits="iq2_xs",
+                block_sizes={-1: 256},
+                backend="ggml",
+            )
+        )
+
+    with pytest.raises(ValueError) as exc_info:
+        _validate_iq_export_weight_shapes(model)
+
+    message = str(exc_info.value)
+    assert "0.weight: (4, 192)" in message
+    assert "2.weight: (4, 320)" in message
+    assert "1.weight" not in message
+
+
+def test_export_hf_checkpoint_runs_iq_shape_preflight_before_mutation(tmp_path):
+    linear = nn.Linear(192, 4, bias=False, dtype=torch.bfloat16)
+    linear.weight_quantizer = TensorQuantizer(
+        QuantizerAttributeConfig(
+            num_bits="iq2_xs",
+            block_sizes={-1: 256},
+            backend="ggml",
+        )
+    )
+    original_weight = linear.weight.detach().clone()
+
+    with pytest.raises(ValueError, match=r"weight: \(4, 192\)"):
+        export_hf_checkpoint(linear, export_dir=tmp_path)
+
+    assert linear.weight.dtype == torch.bfloat16
+    assert torch.equal(linear.weight, original_weight)
 
 
 @pytest.mark.parametrize("num_bits", ["iq1_s", "iq2_xs"])

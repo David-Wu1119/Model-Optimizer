@@ -82,6 +82,32 @@ from .quant_format import (
 logger = logging.getLogger(__name__)
 
 
+def _validate_iq_export_weight_shapes(model: nn.Module) -> None:
+    """Reject all IQ weights that cannot be packed before export mutates the model."""
+    incompatible: list[str] = []
+    for module_name, module in model.named_modules():
+        for weight_name in weight_attr_names(module):
+            quantizer = representative_weight_quantizer(module, weight_name)
+            if not (
+                isinstance(quantizer, TensorQuantizer)
+                and quantizer.is_enabled
+                and quantizer.num_bits in IQ_FORMATS
+            ):
+                continue
+            weight = getattr(module, weight_name)
+            group_size = iq_format_spec(quantizer.num_bits)["group_size"]
+            if weight.dim() == 0 or weight.shape[-1] % group_size:
+                qualified_name = f"{module_name}.{weight_name}".lstrip(".")
+                incompatible.append(f"{qualified_name}: {tuple(weight.shape)}")
+
+    if incompatible:
+        details = "\n  - ".join(incompatible)
+        raise ValueError(
+            "IQ export requires every selected weight's final dimension to be divisible by "
+            f"its format group size. Incompatible weights:\n  - {details}"
+        )
+
+
 def _validate_iq_quantizer_config(
     module: nn.Module, quantization_format: str, weight_name: str = "weight"
 ) -> None:
@@ -127,8 +153,12 @@ def _pack_iq_weight(
     try:
         if quantization_format == QUANTIZATION_IQ1_S:
             packed_weight, _ = quantize_iq1_s(weight)
-        else:
+        elif quantization_format == QUANTIZATION_IQ2_XS:
             packed_weight, _ = quantize_iq2_xs(weight)
+        else:
+            raise NotImplementedError(
+                f"No checkpoint packer is registered for {quantization_format.upper()}"
+            )
     except ValueError as exc:
         if describe_as is None:
             owner = type(module).__name__ if module is not None else "state_dict"
@@ -549,7 +579,7 @@ def get_quantization_format(module) -> str | None:
             return QUANTIZATION_W4A8_AWQ
 
         # Handle individual num_bits cases
-        if weight_quantizer.num_bits in (QUANTIZATION_IQ1_S, QUANTIZATION_IQ2_XS):
+        if weight_quantizer.num_bits in IQ_FORMATS:
             if weight_quantizer.backend != "ggml":
                 raise ValueError("IQ formats require the built-in 'ggml' quantization backend")
             return weight_quantizer.num_bits

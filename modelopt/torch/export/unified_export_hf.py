@@ -110,6 +110,7 @@ from .quant_format import (
 from .quant_utils import (
     _get_kv_cache_postprocess_config,
     _pack_iq_weight,
+    _validate_iq_export_weight_shapes,
     fuse_prequant_layernorm,
     fuse_prequant_to_linear,
     get_activation_scaling_factor,
@@ -1679,6 +1680,8 @@ def export_hf_checkpoint(
             **kwargs,
         )
         return
+
+    _validate_iq_export_weight_shapes(model)
 
     is_fsdp2_sharded = (
         torch.distributed.is_available()
