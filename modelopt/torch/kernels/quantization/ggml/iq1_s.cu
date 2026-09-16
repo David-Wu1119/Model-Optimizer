@@ -51,6 +51,7 @@ static_assert(kThreads % kWarpSize == 0);
 static_assert(kWarpSize == 32, "the shuffle reductions below start at delta = 16");
 static_assert(kThreads >= kBlockSize, "shared_input is filled one value per thread");
 static_assert(kThreads >= kPayloadBytes, "the zero-block path writes one byte per thread");
+static_assert(kThreads >= kChoices, "choice reductions assign one thread per choice");
 static_assert(kGroups * 4 * kVectorSize == kBlockSize, "group tiling must cover the block");
 static_assert(kPayloadBytes == kMetadataOffset + 2 * kGroups,
               "payload layout must match scale, index, and metadata fields");
