@@ -280,8 +280,11 @@ at::Tensor iq2_xs_pack_cuda(at::Tensor input, at::Tensor grid, bool validate_gri
   TORCH_CHECK(input.get_device() == grid.get_device(), "input and grid must share a device");
   c10::cuda::CUDAGuard guard(input.device());
   if (validate_grid) {
-    // The upper bound is int8 staging; the lower bound is semantic. IQ2_XS grid entries are
-    // magnitudes and signs live in the code word, so even_parity_dot assumes nonnegative q.
+    // The upper bound has two independent reasons: int8 staging caps q at 127, and kNativeMax
+    // (43 * 31 / 8) assumes the canonical grid's largest magnitude is 43. Larger entries stage
+    // safely but would be scaled as if their peak were 43. The lower bound is semantic: IQ2_XS
+    // grid entries are magnitudes and signs live in the code word, so even_parity_dot assumes
+    // nonnegative q.
     const auto valid =
         grid.eq(grid.trunc()).logical_and(grid.ge(0.0f)).logical_and(grid.le(127.0f));
     TORCH_CHECK(valid.all().item<bool>(),

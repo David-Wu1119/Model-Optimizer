@@ -84,17 +84,28 @@ def get_cuda_ext_mx(raise_if_failed: bool = False):
 
 
 def _get_ggml_ext(getter: Callable[..., Any], stem: str, label: str, raise_if_failed: bool):
-    # A strict caller may follow an optional build that cached ``None``; retry so it fails loudly.
+    # A strict caller may follow an optional build that cached ``None``; retry once so it fails
+    # loudly, then preserve that failure instead of recompiling on every later strict call.
     extension = getattr(getter, "extension", _NOT_BUILT)
+    strict_error = getattr(getter, "strict_error", None)
+    if raise_if_failed and strict_error is not None:
+        raise RuntimeError(strict_error)
     if extension is _NOT_BUILT or (raise_if_failed and extension is None):
-        extension = load_cpp_extension(
-            name=f"modelopt_cuda_ext_{stem}",
-            sources=[kernels_ggml / f"{stem}.cpp", kernels_ggml / f"{stem}.cu"],
-            cuda_version_specifiers=">=11.8",
-            fail_msg=f"{label} CUDA packing is unavailable; using the PyTorch reference encoder.",
-            extra_cuda_cflags=["-O3"],
-            raise_if_failed=raise_if_failed,
-        )
+        try:
+            extension = load_cpp_extension(
+                name=f"modelopt_cuda_ext_{stem}",
+                sources=[kernels_ggml / f"{stem}.cpp", kernels_ggml / f"{stem}.cu"],
+                cuda_version_specifiers=">=11.8",
+                fail_msg=(
+                    f"{label} CUDA packing is unavailable; using the PyTorch reference encoder."
+                ),
+                extra_cuda_cflags=["-O3"],
+                raise_if_failed=raise_if_failed,
+            )
+        except RuntimeError as error:
+            setattr(getter, "extension", None)
+            setattr(getter, "strict_error", str(error))
+            raise
         setattr(getter, "extension", extension)
     return extension
 
