@@ -999,6 +999,21 @@ def test_grouped_mlp_slicing_preserves_exclusion_prefix_and_formats_iq_label():
     ]
 
 
+def test_vllm_fakequant_grouped_mlp_accepts_diagnostic_label():
+    exporter = object.__new__(VllmFqGPTModelExporter)
+    exporter.dtype = torch.bfloat16
+    exporter._state_dict = {}
+    exporter.exclude_modules = []
+    exporter._get_weight_bias = lambda module, _dtype, _values: {"weight": module.weight}
+    exporter._get_weight_scales = lambda *_args: (None, None)
+    exporter._record_layer_quant_config = lambda *_args: None
+    module = _FakeTEGroupedMLP(num_gemms=1, local_expert_indices=[3])
+
+    exporter._grouped_mlp_slicing(module, "experts.{}.down_proj")
+
+    assert "experts.3.down_proj.weight" in exporter._state_dict
+
+
 def test_grouped_mlp_slicing_normalizes_tensor_local_expert_indices():
     """local_expert_indices may arrive as a torch.Tensor (Megatron path). It must be
     normalized to list[int] -- a naive `bool(tensor)` on a multi-element tensor raises.

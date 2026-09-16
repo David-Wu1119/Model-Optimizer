@@ -116,6 +116,7 @@ class VllmFqGPTModelExporter(GPTModelExporter):
         module: torch.nn.Module,
         dtype: torch.dtype = torch.float16,
         prefix: str = "",
+        describe_as: str | None = None,
     ) -> tuple[dict[str, torch.Tensor], str, int]:
         """Return a state_dict, quantization format, and block_size of the module.
 
@@ -126,6 +127,8 @@ class VllmFqGPTModelExporter(GPTModelExporter):
         Args:
             module: The target module to perform real quantization.
             dtype: The default data type.
+            prefix: The exported module prefix.
+            describe_as: Optional diagnostic label accepted for base-exporter compatibility.
 
         Returns:
             Tuple: state_dict, quantization format, and block_size of the module.
