@@ -300,13 +300,13 @@ at::Tensor iq1_s_pack_cuda(at::Tensor input, at::Tensor grid, bool validate_grid
   TORCH_CHECK(grid.scalar_type() == at::kFloat && grid.numel() == kEntries * kVectorSize,
               "grid must be float32 [2048, 8]");
   TORCH_CHECK(input.get_device() == grid.get_device(), "input and grid must share a device");
+  c10::cuda::CUDAGuard guard(input.device());
   if (validate_grid) {
     const auto valid = grid.eq(grid.trunc()).logical_and(grid.ge(-1.0f)).logical_and(grid.le(1.0f));
     TORCH_CHECK(
         valid.all().item<bool>(),
         "grid values must be integral and within [-1, 1] for compact shared-memory staging");
   }
-  c10::cuda::CUDAGuard guard(input.device());
   const int64_t num_blocks = input.numel() / kBlockSize;
   TORCH_CHECK(num_blocks <= std::numeric_limits<int>::max(), "IQ1_S CUDA grid is too large");
   auto scales = at::empty({num_blocks}, input.options().dtype(at::kShort));
