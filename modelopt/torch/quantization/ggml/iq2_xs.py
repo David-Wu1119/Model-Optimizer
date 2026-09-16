@@ -236,7 +236,7 @@ def quantize_iq2_xs(
     """
     validate_weight(weight, "IQ2_XS")
     if block_chunk_size is None:
-        block_chunk_size = 4096 if weight.is_cuda else 64
+        block_chunk_size = 1024 if weight.is_cuda else 64
     if block_chunk_size <= 0:
         raise ValueError(f"block_chunk_size must be positive, got {block_chunk_size}")
 

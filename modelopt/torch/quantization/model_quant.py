@@ -123,6 +123,8 @@ def calibrate(
         if isinstance(module, TensorQuantizer):
             for attr_name in ["_amax", "_pre_quant_scale"]:
                 module.validate_attr(attr_name=attr_name, warn_error=True, name=name)
+            if getattr(module, "backend", None) == "ggml":
+                module.freeze_quantizer_cache()
 
     # TODO: Re-enable when the CUDA error: unspecified launch failure is fixed.
     # clear_cuda_cache()

@@ -119,6 +119,8 @@ class QuantModule(DynamicModule):
         for module in self.modules():
             if isinstance(module, TensorQuantizer):
                 module.to(non_tq_param_or_buffer.device)
+                if getattr(module, "backend", None) == "ggml":
+                    module.freeze_quantizer_cache()
 
     def iter_weights_for_calibration(self):
         """Yield ``(weight, weight_quantizer)`` pairs for weight-only calibration."""
@@ -159,6 +161,7 @@ class QuantModule(DynamicModule):
             weight.data.copy_(quantizer(weight.float().contiguous()).to(weight.dtype))
         quantizer.disable()
         quantizer.disable_rotate()
+        quantizer.clear_quantizer_cache()
         if keep_attrs and hasattr(quantizer, "_pre_quant_scale"):
             # The scale is already baked into the folded weight.
             # Disable pre-quant scaling so it is not applied twice.

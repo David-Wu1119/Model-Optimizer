@@ -290,7 +290,7 @@ class TensorQuantizer(nn.Module):
             self._pass_through_bwd = True
 
         if hasattr(self, "_quantizer_cache"):
-            self.clear_quantizer_cache()
+            self.unfreeze_quantizer_cache()
 
     def dequantize(self, inputs: BaseQuantizedTensor | QTensorWrapper):
         """De-quantize a real quantized tensor to a given dtype."""
@@ -384,18 +384,25 @@ class TensorQuantizer(nn.Module):
 
     def reset_amax(self):
         """Reset amax to None."""
-        self.clear_quantizer_cache()
+        self.unfreeze_quantizer_cache()
         if hasattr(self, "_amax"):
             delattr(self, "_amax")
         self._calibrator.reset()
         self.reset_bias()
 
     def clear_quantizer_cache(self):
-        """Discard runtime-only data cached by a custom quantization backend.
+        """Discard runtime-only data cached by a custom quantization backend."""
+        frozen = isinstance(self._quantizer_cache, dict) and self._quantizer_cache.get(
+            "_modelopt_cache_frozen"
+        )
+        self._quantizer_cache = {"_modelopt_cache_frozen": True} if frozen else None
 
-        Call this after rewriting a source tensor through ``.data`` because such writes can bypass
-        PyTorch version counters while reusing the same storage.
-        """
+    def freeze_quantizer_cache(self):
+        """Allow custom backends to cache reconstructions for weights declared frozen."""
+        self._quantizer_cache = {"_modelopt_cache_frozen": True}
+
+    def unfreeze_quantizer_cache(self):
+        """Disable reconstruction caching until the next completed calibration."""
         self._quantizer_cache = None
 
     def reset_bias(self):

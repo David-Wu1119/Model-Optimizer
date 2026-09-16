@@ -13,9 +13,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import gc
+import weakref
+
 import pytest
 import torch
 
+import modelopt.torch.quantization as mtq
 import modelopt.torch.quantization.ggml as ggml
 import modelopt.torch.quantization.ggml.iq1_s as iq1_s_module
 from modelopt.torch.quantization.config import QuantizerAttributeConfig
@@ -133,6 +137,30 @@ def test_iq1_s_fake_quant_has_pass_through_gradient():
     assert torch.equal(weight.grad, torch.ones_like(weight))
 
 
+def test_iq1_s_cache_is_frozen_after_quantization():
+    model = torch.nn.Linear(256, 1, bias=False)
+    config = {
+        "quant_cfg": [
+            {"quantizer_name": "*", "enable": False},
+            {
+                "quantizer_name": "*weight_quantizer",
+                "cfg": {
+                    "num_bits": "iq1_s",
+                    "block_sizes": {-1: 256},
+                    "backend": "ggml",
+                    "backend_extra_args": {"search_impl": "auto"},
+                },
+                "enable": True,
+            },
+        ],
+        "algorithm": "max",
+    }
+
+    mtq.quantize(model, config)
+
+    assert model.weight_quantizer._quantizer_cache == {"_modelopt_cache_frozen": True}
+
+
 def test_iq1_s_fake_quant_reuses_cached_reconstruction(monkeypatch):
     calls = 0
     original_quantize = iq1_s_module.quantize_iq1_s
@@ -155,24 +183,30 @@ def test_iq1_s_fake_quant_reuses_cached_reconstruction(monkeypatch):
 
     quantizer(weight)
     quantizer(weight)
-    assert calls == 1
+    assert calls == 2
+
+    quantizer.freeze_quantizer_cache()
+    quantizer(weight)
+    quantizer(weight)
+    assert calls == 3
 
     with torch.no_grad():
         weight.add_(1)
     quantizer(weight)
-    assert calls == 2
+    assert calls == 4
 
     weight.data = torch.randn_like(weight)
     quantizer(weight)
-    assert calls == 3
+    assert calls == 5
 
     weight.data.add_(1)
     quantizer.reset_amax()
+    assert quantizer._quantizer_cache is None
     quantizer(weight)
-    assert calls == 4
+    assert calls == 6
 
     quantizer(weight.clone())
-    assert calls == 5
+    assert calls == 7
 
 
 def test_iq1_s_fake_quant_handles_inference_tensors_without_a_version(monkeypatch):
@@ -193,13 +227,38 @@ def test_iq1_s_fake_quant_handles_inference_tensors_without_a_version(monkeypatc
             backend_extra_args={"search_impl": "auto"},
         )
     ).eval()
+    quantizer.freeze_quantizer_cache()
 
     with torch.inference_mode():
         weight = torch.randn(1, 256)
         quantizer(weight)
         quantizer(weight)
+        weight.add_(1)
+        quantizer.clear_quantizer_cache()
+        quantizer(weight)
 
-    assert calls == 1
+    assert calls == 2
+
+
+def test_iq1_s_fake_quant_cache_does_not_retain_temporary_storage():
+    quantizer = TensorQuantizer(
+        QuantizerAttributeConfig(
+            num_bits="iq1_s",
+            block_sizes={-1: 256},
+            backend="ggml",
+            backend_extra_args={"search_impl": "auto"},
+        )
+    ).eval()
+    quantizer.freeze_quantizer_cache()
+    weight = torch.randn(1, 256, dtype=torch.bfloat16)
+    temporary = weight.float()
+    storage_ref = weakref.ref(temporary.untyped_storage())
+
+    quantizer(temporary)
+    del temporary
+    gc.collect()
+
+    assert storage_ref() is None
 
 
 def test_iq1_s_fake_quant_distinguishes_storage_offsets(monkeypatch):
@@ -220,6 +279,7 @@ def test_iq1_s_fake_quant_distinguishes_storage_offsets(monkeypatch):
             backend_extra_args={"search_impl": "auto"},
         )
     ).eval()
+    quantizer.freeze_quantizer_cache()
     storage = torch.randn(512)
 
     quantizer(storage[:256].reshape(1, 256))

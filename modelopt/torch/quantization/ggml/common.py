@@ -16,6 +16,7 @@
 """Shared validation for GGML-compatible block quantizers."""
 
 import math
+import weakref
 from collections.abc import Callable
 from typing import Any
 
@@ -56,18 +57,27 @@ def cached_reconstruction(
     quantize: Callable[[torch.Tensor], tuple[torch.Tensor, torch.Tensor]],
     dequantize: Callable[..., torch.Tensor],
 ) -> torch.Tensor:
-    """Return a reconstruction, caching only the compact payload for frozen weights.
+    """Return a reconstruction, caching only after the quantizer marks weights frozen.
 
     Static block quantization reshapes the weight before backend dispatch, so the transient
     ``inputs`` view is not a stable cache key.  Follow its view chain to the owning tensor and
-    use that tensor's version counter.  Cache reuse is restricted to eval mode; training always
-    recomputes.  Callers that rewrite a weight without advancing its version counter must clear
-    the quantizer cache explicitly.
+    use that tensor's version counter.  Cache reuse also requires eval mode and an explicit
+    :meth:`TensorQuantizer.freeze_quantizer_cache` call.  A weak storage reference distinguishes
+    live allocations without retaining temporary input buffers.  Callers that rewrite a frozen
+    weight must clear its quantizer cache before the next forward.
     """
-    cache = getattr(quantizer, "_quantizer_cache", None)
-    if not isinstance(cache, dict):
+    raw_cache = getattr(quantizer, "_quantizer_cache", None)
+    cache_enabled = (
+        not getattr(quantizer, "training", True)
+        and isinstance(raw_cache, dict)
+        and raw_cache.get("_modelopt_cache_frozen") is True
+    )
+    cache: dict[str, Any] = raw_cache if isinstance(raw_cache, dict) else {}
+    if not cache_enabled:
         cache = {}
-        quantizer._quantizer_cache = cache
+        if getattr(quantizer, "training", True):
+            frozen = isinstance(raw_cache, dict) and raw_cache.get("_modelopt_cache_frozen") is True
+            quantizer._quantizer_cache = {"_modelopt_cache_frozen": True} if frozen else None
 
     storage_key = f"{cache_namespace}_storage"
     signature_key = f"{cache_namespace}_signature"
@@ -75,9 +85,11 @@ def cached_reconstruction(
     shape_key = f"{cache_namespace}_shape"
 
     storage, signature = _cache_identity(inputs)
+    cached_storage_ref = cache.get(storage_key)
     cache_hit = (
-        not getattr(quantizer, "training", True)
-        and storage_key in cache
+        cache_enabled
+        and isinstance(cached_storage_ref, weakref.ReferenceType)
+        and cached_storage_ref() is storage
         and cache.get(signature_key) == signature
     )
 
@@ -88,15 +100,13 @@ def cached_reconstruction(
         # The backend receives the final logical block view, so its Python shape is the exact
         # metadata needed by the decoder and avoids a device-to-host copy on every cache hit.
         shape = tuple(inputs.shape)
-        if not getattr(quantizer, "training", True):
-            # Keep the storage alive while the signature is cached. That prevents allocator reuse
-            # from making a different tensor appear to own the same data pointer.
-            cache[storage_key] = storage
+        if cache_enabled:
+            # If the source allocation dies, the weak reference forces a miss before a recycled
+            # data pointer can make another tensor appear to own the cached payload.
+            cache[storage_key] = weakref.ref(storage)
             cache[signature_key] = signature
             cache[packed_key] = packed
             cache[shape_key] = shape
-        else:
-            quantizer._quantizer_cache = None
     reconstructed = dequantize(packed, shape, dtype=inputs.dtype)
     return reconstructed
 
