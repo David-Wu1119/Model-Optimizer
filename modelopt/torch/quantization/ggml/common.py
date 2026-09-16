@@ -37,6 +37,31 @@ def detect_fake_mode(inputs: Any = None) -> Any:
     return getattr(inputs, "fake_mode", None)
 
 
+def _cached_grid_from_bytes(
+    grid_bytes: Callable[[], bytes],
+    rows: int,
+    cache: dict[torch.device, torch.Tensor],
+    *,
+    signed: bool,
+    device: torch.device | str | None = None,
+) -> torch.Tensor:
+    """Materialize a codec grid as float32, cached per device outside fake mode."""
+    resolved_device = torch.device(device or "cpu")
+
+    def build() -> torch.Tensor:
+        values = torch.tensor(list(grid_bytes()), dtype=torch.uint8)
+        if signed:
+            values = values.view(torch.int8)
+        return values.reshape(rows, 8).to(device=resolved_device, dtype=torch.float32)
+
+    # Retaining a FakeTensor here would poison later real execution with a meta-only grid.
+    if detect_fake_mode() is not None:
+        return build()
+    if resolved_device not in cache:
+        cache[resolved_device] = build()
+    return cache[resolved_device]
+
+
 def _cache_identity(inputs: torch.Tensor) -> tuple[Any, tuple[Any, ...]]:
     """Return storage ownership plus a signature that works in every grad mode."""
     storage = inputs.untyped_storage()
@@ -72,9 +97,9 @@ def cached_reconstruction(
     Static block quantization reshapes the weight before backend dispatch, so the transient
     ``inputs`` view is not a stable cache key.  Its version counter is a best-effort mutation
     witness and is absent under inference mode. Cache reuse therefore also requires eval mode and
-    an explicit :meth:`TensorQuantizer.freeze_quantizer_cache` call. A weak storage reference
+    an explicit :meth:`TensorQuantizer.freeze_reconstruction_cache` call. A weak storage reference
     distinguishes live allocations without retaining temporary input buffers. Callers that
-    rewrite a frozen weight must clear its quantizer cache before the next forward.
+    rewrite a frozen weight must clear its reconstruction cache before the next forward.
     """
     raw_cache = getattr(quantizer, "_reconstruction_cache", None)
     in_fake_mode = detect_fake_mode(inputs) is not None

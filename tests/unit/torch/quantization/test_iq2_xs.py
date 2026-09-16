@@ -40,6 +40,13 @@ def test_iq2_xs_canonical_grid():
     assert grid.unique(dim=0).shape[0] == grid.shape[0]
 
 
+def test_iq2_xs_public_grid_mutation_does_not_change_cached_grid():
+    grid = iq2_xs_grid()
+    grid.zero_()
+
+    assert set(iq2_xs_grid().unique().tolist()) == {8.0, 25.0, 43.0}
+
+
 def test_iq2_xs_fake_grid_does_not_poison_real_grid_cache():
     iq2_xs_module._GRID_CACHE.clear()
     with FakeTensorMode():
@@ -132,7 +139,7 @@ def test_iq2_xs_fake_quant_reuses_cached_reconstruction(monkeypatch):
             backend_extra_args={"search_impl": "auto"},
         )
     ).eval()
-    quantizer.freeze_quantizer_cache()
+    quantizer.freeze_reconstruction_cache()
     weight = torch.randn(1, 256)
 
     quantizer(weight)
@@ -151,7 +158,7 @@ def test_iq2_xs_fake_quant_reuses_cached_reconstruction(monkeypatch):
     weight.data.add_(1)
     quantizer.reset_amax()
     assert quantizer._reconstruction_cache is None
-    quantizer.freeze_quantizer_cache()
+    quantizer.freeze_reconstruction_cache()
     quantizer(weight)
     assert calls == 4
 
@@ -177,14 +184,14 @@ def test_iq2_xs_fake_quant_handles_inference_tensors_without_a_version(monkeypat
             backend_extra_args={"search_impl": "auto"},
         )
     ).eval()
-    quantizer.freeze_quantizer_cache()
+    quantizer.freeze_reconstruction_cache()
 
     with torch.inference_mode():
         weight = torch.randn(1, 256)
         quantizer(weight)
         quantizer(weight)
         weight.add_(1)
-        quantizer.clear_quantizer_cache()
+        quantizer.clear_reconstruction_cache()
         quantizer(weight)
 
     assert calls == 2

@@ -56,6 +56,13 @@ def test_iq1_s_canonical_grid():
     assert grid.unique(dim=0).shape[0] == grid.shape[0]
 
 
+def test_iq1_s_public_grid_mutation_does_not_change_cached_grid():
+    grid = iq1_s_grid()
+    grid.zero_()
+
+    assert set(iq1_s_grid().unique().tolist()) == {-1.0, 0.0, 1.0}
+
+
 def test_iq1_s_fake_grid_does_not_poison_real_grid_cache():
     iq1_s_module._GRID_CACHE.clear()
     with FakeTensorMode():
@@ -202,7 +209,7 @@ def test_iq1_s_fake_quant_reuses_cached_reconstruction(monkeypatch):
     quantizer(weight)
     assert calls == 2
 
-    quantizer.freeze_quantizer_cache()
+    quantizer.freeze_reconstruction_cache()
     quantizer(weight)
     quantizer(weight)
     assert calls == 3
@@ -219,7 +226,7 @@ def test_iq1_s_fake_quant_reuses_cached_reconstruction(monkeypatch):
     weight.data.add_(1)
     quantizer.reset_amax()
     assert quantizer._reconstruction_cache is None
-    quantizer.freeze_quantizer_cache()
+    quantizer.freeze_reconstruction_cache()
     quantizer(weight)
     assert calls == 6
 
@@ -238,7 +245,7 @@ def test_iq1_s_fake_quant_preserves_a_foreign_cache_object():
     ).eval()
     foreign_cache = object()
     quantizer._quantizer_cache = foreign_cache
-    quantizer.freeze_quantizer_cache()
+    quantizer.freeze_reconstruction_cache()
 
     quantizer(torch.randn(1, 256))
 
@@ -281,7 +288,7 @@ def test_iq1_s_fake_quant_abandons_cache_for_transient_inputs(monkeypatch):
             backend_extra_args={"search_impl": "auto"},
         )
     ).eval()
-    quantizer.freeze_quantizer_cache()
+    quantizer.freeze_reconstruction_cache()
 
     temporary = torch.randn(1, 256, dtype=torch.bfloat16).float()
     quantizer(temporary)
@@ -298,7 +305,7 @@ def test_iq1_s_fake_quant_abandons_cache_for_transient_inputs(monkeypatch):
 
 def test_cached_reconstruction_bypasses_storage_identity_in_fake_mode(monkeypatch):
     quantizer = TensorQuantizer().eval()
-    quantizer.freeze_quantizer_cache()
+    quantizer.freeze_reconstruction_cache()
     existing_cache = {"existing": object()}
     quantizer._reconstruction_cache = existing_cache
     monkeypatch.setattr(
@@ -352,13 +359,13 @@ def test_iq1_s_frozen_cache_requires_explicit_clear_after_data_write():
         )
     ).eval()
     weight = torch.randn(1, 256)
-    quantizer.freeze_quantizer_cache()
+    quantizer.freeze_reconstruction_cache()
 
     before = quantizer(weight)
     weight.data.add_(1)
     assert torch.allclose(quantizer(weight), before, rtol=1e-5, atol=1e-6)
 
-    quantizer.clear_quantizer_cache()
+    quantizer.clear_reconstruction_cache()
     assert not torch.allclose(quantizer(weight), before, rtol=1e-5, atol=1e-6)
 
 
@@ -380,14 +387,14 @@ def test_iq1_s_fake_quant_handles_inference_tensors_without_a_version(monkeypatc
             backend_extra_args={"search_impl": "auto"},
         )
     ).eval()
-    quantizer.freeze_quantizer_cache()
+    quantizer.freeze_reconstruction_cache()
 
     with torch.inference_mode():
         weight = torch.randn(1, 256)
         quantizer(weight)
         quantizer(weight)
         weight.add_(1)
-        quantizer.clear_quantizer_cache()
+        quantizer.clear_reconstruction_cache()
         quantizer(weight)
 
     assert calls == 2
@@ -402,7 +409,7 @@ def test_iq1_s_fake_quant_cache_does_not_retain_temporary_storage():
             backend_extra_args={"search_impl": "auto"},
         )
     ).eval()
-    quantizer.freeze_quantizer_cache()
+    quantizer.freeze_reconstruction_cache()
     weight = torch.randn(1, 256, dtype=torch.bfloat16)
     temporary = weight.float()
     storage_ref = weakref.ref(temporary.untyped_storage())
@@ -432,7 +439,7 @@ def test_iq1_s_fake_quant_distinguishes_storage_offsets(monkeypatch):
             backend_extra_args={"search_impl": "auto"},
         )
     ).eval()
-    quantizer.freeze_quantizer_cache()
+    quantizer.freeze_reconstruction_cache()
     storage = torch.randn(512)
 
     quantizer(storage[:256].reshape(1, 256))

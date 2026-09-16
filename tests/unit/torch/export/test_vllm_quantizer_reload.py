@@ -170,7 +170,7 @@ def test_inplace_resmooth_clears_weight_reconstruction_caches(monkeypatch):
     for idx, linear in enumerate(linears, start=1):
         linear.input_quantizer.pre_quant_scale = torch.full((4,), float(idx))
         linear.weight_quantizer._reconstruction_cache = {"payload": torch.tensor(idx)}
-        linear.weight_quantizer.freeze_quantizer_cache()
+        linear.weight_quantizer.freeze_reconstruction_cache()
 
     monkeypatch.setattr(vllm_fakequant_hf, "get_quantization_format", lambda _model: "W4A8_AWQ")
     monkeypatch.setattr(vllm_fakequant_hf, "hf_model_type", lambda _model: "test")
@@ -194,7 +194,7 @@ def test_inplace_resmooth_clears_weight_reconstruction_caches(monkeypatch):
 
 def test_inplace_requantization_restores_frozen_cache_declaration():
     quantizer = TensorQuantizer(QuantizerAttributeConfig(num_bits=8, axis=None)).eval()
-    quantizer.freeze_quantizer_cache()
+    quantizer.freeze_reconstruction_cache()
 
     requant_weights_for_export(quantizer, torch.randn(4, 4), copy_quantizer=False)
 

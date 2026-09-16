@@ -73,7 +73,7 @@ def _clear_weight_quantizer_caches(module: nn.Module) -> None:
     """Invalidate reconstruction payloads after an in-place weight rewrite."""
     for name, quantizer in module.named_modules():
         if isinstance(quantizer, TensorQuantizer) and is_weight_quantizer_state_key(name):
-            quantizer.clear_quantizer_cache()
+            quantizer.clear_reconstruction_cache()
 
 
 def infer_quantizer_prefix_remap(
@@ -269,7 +269,7 @@ def _fakequant_module_weights(
 
         if inplace:
             w.data.copy_(w_quant)
-            quantizer.clear_quantizer_cache()
+            quantizer.clear_reconstruction_cache()
         else:
             if state_dict is None:
                 raise RuntimeError("state_dict is required when inplace=False for fakequant export")
@@ -343,7 +343,7 @@ def requant_weights_for_export(
         if not copy_quantizer:
             for quantizer_copy, was_frozen in zip(quantizers, frozen_cache_states):
                 if was_frozen:
-                    quantizer_copy.freeze_quantizer_cache()
+                    quantizer_copy.freeze_reconstruction_cache()
 
 
 def merge_amax_tensors_for_group(tensors: list[torch.Tensor]) -> torch.Tensor:

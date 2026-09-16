@@ -162,7 +162,7 @@ def freeze_reconstruction_caches(model: nn.Module) -> None:
             and is_weight_quantizer_path(name)
             and quant_backend_caches_reconstruction(module.backend)
         ):
-            module.freeze_quantizer_cache()
+            module.freeze_reconstruction_cache()
 
 
 class TensorQuantizerCache(Protocol):
@@ -338,7 +338,7 @@ class TensorQuantizer(nn.Module):
             self._pass_through_bwd = True
 
         if hasattr(self, "_reconstruction_cache"):
-            self.clear_quantizer_cache()
+            self.clear_reconstruction_cache()
 
     def dequantize(self, inputs: BaseQuantizedTensor | QTensorWrapper):
         """De-quantize a real quantized tensor to a given dtype."""
@@ -432,24 +432,24 @@ class TensorQuantizer(nn.Module):
 
     def reset_amax(self):
         """Reset amax and discard the ModelOpt reconstruction cache."""
-        self.unfreeze_quantizer_cache()
+        self.unfreeze_reconstruction_cache()
         if hasattr(self, "_amax"):
             delattr(self, "_amax")
         self._calibrator.reset()
         self.reset_bias()
 
-    def clear_quantizer_cache(self):
+    def clear_reconstruction_cache(self):
         """Drop the ModelOpt reconstruction payload while preserving backend-owned caches."""
         self._reconstruction_cache = None
 
-    def freeze_quantizer_cache(self):
+    def freeze_reconstruction_cache(self):
         """Declare source weights frozen for a backend that caches reconstructions."""
         self._reconstruction_cache_frozen = True
 
-    def unfreeze_quantizer_cache(self):
+    def unfreeze_reconstruction_cache(self):
         """Disable reconstruction cache reuse until the next completed calibration."""
         self._reconstruction_cache_frozen = False
-        self.clear_quantizer_cache()
+        self.clear_reconstruction_cache()
 
     def reset_bias(self):
         """Reset bias to None."""
@@ -1810,9 +1810,9 @@ class _QuantizerContainerBase:
         "enable",
         "load_calib_amax",
         "load_calib_bias",
-        "clear_quantizer_cache",
-        "freeze_quantizer_cache",
-        "unfreeze_quantizer_cache",
+        "clear_reconstruction_cache",
+        "freeze_reconstruction_cache",
+        "unfreeze_reconstruction_cache",
     ]
 
     def __getitem__(self, idx) -> Any:

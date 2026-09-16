@@ -99,11 +99,11 @@ def test_quantizer_container_base_delegates_shared_contract(
 
     for quantizer in quantizers:
         quantizer._reconstruction_cache = {"payload": torch.tensor(1)}
-    container.freeze_quantizer_cache()
+    container.freeze_reconstruction_cache()
     assert all(quantizer._reconstruction_cache_frozen for quantizer in quantizers)
-    container.clear_quantizer_cache()
+    container.clear_reconstruction_cache()
     assert all(quantizer._reconstruction_cache is None for quantizer in quantizers)
-    container.unfreeze_quantizer_cache()
+    container.unfreeze_reconstruction_cache()
     assert not any(quantizer._reconstruction_cache_frozen for quantizer in quantizers)
 
 

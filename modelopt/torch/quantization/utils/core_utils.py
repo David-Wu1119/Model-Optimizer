@@ -651,7 +651,7 @@ def enable_weight_access_and_writeback(
 
             for submodule in module.modules():
                 if isinstance(submodule, TensorQuantizer):
-                    submodule.clear_quantizer_cache()
+                    submodule.clear_reconstruction_cache()
 
 
 def requires_weight_materialization(module, root_model, names: "ModuleNames | None" = None) -> bool:

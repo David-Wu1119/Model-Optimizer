@@ -61,8 +61,8 @@ import torch
 
 from .common import (
     GGML_BLOCK_SIZE,
+    _cached_grid_from_bytes,
     cached_reconstruction,
-    detect_fake_mode,
     validate_packed_weights,
     validate_weight,
 )
@@ -158,16 +158,14 @@ def _grid_bytes() -> bytes:
     return raw
 
 
+def _cached_iq2_xs_grid(device: torch.device | str | None = None) -> torch.Tensor:
+    """Return the private canonical grid used by pack and unpack paths."""
+    return _cached_grid_from_bytes(_grid_bytes, 512, _GRID_CACHE, signed=False, device=device)
+
+
 def iq2_xs_grid(device: torch.device | str | None = None) -> torch.Tensor:
-    """Return the canonical IQ2_XS magnitude grid as float32."""
-    resolved_device = torch.device(device or "cpu")
-    if detect_fake_mode() is not None:
-        values = torch.tensor(list(_grid_bytes()), dtype=torch.float32)
-        return values.reshape(512, 8).to(device=resolved_device)
-    if resolved_device not in _GRID_CACHE:
-        values = torch.tensor(list(_grid_bytes()), dtype=torch.float32)
-        _GRID_CACHE[resolved_device] = values.reshape(512, 8).to(device=resolved_device)
-    return _GRID_CACHE[resolved_device]
+    """Return a caller-owned copy of the canonical IQ2_XS magnitude grid as float32."""
+    return _cached_iq2_xs_grid(device).clone()
 
 
 def _encode_blocks(blocks: torch.Tensor, grid: torch.Tensor) -> torch.Tensor:
@@ -246,7 +244,7 @@ def _quantize_iq2_xs_packed(
         raise ValueError(f"block_chunk_size must be positive, got {block_chunk_size}")
 
     blocks = weight.contiguous().reshape(-1, IQ2_XS_BLOCK_SIZE)
-    grid = iq2_xs_grid(weight.device)
+    grid = _cached_iq2_xs_grid(weight.device)
     chunks = [
         _encode_blocks(blocks[start : start + block_chunk_size], grid)
         for start in range(0, blocks.shape[0], block_chunk_size)
@@ -303,7 +301,7 @@ def dequantize_iq2_xs(
     local[:, 0::2] = scale_bytes & 0x0F
     local[:, 1::2] = scale_bytes >> 4
     scales = d.unsqueeze(-1) * (2 * local + 1).float() / 8.0
-    values = iq2_xs_grid(blocks.device)[entries] * signs
+    values = _cached_iq2_xs_grid(blocks.device)[entries] * signs
     decoded = values * scales.repeat_interleave(2, dim=1).unsqueeze(-1)
     return decoded.reshape(shape).to(dtype)
 

@@ -90,7 +90,7 @@ def test_backend_cache_capability_freezes_after_all_restore_hooks(monkeypatch):
         quant_module_type = type(model)
 
         def reset_cache_in_restore_hook(self, _prefix=""):
-            self.weight_quantizer.unfreeze_quantizer_cache()
+            self.weight_quantizer.unfreeze_reconstruction_cache()
 
         monkeypatch.setattr(quant_module_type, "modelopt_post_restore", reset_cache_in_restore_hook)
 
@@ -107,7 +107,7 @@ def test_freezing_reconstruction_cache_preserves_custom_backend_cache():
     backend_cache = object()
     quantizer._quantizer_cache = backend_cache
 
-    quantizer.freeze_quantizer_cache()
+    quantizer.freeze_reconstruction_cache()
 
     assert quantizer._reconstruction_cache_frozen
     assert quantizer._quantizer_cache is backend_cache
@@ -118,15 +118,15 @@ def test_reconstruction_cache_lifecycle_preserves_custom_backend_cache():
     backend_cache = object()
     quantizer._quantizer_cache = backend_cache
     quantizer._reconstruction_cache = {"payload": object()}
-    quantizer.freeze_quantizer_cache()
+    quantizer.freeze_reconstruction_cache()
 
-    quantizer.clear_quantizer_cache()
+    quantizer.clear_reconstruction_cache()
     assert quantizer._quantizer_cache is backend_cache
     assert quantizer._reconstruction_cache is None
     assert quantizer._reconstruction_cache_frozen
 
     quantizer._reconstruction_cache = {"payload": object()}
-    quantizer.unfreeze_quantizer_cache()
+    quantizer.unfreeze_reconstruction_cache()
     assert quantizer._quantizer_cache is backend_cache
     assert quantizer._reconstruction_cache is None
     assert not quantizer._reconstruction_cache_frozen
@@ -182,7 +182,7 @@ def test_quantizer_config_edits_clear_payload_without_unfreezing_weight_cache():
     model.weight_quantizer = TensorQuantizer(
         QuantizerAttributeConfig(num_bits=8, backend=backend_name)
     )
-    model.weight_quantizer.freeze_quantizer_cache()
+    model.weight_quantizer.freeze_reconstruction_cache()
     backend_cache = {"payload": object()}
     model.weight_quantizer._quantizer_cache = backend_cache
     model.weight_quantizer._reconstruction_cache = {"payload": object()}

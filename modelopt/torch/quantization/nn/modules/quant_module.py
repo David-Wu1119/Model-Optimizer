@@ -159,7 +159,7 @@ class QuantModule(DynamicModule):
             weight.data.copy_(quantizer(weight.float().contiguous()).to(weight.dtype))
         quantizer.disable()
         quantizer.disable_rotate()
-        quantizer.clear_quantizer_cache()
+        quantizer.clear_reconstruction_cache()
         if keep_attrs and hasattr(quantizer, "_pre_quant_scale"):
             # The scale is already baked into the folded weight.
             # Disable pre-quant scaling so it is not applied twice.

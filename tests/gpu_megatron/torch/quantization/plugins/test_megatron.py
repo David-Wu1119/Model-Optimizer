@@ -1947,7 +1947,7 @@ def test_quant_module_extra_state_freezes_reconstruction_cache():
         }
     )
     state = quant_module_get_extra_state(module)
-    module.weight_quantizer.unfreeze_quantizer_cache()
+    module.weight_quantizer.unfreeze_reconstruction_cache()
 
     quant_module_set_extra_state(module, state)
 
