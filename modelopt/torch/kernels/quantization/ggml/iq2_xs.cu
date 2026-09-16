@@ -58,6 +58,7 @@ static_assert(kThreads >= kBlockSize, "shared_input is filled one value per thre
 static_assert(kThreads >= kLocalScales, "local-scale reductions assign one thread per scale");
 static_assert(kThreads >= kGroups / 2, "local-scale bytes are written one per thread");
 static_assert(kEntries == 512, "the packed code stores a 9-bit grid index");
+static_assert(kLocalScales <= 16, "each local scale must fit in one nibble");
 static_assert(kGroups * kGroupValues == kBlockSize, "group tiling must cover the block");
 static_assert(kPayloadBytes == kLocalScaleOffset + kGroups / 2,
               "payload layout must match scale, code, and local-scale fields");

@@ -81,12 +81,23 @@ def test_iq2_xs_cuda_quality_matches_cpu_reference_and_public_dispatch(dtype):
 
 
 def test_iq2_xs_cuda_uses_reference_fallback_when_extension_is_unavailable(monkeypatch):
-    monkeypatch.setattr(iq2_xs_module.extensions, "get_cuda_ext_iq2_xs", lambda: None)
+    getter_called = False
+
+    def unavailable_extension():
+        nonlocal getter_called
+        getter_called = True
+
+    monkeypatch.setattr(iq2_xs_module.extensions, "get_cuda_ext_iq2_xs", unavailable_extension)
     weight = torch.randn((1, 256), device="cuda", dtype=torch.bfloat16)
+    expected = iq2_xs_module._encode_blocks(weight.reshape(-1, 256), iq2_xs_grid("cuda")).reshape(
+        1, 1, 74
+    )
 
     packed, shape = quantize_iq2_xs(weight, block_chunk_size=1)
 
+    assert getter_called
     assert packed.shape == (1, 1, 74)
+    assert torch.equal(packed, expected)
     assert torch.equal(shape, torch.tensor([1, 256], device="cuda"))
     assert dequantize_iq2_xs(packed, shape).shape == weight.shape
 

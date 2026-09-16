@@ -56,6 +56,9 @@ static_assert(kThreads >= kBlockSize, "shared_input is filled one value per thre
 static_assert(kThreads >= kPayloadBytes, "the zero-block path writes one byte per thread");
 static_assert(kThreads >= kChoices, "choice reductions assign one thread per choice");
 static_assert(kEntries == 2048, "the packed code stores an 11-bit grid index");
+static_assert(kVectorsPerGroup * 3 <= 12,
+              "high grid-index bits must fit below the local-scale field");
+static_assert(kLocalScales <= 8, "the local scale must fit in qh bits 12-14");
 static_assert(kGroups * kGroupValues == kBlockSize, "group tiling must cover the block");
 static_assert(kPayloadBytes == kMetadataOffset + 2 * kGroups,
               "payload layout must match scale, index, and metadata fields");
