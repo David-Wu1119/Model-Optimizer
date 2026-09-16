@@ -36,7 +36,11 @@ constexpr int kEntries = 512;
 constexpr int kGroups = 16;
 constexpr int kLocalScales = 16;
 constexpr int kPayloadBytes = 74;
+constexpr int kThreads = 256;
+constexpr int kWarpSize = 32;
+constexpr int kWarps = kThreads / kWarpSize;
 constexpr float kNativeMax = 166.625f;
+static_assert(kThreads % kWarpSize == 0);
 
 template <typename scalar_t> __device__ __forceinline__ float load_float(const scalar_t *input) {
   return static_cast<float>(*input);
@@ -46,12 +50,12 @@ __device__ __forceinline__ float quant_error(float xnorm, float dot, float qnorm
   return fmaxf(fmaf(scale * scale, qnorm, fmaf(-2.0f * scale, dot, xnorm)), 0.0f);
 }
 
-__device__ __forceinline__ float even_parity_dot(const float *x, const float *q, bool odd_parity) {
+__device__ __forceinline__ float even_parity_dot(const float *x, const int8_t *q, bool odd_parity) {
   float dot = 0.0f;
   float weakest = FLT_MAX;
 #pragma unroll
   for (int j = 0; j < kVectorSize; ++j) {
-    const float term = fabsf(x[j]) * q[j];
+    const float term = fabsf(x[j]) * static_cast<float>(q[j]);
     dot += term;
     weakest = fminf(weakest, term);
   }
@@ -59,7 +63,7 @@ __device__ __forceinline__ float even_parity_dot(const float *x, const float *q,
 }
 
 template <typename scalar_t>
-__global__ void find_scale(const scalar_t *input, int64_t num_blocks, int64_t *scale_bits) {
+__global__ void find_scale(const scalar_t *input, int64_t num_blocks, int16_t *scale_bits) {
   const int64_t block = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
   if (block >= num_blocks)
     return;
@@ -81,31 +85,31 @@ __global__ void find_scale(const scalar_t *input, int64_t num_blocks, int64_t *s
   const float peak_to_rms = rms > 0.0f ? amax / rms : 0.0f;
   const float anchor = fminf(0.92f, fmaxf(0.65f, 1.0f - 0.035f * peak_to_rms));
   const __half scale = __float2half_rn(fminf((amax / kNativeMax) * anchor, 65504.0f));
-  scale_bits[block] = static_cast<int64_t>(__half_as_ushort(scale));
+  scale_bits[block] = static_cast<int16_t>(__half_as_ushort(scale));
 }
 
 template <typename scalar_t>
 __global__ void encode(const scalar_t *input, int64_t num_blocks, const float *grid,
-                       const int64_t *scale_bits, uint8_t *output) {
-  __shared__ float shared_grid[kEntries * kVectorSize];
+                       const int16_t *scale_bits, uint8_t *output) {
+  __shared__ int8_t shared_grid[kEntries * kVectorSize];
   __shared__ float grid_norm[kEntries];
-  __shared__ float warp_best[8 * kLocalScales];
+  __shared__ float warp_best[kWarps * kLocalScales];
   __shared__ float group_error[kLocalScales];
-  __shared__ unsigned long long warp_keys[8];
+  __shared__ unsigned long long warp_keys[kWarps];
   __shared__ int selected_local;
   __shared__ uint8_t locals[kGroups];
 
   const int tid = threadIdx.x;
-  const int lane = tid & 31;
-  const int warp = tid >> 5;
+  const int lane = tid & (kWarpSize - 1);
+  const int warp = tid / kWarpSize;
   for (int i = tid; i < kEntries * kVectorSize; i += blockDim.x)
-    shared_grid[i] = grid[i];
+    shared_grid[i] = static_cast<int8_t>(grid[i]);
   __syncthreads();
   for (int entry = tid; entry < kEntries; entry += blockDim.x) {
     float norm = 0.0f;
 #pragma unroll
     for (int j = 0; j < kVectorSize; ++j) {
-      const float q = shared_grid[entry * kVectorSize + j];
+      const float q = static_cast<float>(shared_grid[entry * kVectorSize + j]);
       norm = fmaf(q, q, norm);
     }
     grid_norm[entry] = norm;
@@ -148,7 +152,7 @@ __global__ void encode(const scalar_t *input, int64_t num_blocks, const float *g
       for (int local = 0; local < kLocalScales; ++local)
         local_best[local] = FLT_MAX;
       for (int entry = tid; entry < kEntries; entry += blockDim.x) {
-        const float *q = shared_grid + entry * kVectorSize;
+        const int8_t *q = shared_grid + entry * kVectorSize;
         const float dot = even_parity_dot(x, q, odd_parity);
 #pragma unroll
         for (int local = 0; local < kLocalScales; ++local) {
@@ -170,7 +174,7 @@ __global__ void encode(const scalar_t *input, int64_t num_blocks, const float *g
       if (tid < kLocalScales) {
         float value = warp_best[tid];
 #pragma unroll
-        for (int w = 1; w < 8; ++w)
+        for (int w = 1; w < kWarps; ++w)
           value = fminf(value, warp_best[w * kLocalScales + tid]);
         group_error[tid] += value;
       }
@@ -226,10 +230,10 @@ __global__ void encode(const scalar_t *input, int64_t num_blocks, const float *g
       if (tid == 0) {
         key = warp_keys[0];
 #pragma unroll
-        for (int w = 1; w < 8; ++w)
+        for (int w = 1; w < kWarps; ++w)
           key = warp_keys[w] < key ? warp_keys[w] : key;
         const int entry = static_cast<int>(key & 0x1ff);
-        const float *q = shared_grid + entry * kVectorSize;
+        const int8_t *q = shared_grid + entry * kVectorSize;
         int flip_index = 0;
         float weakest = fabsf(x[0]) * q[0];
 #pragma unroll
@@ -257,7 +261,7 @@ __global__ void encode(const scalar_t *input, int64_t num_blocks, const float *g
     }
   }
 
-  if (tid < 8)
+  if (tid < kGroups / 2)
     payload[66 + tid] = locals[2 * tid] | (locals[2 * tid + 1] << 4);
 }
 
@@ -273,19 +277,19 @@ at::Tensor iq2_xs_pack_cuda(at::Tensor input, at::Tensor grid) {
   c10::cuda::CUDAGuard guard(input.device());
   const int64_t num_blocks = input.numel() / kBlockSize;
   TORCH_CHECK(num_blocks <= std::numeric_limits<int>::max(), "IQ2_XS CUDA grid is too large");
-  auto scales = at::empty({num_blocks}, input.options().dtype(at::kLong));
+  auto scales = at::empty({num_blocks}, input.options().dtype(at::kShort));
   auto output = at::empty({num_blocks, kPayloadBytes}, input.options().dtype(at::kByte));
   const auto stream = c10::cuda::getCurrentCUDAStream();
-  const int scale_grid = static_cast<int>((num_blocks + 255) / 256);
+  const int scale_grid = static_cast<int>((num_blocks + kThreads - 1) / kThreads);
 
   AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half, at::ScalarType::BFloat16, input.scalar_type(), "iq2_xs_pack", [&] {
-        find_scale<scalar_t><<<scale_grid, 256, 0, stream>>>(input.data_ptr<scalar_t>(), num_blocks,
-                                                             scales.data_ptr<int64_t>());
+        find_scale<scalar_t><<<scale_grid, kThreads, 0, stream>>>(
+            input.data_ptr<scalar_t>(), num_blocks, scales.data_ptr<int16_t>());
         C10_CUDA_KERNEL_LAUNCH_CHECK();
-        encode<scalar_t><<<static_cast<int>(num_blocks), 256, 0, stream>>>(
+        encode<scalar_t><<<static_cast<int>(num_blocks), kThreads, 0, stream>>>(
             input.data_ptr<scalar_t>(), num_blocks, grid.data_ptr<float>(),
-            scales.data_ptr<int64_t>(), output.data_ptr<uint8_t>());
+            scales.data_ptr<int16_t>(), output.data_ptr<uint8_t>());
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
   return output;

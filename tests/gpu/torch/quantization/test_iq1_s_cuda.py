@@ -15,28 +15,52 @@
 
 import torch
 
-from modelopt.torch.quantization.ggml.iq1_s import dequantize_iq1_s, quantize_iq1_s
+from modelopt.torch.quantization.extensions import get_cuda_ext_iq1_s
+from modelopt.torch.quantization.ggml.iq1_s import dequantize_iq1_s, iq1_s_grid, quantize_iq1_s
 
 
-def test_iq1_s_cuda_pack_is_deterministic_and_decodable():
+def _extension():
+    extension = get_cuda_ext_iq1_s(raise_if_failed=True)
+    assert extension is not None
+    return extension
+
+
+def test_iq1_s_cuda_extension_handles_multiple_scale_grid_blocks():
     generator = torch.Generator(device="cuda").manual_seed(1234)
-    weight = torch.randn((8, 256), generator=generator, device="cuda", dtype=torch.bfloat16)
+    weight = torch.randn((257, 256), generator=generator, device="cuda", dtype=torch.bfloat16)
 
-    packed, shape = quantize_iq1_s(weight)
-    packed_again, _ = quantize_iq1_s(weight)
+    packed = _extension().pack(weight, iq1_s_grid("cuda")).reshape(257, 1, 50)
+    shape = torch.tensor(weight.shape, dtype=torch.int64, device="cuda")
     reconstructed = dequantize_iq1_s(packed, shape)
 
-    assert packed.shape == (8, 1, 50)
-    assert torch.equal(packed, packed_again)
+    assert packed.shape == (257, 1, 50)
     normalized_mse = (
         reconstructed.float() - weight.float()
     ).square().mean() / weight.float().square().mean()
     assert normalized_mse < 0.25
 
 
+def test_iq1_s_cuda_payload_matches_cpu_reference_and_public_dispatch():
+    generator = torch.Generator().manual_seed(5678)
+    weight_cpu = torch.randn((4, 256), generator=generator, dtype=torch.bfloat16)
+    reference, _ = quantize_iq1_s(weight_cpu)
+    weight_cuda = weight_cpu.cuda()
+
+    extension = _extension()
+    grid = iq1_s_grid("cuda")
+    direct = extension.pack(weight_cuda, grid).reshape(4, 1, 50)
+    direct_again = extension.pack(weight_cuda, grid).reshape(4, 1, 50)
+    dispatched, _ = quantize_iq1_s(weight_cuda)
+
+    assert torch.equal(direct.cpu(), reference)
+    assert torch.equal(direct_again, direct)
+    assert torch.equal(dispatched, direct)
+
+
 def test_iq1_s_cuda_zero_encoding_matches_ggml_block_layout():
     weight = torch.zeros((1, 256), device="cuda", dtype=torch.bfloat16)
-    packed, shape = quantize_iq1_s(weight)
+    packed = _extension().pack(weight, iq1_s_grid("cuda")).reshape(1, 1, 50)
+    shape = torch.tensor(weight.shape, dtype=torch.int64, device="cuda")
 
     assert not packed.any()
     assert torch.equal(dequantize_iq1_s(packed, shape), weight)
