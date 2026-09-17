@@ -39,16 +39,6 @@ from modelopt.torch.quantization.nn.modules.tensor_quantizer import GroupedQuant
 from modelopt.torch.utils import import_plugin, warn_rank_0
 
 from .convert_hf_config import convert_hf_quant_config_format
-from .model_config import (
-    KV_CACHE_FP8,
-    KV_CACHE_NVFP4,
-    QUANTIZATION_FP8,
-    QUANTIZATION_FP8_PB_REAL,
-    QUANTIZATION_FP8_PB_WO,
-    QUANTIZATION_NONE,
-    QUANTIZATION_NVFP4,
-    QUANTIZATION_W4A16_NVFP4,
-)
 from .plugins.hf_checkpoint_utils import (
     copy_hf_ckpt_remote_code,
     copy_non_safetensor_files_from_ckpt,
@@ -65,6 +55,16 @@ from .plugins.mcore_custom import (
     save_safetensors_by_layer_index,
 )
 from .plugins.megatron_importer import GPTModelImporter, _get_mamba_conv1d
+from .quant_format import (
+    KV_CACHE_FP8,
+    KV_CACHE_NVFP4,
+    QUANTIZATION_FP8,
+    QUANTIZATION_FP8_PB_REAL,
+    QUANTIZATION_FP8_PB_WO,
+    QUANTIZATION_NONE,
+    QUANTIZATION_NVFP4,
+    QUANTIZATION_W4A16_NVFP4,
+)
 from .quant_utils import (
     get_activation_scaling_factor,
     get_kv_cache_dtype,
@@ -125,7 +125,10 @@ class GPTModelExporter:
             eagle_module. Otherwise, only export the base model.
         dtype: The weights data type to export the unquantized layers.
         trust_remote_code: Whether to trust remote code in the HuggingFace pretrained model.
-        moe_router_dtype: The data type of the MoE router. Can be "fp32", "fp64", or None (default to the model dtype).
+        moe_router_dtype: Storage dtype override for the exported MoE router weight, "fp32",
+            "fp64" or None to store it at ``dtype`` like every other unquantized weight.
+            This is not Megatron's ``moe_router_dtype``, which is a routing *compute* dtype;
+            HF checkpoints conventionally store the router at the model dtype.
         clamp_kv_cache_scales: Whether to clamp FP8 KV cache scaling factors to at least 1.0.
     """
 
@@ -551,8 +554,9 @@ class GPTModelExporter:
     def _get_state_dict(self):
         model = self.model
 
-        # Embedding
-        if hasattr(model, "embedding"):
+        # Embedding. MCore also builds `embedding` on the MTP stage, so gating on hasattr
+        # alone would emit a second, orphaned copy of the vocab embedding when PP > 1.
+        if model.pre_process and hasattr(model, "embedding"):
             self.rules["word_embeddings"](model.embedding.word_embeddings)
 
         # Decoder layers
