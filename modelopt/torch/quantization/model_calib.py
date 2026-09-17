@@ -70,10 +70,12 @@ from .utils import (
     promote_static_block_weight_quantizers,
 )
 from .utils.calib_utils import _GPTQ_HELPER_REGISTRY, GPTQHelper
+from .utils.numeric_utils import FOUR_OVER_SIX_MULTIPLIER
 
 __all__ = [
     "CalibratorFactory",
     "awq",
+    "four_over_six_calibrate",
     "layerwise_calibrate",
     "local_hessian_calibrate",
     "lsq",
@@ -779,6 +781,49 @@ def mse_calibrate(
         start_multiplier=start_multiplier,
         stop_multiplier=stop_multiplier,
         fp8_scale_sweep=fp8_scale_sweep,
+    )
+
+
+def four_over_six_calibrate(
+    model: nn.Module,
+    forward_loop: ForwardLoop | None = None,
+    distributed_sync=True,
+    shared_states: Mapping[str, Mapping[str, Sequence[str]]] | None = None,
+):
+    """Calibrate NVFP4 Four-Over-Six (4/6) weight quantizers.
+
+    4/6 gives each weight block a choice of two dynamic ranges: the full E2M1 range (M=6)
+    or a reduced one (M=4). Picking M=4 is arithmetically the same as scaling that block's
+    amax by 6/4, so the choice is an MSE amax search over exactly two candidates,
+    ``[1.0, FOUR_OVER_SIX_MULTIPLIER]``, and the winner is folded into the quantizer amax.
+
+    The other half of 4/6 is the ``four_over_six: true`` flag in the weight quantizer's
+    ``block_sizes``, which normalizes the per-block FP8 scales by 256 instead of 448 to
+    leave room for the M=4 blocks. Neither half does anything useful without the other, so
+    :class:`QuantizeConfig <modelopt.torch.quantization.config.QuantizeConfig>` requires
+    them to agree.
+
+    Args:
+        model: Model to be calibrated.
+        forward_loop: A callable which takes the model as argument and
+            forwards calibration data through the model.
+        distributed_sync: Whether to sync amax across distributed processes.
+
+    See :class:`FourOverSixCalibConfig
+    <modelopt.torch.quantization.config.FourOverSixCalibConfig>` for details on the
+    remaining arguments.
+    """
+    # The search grid is derived from the format, not configurable: linspace over
+    # [1.0, 6/4] with a single step yields exactly the two candidates {M=6, M=4}.
+    mse_calibrate(
+        model,
+        forward_loop,
+        distributed_sync,
+        step_size=FOUR_OVER_SIX_MULTIPLIER - 1.0,
+        start_multiplier=1.0,
+        stop_multiplier=FOUR_OVER_SIX_MULTIPLIER,
+        fp8_scale_sweep=False,
+        shared_states=shared_states,
     )
 
 
@@ -2352,6 +2397,7 @@ def _run_weight_scale_calibration(model, forward_loop, scale_algorithm):
     algo_kwargs = {k: v for k, v in scale_algorithm.items() if k != "method"}
     calib_funcs = {
         "mse": mse_calibrate,
+        "four_over_six": four_over_six_calibrate,
         "local_hessian": local_hessian_calibrate,
         "max": max_calibrate,
     }

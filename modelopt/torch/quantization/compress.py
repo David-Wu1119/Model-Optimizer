@@ -32,6 +32,7 @@ from .backends.gemm_registry import disable_real_quant_gemm, enable_real_quant_g
 from .config import CompressCfgType, CompressConfig
 from .conversion import _replace_quant_module, set_quantizer_attributes_partial
 from .nn.modules.quant_linear import RealQuantLinear
+from .nn.modules.tensor_quantizer import TensorQuantizer
 from .qtensor import QTensorWrapper, pack_real_quantize_weight
 from .utils import is_quantized_linear
 
@@ -48,6 +49,33 @@ except ImportError:
     mcore_available = False
 
 RealQuantModuleRegistry = _DMRegistryCls("RealQuant")
+
+
+def _reject_four_over_six(model: nn.Module) -> None:
+    """Refuse to compress a 4/6 model before any weight has been packed.
+
+    ``TensorQuantizer._real_quantize`` raises the same refusal, but only once
+    :func:`pack_real_quantize_weight` is already walking layers, so the run dies partway
+    through with one layer named. Call this once the ``fake_quant`` flags are settled and
+    it reports the whole problem up front -- and only for quantizers that would actually
+    be compressed, so excluding the 4/6 layers via the ``compress`` patterns still works.
+    """
+    offenders = [
+        f"{name}.weight_quantizer"
+        for name, module in model.named_modules()
+        if isinstance(getattr(module, "weight_quantizer", None), TensorQuantizer)
+        # Mirrors _compress_and_update_module_weight's gate in pack_real_quantize_weight.
+        and module.weight_quantizer.is_enabled
+        and not module.weight_quantizer._fake_quant
+        and (module.weight_quantizer.block_sizes or {}).get("four_over_six", False)
+    ]
+    if offenders:
+        raise NotImplementedError(
+            "NVFP4 Four-Over-Six (4/6) is not supported via mtq.compress: the per-block "
+            "M=4/M=6 choice baked into the quantizer amax by calibration is not preserved by "
+            "real quantization. Use mtq.quantize + export for 4/6 instead, or exclude these "
+            f"layers with the compress config. Quantizers with four_over_six enabled: {offenders}."
+        )
 
 
 def compress_convert(
@@ -106,6 +134,7 @@ def compress_convert(
             )
     # If real quant quantizer is present, real quantize the weights.
     if not skip_real_quantize_weight:
+        _reject_four_over_six(model)
         pack_real_quantize_weight(model)
 
     def _has_qtensorwrapper(module):

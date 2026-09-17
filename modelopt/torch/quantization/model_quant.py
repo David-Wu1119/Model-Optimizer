@@ -77,10 +77,12 @@ def calibrate(
     Args:
         model: A pytorch model with quantizer modules.
         algorithm: A string or dictionary specifying the calibration algorithm to use. Supported
-            algorithms are ``"max"``, ``"smoothquant"``, ``"awq_lite"``, ``"awq_full"``, and
-            ``"awq_clip"``. If a dictionary is passed, the key ``"method"`` should specify the
-            calibration algorithm to use. Other key-value pairs  in this dictionary will be passed
-            as kwargs to the algorithm.
+            algorithms are ``"max"``, ``"mse"``, ``"four_over_six"``, ``"local_hessian"``,
+            ``"nvfp4_act_headroom"``, ``"smoothquant"``, ``"awq_lite"``, ``"awq_full"``,
+            ``"awq_clip"``, ``"gptq"``, ``"svdquant"`` and ``"lsq"``. If a dictionary is passed,
+            the key ``"method"`` should specify the calibration algorithm to use. Other key-value
+            pairs in this dictionary will be passed as kwargs to the algorithm. A list runs the
+            given algorithms in sequence.
 
             An example dictionary argument:
             ``{"method": "awq_clip", "max_co_batch_size": 4096}``.
@@ -345,6 +347,7 @@ _AUTO_QUANTIZE_SUPPORTED_ALGORITHMS = {
     None,
     "max",
     "mse",
+    "four_over_six",
     "local_hessian",
     "smoothquant",
     "awq_lite",

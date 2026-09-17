@@ -432,3 +432,83 @@ class TestNVFP4MSECalibrator:
         scale_fp8_quant_amax = global_amax.float() / 6.0
         scale_qdq = scaled_e4m3_impl(scale, scale_fp8_quant_amax)
         assert torch.allclose(scale_qdq, scale)
+
+
+class TestFourOverSixIsTheLegacyStanza:
+    """`algorithm: four_over_six` calibrates bit-identically to the stanza it replaced.
+
+    The CPU twin of this test (``tests/unit/.../test_nvfp4_four_over_six.py``) stubs the
+    Triton static-NVFP4 kernel, so it cannot show the real kernel agrees. This one runs
+    against it. Renaming the shipped 4/6 recipes is only safe if this holds.
+    """
+
+    # What modelopt_recipes spelled out by hand before `four_over_six` existed.
+    LEGACY_STANZA = {
+        "method": "mse",
+        "fp8_scale_sweep": False,
+        "start_multiplier": 1.0,
+        "stop_multiplier": 1.5,
+        "step_size": 0.5,
+    }
+    QUANT_CFG = [
+        {"quantizer_name": "*", "enable": False},
+        {
+            "quantizer_name": "*weight_quantizer",
+            "enable": True,
+            "cfg": {
+                "num_bits": (2, 1),
+                "block_sizes": {
+                    -1: 16,
+                    "type": "static",
+                    "scale_bits": (4, 3),
+                    "four_over_six": True,
+                },
+            },
+        },
+    ]
+
+    @staticmethod
+    def _calibrated_weight_amax(base, data, algorithm):
+        torch.manual_seed(0)
+        model = copy.deepcopy(base)
+        mtq.quantize(
+            model,
+            {
+                "quant_cfg": copy.deepcopy(TestFourOverSixIsTheLegacyStanza.QUANT_CFG),
+                "algorithm": algorithm,
+            },
+            lambda m: [m(d) for d in data],
+        )
+        return {
+            name: q.amax.clone()
+            for name, q in model.named_modules()
+            if getattr(q, "amax", None) is not None
+        }
+
+    def test_matches_the_legacy_stanza_bit_identically(self):
+        torch.manual_seed(0)
+        base = nn.Sequential(nn.Linear(64, 32), nn.ReLU(), nn.Linear(32, 64)).cuda()
+        data = [torch.randn(4, 64, device="cuda") for _ in range(2)]
+
+        legacy = self._calibrated_weight_amax(base, data, self.LEGACY_STANZA)
+        named = self._calibrated_weight_amax(base, data, "four_over_six")
+
+        assert set(legacy) == set(named)
+        # Per-block amax, or the comparison says nothing about the 4/6 selection.
+        assert legacy and all(t.numel() > 1 for t in legacy.values())
+        for name in legacy:
+            assert torch.equal(legacy[name], named[name]), name
+
+    def test_the_search_actually_picks_both_ranges(self):
+        """Guard against a vacuous pass: the M=4 candidate has to win somewhere."""
+        torch.manual_seed(0)
+        base = nn.Sequential(nn.Linear(64, 32), nn.ReLU(), nn.Linear(32, 64)).cuda()
+        data = [torch.randn(4, 64, device="cuda") for _ in range(2)]
+
+        named = self._calibrated_weight_amax(base, data, "four_over_six")
+        max_only = self._calibrated_weight_amax(
+            base, data, self.LEGACY_STANZA | {"stop_multiplier": 1.0, "step_size": 1.0}
+        )
+        assert any(not torch.equal(named[n], max_only[n]) for n in named), (
+            "no block chose M=4, so this fixture cannot distinguish the two grids"
+        )
