@@ -4,29 +4,29 @@ This is a simple example to demonstrate calibrating and serving ModelOpt fakequa
 
 Compared with realquant, fakequant is 2-5x slower, but doesn't require dedicated kernel support and facilitates research.
 
-The general fakequant example is tested with vLLM 0.9.0, 0.19.1, 0.26.0, and 0.28.0. The
+The general fakequant example is tested with vLLM 0.9.0, 0.19.1, 0.26.0, 0.28.0 and 0.29.0. The
 compact NVFP4 attention worker documented below requires vLLM 0.15.0 or newer.
 
 ## Prepare environment
 
-Use the Dockerfile to build an environment with vLLM 0.28.0:
+Use the Dockerfile to build an environment with vLLM 0.29.0:
 
 ```bash
-docker build -f examples/vllm_serve/Dockerfile -t vllm-modelopt:v0.28.0 .
+docker build -f examples/vllm_serve/Dockerfile -t vllm-modelopt:v0.29.0 .
 ```
 
 To build the same environment with another tested vLLM release, override `VLLM_VERSION`:
 
 ```bash
-docker build --build-arg VLLM_VERSION=0.26.0 \
-  -f examples/vllm_serve/Dockerfile -t vllm-modelopt:v0.26.0 .
+docker build --build-arg VLLM_VERSION=0.29.0 \
+  -f examples/vllm_serve/Dockerfile -t vllm-modelopt:v0.29.0 .
 ```
 
 For a direct installation from the ModelOpt repository root, install the tested vLLM
 release and the ModelOpt extras used by this example:
 
 ```bash
-python3 -m pip install "vllm==0.28.0"
+python3 -m pip install "vllm==0.29.0"
 python3 -m pip install -e ".[all,mlflow]"
 ```
 
@@ -66,13 +66,14 @@ vllm serve <model_path> -tp 8 --host 0.0.0.0 --port 8000 \
   --modelopt-quant-cfg NVFP4_DEFAULT_CFG \
   --modelopt-quant-dataset cnn_dailymail \
   --modelopt-quant-calib-size 512
+  --worker_cls fakequant_worker.FakeQuantWorker
 ```
 
 For an exported HF or Megatron fakequant directory containing the standard sidecars, no
 ModelOpt path flags are required:
 
 ```bash
-vllm serve <export_dir> -tp 8 --host 0.0.0.0 --port 8000
+vllm serve <export_dir> -tp 8 --host 0.0.0.0 --port 8000 --worker_cls fakequant_worker.FakeQuantWorker
 ```
 
 When fakequant is requested explicitly or auto-detected, the shim selects
@@ -81,7 +82,7 @@ environment settings, or recognized sidecars, it delegates to the stock vLLM CLI
 The legacy direct invocation remains available:
 
 ```bash
-python vllm_serve_fakequant.py <model_path> -tp 8 --host 0.0.0.0 --port 8000
+python vllm_serve_fakequant.py <model_path> -tp 8 --host 0.0.0.0 --port 8000 --worker_cls fakequant_worker.FakeQuantWorker
 ```
 
 Hybrid attention/Mamba models such as Nemotron 3 Nano are supported on vLLM 0.26.0 and
@@ -90,7 +91,7 @@ Hybrid attention/Mamba models such as Nemotron 3 Nano are supported on vLLM 0.26
 ```bash
 KV_QUANT_CFG=NVFP4_KV_CFG QUANT_CALIB_SIZE=512 \
   python vllm_serve_fakequant.py <nemotron3_nano_model_path> -tp 8 \
-  --max-model-len 8192 --enforce-eager --host 0.0.0.0 --port 8000
+  --max-model-len 8192 --enforce-eager --host 0.0.0.0 --port 8000 --worker_cls fakequant_worker.FakeQuantWorker
 ```
 
 Calibration uses dedicated scratch KV-cache blocks, so reducing `--max-num-batched-tokens`
