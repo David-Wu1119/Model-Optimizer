@@ -91,6 +91,30 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+      # Diagnostics for the intermittent 0xc000001d (STATUS_ILLEGAL_INSTRUCTION) crash: a native
+      # module executes an opcode this host lacks. The runner fleet is heterogeneous, so the same
+      # wheel passes on one machine and dies on another. Nothing here changes what is tested; it
+      # records which CPU ran, and leaves a dump behind naming the faulting DLL if it happens.
+      - name: Record CPU and torch dispatch capability
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          Get-CimInstance Win32_Processor | Select-Object Name, Description, NumberOfCores | Format-List
+          python -c "import platform; print('machine:', platform.machine(), platform.processor())"
+      - name: Enable crash dumps
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          # WER local dumps. The Python-level faulthandler output does not identify the module --
+          # it prints parked background threads while the main thread's native frame is lost as
+          # the process dies. A minidump names the faulting DLL and offset outright.
+          $d = "$env:GITHUB_WORKSPACE\crashdumps"
+          New-Item -ItemType Directory -Force -Path $d | Out-Null
+          $k = "HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps"
+          New-Item -Path $k -Force | Out-Null
+          Set-ItemProperty -Path $k -Name DumpFolder -Value $d -Type ExpandString
+          Set-ItemProperty -Path $k -Name DumpType -Value 2 -Type DWord
+          Set-ItemProperty -Path $k -Name DumpCount -Value 5 -Type DWord
       - name: Run unit tests (without coverage)
         # PEP 540 UTF-8 mode. Windows defaults text I/O to the locale codepage (cp1252 on these
         # runners), so any read of a UTF-8 file without an explicit encoding= dies with
@@ -99,7 +123,26 @@ jobs:
         # library code from passing encoding= explicitly: user processes will not have this set.
         env:
           PYTHONUTF8: "1"
+          # Unbuffered so a crash does not interleave two threads' faulthandler output and lose
+          # the main thread's frames, which is what made the last dump unreadable.
+          PYTHONUNBUFFERED: "1"
+          PYTHONFAULTHANDLER: "1"
         run: pip install nox uv && nox -s "unit-3.12(torch_214, tf_latest)"
+      - name: Report torch CPU capability
+        # Runs even on failure: torch picks a vectorized kernel set at runtime, so what it chose
+        # is the first thing to compare against the CPU recorded above. If they disagree, the
+        # fix is pinning ATEN_CPU_CAPABILITY rather than anything in this repo.
+        if: always()
+        continue-on-error: true
+        run: python -c "import torch; print('torch', torch.__version__, 'cpu_capability', torch.backends.cpu.get_cpu_capability())"
+      - name: Upload crash dumps
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-crashdumps
+          path: crashdumps/
+          if-no-files-found: ignore
   multi-version:
     if: needs.check-file-changes.outputs.any_changed == 'true'
     needs: [linux, check-file-changes]
