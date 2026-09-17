@@ -21,7 +21,9 @@ state in FP8, ModelOpt runs an adapted copy of the kernel
 (:mod:`modelopt.torch.kernels.quantization.linear_attention`) that fake-quantizes the state to
 E4M3 at the end of every chunk, with a scale computed inside the kernel from the state itself.
 The backward pass recomputes the same quantized states and passes the state gradient straight
-through the quantization, so QAT and QAD train against the quantized recurrence.
+through the quantization, so QAT and QAD train against the quantized recurrence. A second
+quantizer covers ``w``, the WY-transformed keys that multiply the state; ``w`` is a regular tensor,
+so it is fake-quantized by the ``TensorQuantizer`` itself before the kernel reads it.
 """
 
 from collections.abc import Callable
@@ -53,13 +55,15 @@ def _state_qdq_chunk_gated_delta_rule() -> GatedDeltaRuleFn:
 
 
 class GatedDeltaNetStateQuantMixin(QuantModule):
-    """Adds a ``gdn_state_quantizer`` to a GatedDeltaNet module.
+    """Adds ``gdn_state_quantizer`` and ``gdn_w_quantizer`` to a GatedDeltaNet module.
 
     Subclasses route the module's chunked gated-delta-rule call through
-    :meth:`_state_quantized_chunk_gated_delta_rule`. The quantizer starts disabled; enable it with
-    a ``quant_cfg`` entry on ``*gdn_state_quantizer`` such as the
-    ``configs/ptq/units/gdn_state_fp8_dynamic`` recipe unit. The quantizer only carries the
-    configuration: the quant-dequant itself runs inside the kernel.
+    :meth:`_state_quantized_chunk_gated_delta_rule`. Both quantizers start disabled; enable them
+    with ``quant_cfg`` entries on ``*gdn_state_quantizer`` / ``*gdn_w_quantizer`` such as the
+    ``configs/ptq/units/gdn_state_fp8_dynamic`` and ``gdn_w_fp8_dynamic`` recipe units. The state
+    quantizer only carries the configuration (the quant-dequant runs inside the kernel and
+    supports one format); the w quantizer runs on the ``[B, T, H, K]`` tensor ``w`` and accepts
+    any ModelOpt quantizer configuration, calibrated ones included.
     """
 
     # Number of value columns of a head's state that share one dynamic scale; ``None`` uses the
@@ -69,21 +73,29 @@ class GatedDeltaNetStateQuantMixin(QuantModule):
 
     def _setup(self):
         self.gdn_state_quantizer = TensorQuantizer(QuantizerAttributeConfig(enable=False))
+        self.gdn_w_quantizer = TensorQuantizer(QuantizerAttributeConfig(enable=False))
 
     def _state_quantized_chunk_gated_delta_rule(
         self, gated_delta_rule: GatedDeltaRuleFn, *args: Any, **kwargs: Any
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
-        """Call ``gated_delta_rule`` or, if the state quantizer is on, its state-quantizing copy."""
-        if not self.gdn_state_quantizer.is_enabled:
+        """Call ``gated_delta_rule`` or, if a quantizer is on, the vendored quantizing copy."""
+        quantize_state = self.gdn_state_quantizer.is_enabled
+        quantize_w = self.gdn_w_quantizer.is_enabled
+        if not (quantize_state or quantize_w):
             return gated_delta_rule(*args, **kwargs)
-        _validate_state_quantizer(self.gdn_state_quantizer)
+        if quantize_state:
+            _validate_state_quantizer(self.gdn_state_quantizer)
         if getattr(gated_delta_rule, "__name__", None) != "chunk_gated_delta_rule":
             raise NotImplementedError(
-                "gdn_state_quantizer requires the fla chunked kernel; the deterministic torch "
+                "GatedDeltaNet quantizers require the fla chunked kernel; the deterministic torch "
                 f"kernel ({gated_delta_rule!r}) is not supported."
             )
         return _state_qdq_chunk_gated_delta_rule()(
-            *args, state_qdq=1, state_qdq_block_v=self.gdn_state_qdq_block_v, **kwargs
+            *args,
+            state_qdq=int(quantize_state),
+            state_qdq_block_v=self.gdn_state_qdq_block_v,
+            w_quantizer=self.gdn_w_quantizer if quantize_w else None,
+            **kwargs,
         )
 
 

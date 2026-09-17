@@ -60,14 +60,16 @@ class _QuantTinyGatedDeltaNet(GatedDeltaNetStateQuantMixin):
             self.gated_delta_rule = gated_delta_rule
 
 
-def quant_cfg(**state_cfg):
-    return {
-        "quant_cfg": [
-            {"quantizer_name": "*", "enable": False},
-            {"quantizer_name": "*gdn_state_quantizer", "cfg": state_cfg or GDN_STATE_FP8_DYNAMIC},
-        ],
-        "algorithm": "max",
-    }
+GDN_W_FP8_DYNAMIC = {"num_bits": (4, 3), "axis": (0, 1, 2), "type": "dynamic"}
+
+
+def quant_cfg(state=True, w=False):
+    entries = [{"quantizer_name": "*", "enable": False}]
+    if state:
+        entries.append({"quantizer_name": "*gdn_state_quantizer", "cfg": GDN_STATE_FP8_DYNAMIC})
+    if w:
+        entries.append({"quantizer_name": "*gdn_w_quantizer", "cfg": GDN_W_FP8_DYNAMIC})
+    return {"quant_cfg": entries, "algorithm": "max"}
 
 
 @pytest.mark.parametrize(
@@ -94,7 +96,7 @@ def test_disabled_state_quantizer_calls_original_kernel():
     mtq.quantize(model, disable_all, lambda m: m(x))
 
     assert isinstance(model, _QuantTinyGatedDeltaNet)
-    assert not model.gdn_state_quantizer.is_enabled
+    assert not model.gdn_state_quantizer.is_enabled and not model.gdn_w_quantizer.is_enabled
     assert model.gdn_state_qdq_block_v is None
     assert torch.equal(model(x), expected)
     assert model.gated_delta_rule is chunk_gated_delta_rule, "the kernel swap must be undone"
@@ -116,9 +118,39 @@ def test_enabled_state_quantizer_uses_state_qdq_kernel(monkeypatch):
     model.gdn_state_qdq_block_v = 64
 
     model(x)
-    assert calls and calls[-1] == {"state_qdq": 1, "state_qdq_block_v": 64}
+    assert calls and calls[-1] == {"state_qdq": 1, "state_qdq_block_v": 64, "w_quantizer": None}
 
     # The deterministic torch kernel has no quantized counterpart.
     model.gated_delta_rule = lambda *a, **kw: chunk_gated_delta_rule(*a, **kw)
     with pytest.raises(NotImplementedError, match="deterministic torch kernel"):
         model(x)
+
+
+@pytest.mark.parametrize("state", [False, True])
+def test_w_quantizer_is_passed_to_the_kernel(monkeypatch, state):
+    """``*gdn_w_quantizer`` in the config hands the module's TensorQuantizer to the kernel, with
+    or without the state quantizer."""
+    calls = []
+
+    def fake_state_qdq_kernel(*args, **kwargs):
+        calls.append(kwargs)
+        return chunk_gated_delta_rule(*args)
+
+    monkeypatch.setattr(
+        gated_delta_net, "_state_qdq_chunk_gated_delta_rule", lambda: fake_state_qdq_kernel
+    )
+    model = TinyGatedDeltaNet()
+    x = torch.randn(2, 8, 3, 4)
+    mtq.quantize(model, quant_cfg(state=state, w=True), lambda m: m(x))
+    assert model.gdn_w_quantizer.is_enabled and model.gdn_state_quantizer.is_enabled == state
+
+    model(x)
+    assert calls[-1]["state_qdq"] == int(state)
+    assert calls[-1]["w_quantizer"] is model.gdn_w_quantizer
+
+    # The w quantizer really quantizes: 256 random values per token collapse onto the E4M3 grid,
+    # which has at most 127 distinct magnitudes per (row-specific) scale.
+    w = torch.randn(1, 1, 1, 256)
+    quantized = model.gdn_w_quantizer(w)
+    assert not torch.equal(quantized, w)
+    assert torch.unique(quantized.abs()).numel() <= 127 < torch.unique(w.abs()).numel()

@@ -19,6 +19,9 @@ import pytest
 import torch
 import torch.nn.functional as F
 
+from modelopt.torch.quantization.config import QuantizerAttributeConfig
+from modelopt.torch.quantization.nn import TensorQuantizer
+
 fla = pytest.importorskip("fla.ops.gated_delta_rule")
 vendored = pytest.importorskip(
     "modelopt.torch.kernels.quantization.linear_attention.fla_chunk_gated_delta_rule",
@@ -143,3 +146,22 @@ def test_state_qdq_varlen():
     )
     torch.testing.assert_close(out[:, : 2 * CHUNK], first, rtol=1e-4, atol=1e-4)
     torch.testing.assert_close(final_state[:1], first_state, rtol=1e-4, atol=1e-4)
+
+
+def test_w_quantizer_fake_quantizes_the_state_matmul_operand():
+    """``w_quantizer`` is applied once to the WY tensor ``w`` before its matmul with the state; a
+    ModelOpt TensorQuantizer with a dynamic per-token FP8 scale works as the callable."""
+    w_quantizer = TensorQuantizer(
+        QuantizerAttributeConfig(num_bits=(4, 3), type="dynamic", axis=(0, 1, 2))
+    ).cuda()
+    q, k, v, g, beta = (x.clone().requires_grad_() for x in make_inputs())
+    state_only, _ = state_qdq_chunk_gated_delta_rule(q, k, v, g, beta, state_qdq=1)
+    out, final_state = state_qdq_chunk_gated_delta_rule(
+        q, k, v, g, beta, output_final_state=True, state_qdq=1, w_quantizer=w_quantizer
+    )
+    assert torch.isfinite(out).all() and not torch.equal(out, state_only)
+    (out.square().sum() + final_state.square().sum()).backward()
+    for tensor in (q, k, v, g, beta):
+        assert tensor.grad is not None and torch.isfinite(tensor.grad).all()
+    with pytest.raises(TypeError, match="w_quantizer"):
+        state_qdq_chunk_gated_delta_rule(q, k, v, g, beta, w_quantizer=1)
