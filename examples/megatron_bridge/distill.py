@@ -215,11 +215,6 @@ def get_args():
         default=1,
         help="Minimum number of top-k entries kept per token when --logit_kl_top_p is active.",
     )
-    parser.add_argument(
-        "--no_logit_kl_ghost_token",
-        action="store_true",
-        help="Disable the residual 'ghost' token (out-of-top-k probability mass) in the top-k KL loss.",
-    )
     parser.add_argument("--lr", type=float, default=1e-4, help="Peak learning rate")
     parser.add_argument("--min_lr", type=float, default=1e-5, help="Minimum learning rate")
     parser.add_argument("--lr_warmup_iters", type=int, default=50, help="Number of LR warmup steps")
@@ -471,7 +466,6 @@ def main(args: argparse.Namespace):
         logit_kl_topk=args.logit_kl_topk,
         logit_kl_top_p=args.logit_kl_top_p,
         logit_kl_top_p_min_k=args.logit_kl_top_p_min_k,
-        logit_kl_ghost_token=not args.no_logit_kl_ghost_token,
     )
 
     # HF VLM configs expose ``vision_config``; Megatron-Bridge nests the text model under
