@@ -15,9 +15,10 @@
 
 """Linear-attention kernels for quantization.
 
-``fla_chunk_delta_h.py`` and ``fla_chunk_gated_delta_rule.py`` are copies of the chunked
+``fla_chunk_delta_h.py`` and ``fla_chunk_gated_delta_rule.py`` are adapted copies of the chunked
 GatedDeltaNet kernels of `flash-linear-attention <https://github.com/fla-org/flash-linear-attention>`_
-(``fla.ops.common.chunk_delta_h`` and ``fla.ops.gated_delta_rule.chunk``). They still import the
-surrounding fla operators, so ``flash-linear-attention`` and Triton must be installed to use them.
-This package initializer does not import the kernels, so importing it needs neither.
+(``fla.ops.common.chunk_delta_h`` and ``fla.ops.gated_delta_rule.chunk``) that can fake-quantize the
+recurrent state carried between chunks to FP8 (``state_qdq``). They still import the surrounding
+fla operators, so ``flash-linear-attention`` (v0.5.1 or newer) and Triton must be installed to use
+them. This package initializer does not import the kernels, so importing it needs neither.
 """

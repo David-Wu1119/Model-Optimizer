@@ -1,5 +1,6 @@
 # Adapted from: https://github.com/fla-org/flash-linear-attention/blob/516143e31fce/fla/ops/gated_delta_rule/chunk.py
-# Verbatim copy (formatting aside); imports the state kernels from the vendored sibling module.
+# Adapted with modifications (marked [ModelOpt]): threads state_qdq / state_qdq_block_v through
+# the autograd function and imports the state kernels from the vendored sibling module.
 #
 # Copyright (c) 2023-2026, Songlin Yang, Yu Zhang, Zhiyuan Li
 #
@@ -28,7 +29,6 @@ import warnings
 
 import torch
 from fla.modules.l2norm import l2norm_bwd, l2norm_fwd
-from fla.ops.backends import dispatch
 from fla.ops.common.chunk_o import chunk_bwd_dqkwg, chunk_bwd_dv_local, chunk_fwd_o
 from fla.ops.common.gate import fused_beta_sigmoid, fused_beta_sigmoid_bwd
 from fla.ops.cp import FLACPContext
@@ -46,7 +46,12 @@ from fla.ops.utils.constant import RCP_LN2
 from fla.ops.utils.index import prepare_chunk_indices
 from fla.utils import autocast_custom_bwd, autocast_custom_fwd, input_guard
 
-from .fla_chunk_delta_h import chunk_gated_delta_rule_bwd_dhu, chunk_gated_delta_rule_fwd_h
+from .fla_chunk_delta_h import (
+    STATE_QDQ_FP8_DYNAMIC,
+    STATE_QDQ_OFF,
+    chunk_gated_delta_rule_bwd_dhu,
+    chunk_gated_delta_rule_fwd_h,
+)
 
 
 def chunk_gated_delta_rule_fwd(
@@ -66,6 +71,8 @@ def chunk_gated_delta_rule_fwd(
     A_log: torch.Tensor | None = None,
     dt_bias: torch.Tensor | None = None,
     chunk_size: int = 64,
+    state_qdq: int = STATE_QDQ_OFF,
+    state_qdq_block_v: int | None = None,
 ):
     g_input = g if use_gate_in_kernel else None
     if use_gate_in_kernel:
@@ -122,6 +129,8 @@ def chunk_gated_delta_rule_fwd(
         chunk_indices=chunk_indices,
         state_v_first=state_v_first,
         chunk_size=chunk_size,
+        state_qdq=state_qdq,
+        state_qdq_block_v=state_qdq_block_v,
     )
 
     if cp_context is not None:
@@ -162,6 +171,8 @@ def chunk_gated_delta_rule_bwd(
     A_log: torch.Tensor | None = None,
     dt_bias: torch.Tensor | None = None,
     chunk_size: int = 64,
+    state_qdq: int = STATE_QDQ_OFF,
+    state_qdq_block_v: int | None = None,
 ):
     w, u = recompute_w_u_fwd(
         k=k,
@@ -176,6 +187,8 @@ def chunk_gated_delta_rule_bwd(
     if cp_context is not None:
         initial_state = expand_h0(initial_state, context=cp_context)
 
+    # [ModelOpt] The backward recomputes the forward's chunk states, so it sees the same
+    # fake-quantized states; the state gradient itself passes straight through the QDQ.
     h, v_new, _ = chunk_gated_delta_rule_fwd_h(
         k=k,
         w=w,
@@ -187,6 +200,8 @@ def chunk_gated_delta_rule_bwd(
         chunk_indices=chunk_indices,
         state_v_first=state_v_first,
         chunk_size=chunk_size,
+        state_qdq=state_qdq,
+        state_qdq_block_v=state_qdq_block_v,
     )
     dv = chunk_bwd_dv_local(
         q=q,
@@ -297,6 +312,8 @@ class ChunkGatedDeltaRuleFunction(torch.autograd.Function):
         allow_neg_eigval: bool = False,
         cp_context: FLACPContext | None = None,
         chunk_size: int = 64,
+        state_qdq: int = STATE_QDQ_OFF,
+        state_qdq_block_v: int | None = None,
     ):
         q_rstd, k_rstd = None, None
         if use_qk_l2norm_in_kernel:
@@ -328,6 +345,8 @@ class ChunkGatedDeltaRuleFunction(torch.autograd.Function):
             A_log=A_log,
             dt_bias=dt_bias,
             chunk_size=chunk_size,
+            state_qdq=state_qdq,
+            state_qdq_block_v=state_qdq_block_v,
         )
         ctx.save_for_backward(
             q,
@@ -354,6 +373,8 @@ class ChunkGatedDeltaRuleFunction(torch.autograd.Function):
         ctx.cp_context = cp_context
         ctx.state_v_first = state_v_first
         ctx.use_gate_in_kernel = use_gate_in_kernel
+        ctx.state_qdq = state_qdq
+        ctx.state_qdq_block_v = state_qdq_block_v
         return o.to(q.dtype), final_state
 
     @staticmethod
@@ -401,6 +422,8 @@ class ChunkGatedDeltaRuleFunction(torch.autograd.Function):
             A_log=A_log,
             dt_bias=dt_bias,
             chunk_size=ctx.chunk_size,
+            state_qdq=ctx.state_qdq,
+            state_qdq_block_v=ctx.state_qdq_block_v,
         )
         if ctx.use_qk_l2norm_in_kernel:
             dq = l2norm_bwd(q, q_rstd, dq)
@@ -428,11 +451,14 @@ class ChunkGatedDeltaRuleFunction(torch.autograd.Function):
             None,
             None,
             None,
+            None,
+            None,
         )
 
 
+# [ModelOpt] Not registered with fla's backend dispatch: another backend must not take over a
+# call that asks for state quantization.
 @torch.compiler.disable
-@dispatch("gated_delta_rule")
 def chunk_gated_delta_rule(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -582,6 +608,15 @@ def chunk_gated_delta_rule(
             f"`chunk_size` must be 16, 32, or 64 for Gated Delta Rule, got {chunk_size}."
         )
 
+    # [ModelOpt] state_qdq: 0 keeps fla's numerics; 1 fake-quantizes the state carried between
+    # chunks to FP8 E4M3 with a dynamic scale per [K, state_qdq_block_v] tile of each head.
+    state_qdq = kwargs.pop("state_qdq", STATE_QDQ_OFF)
+    state_qdq_block_v = kwargs.pop("state_qdq_block_v", None)
+    if state_qdq not in (STATE_QDQ_OFF, STATE_QDQ_FP8_DYNAMIC):
+        raise ValueError(f"`state_qdq` must be 0 or 1, got {state_qdq}.")
+    if state_qdq != STATE_QDQ_OFF and cp_context is not None:
+        raise ValueError("State quantization is not supported together with `cp_context`.")
+
     if cp_context is not None:
         assert initial_state is None, "Initial state is not supported for CP"
         assert output_final_state is False, "Output final state is not supported for CP"
@@ -632,6 +667,8 @@ def chunk_gated_delta_rule(
         allow_neg_eigval,
         cp_context,
         chunk_size,
+        state_qdq,
+        state_qdq_block_v,
     )
     return o, final_state
 

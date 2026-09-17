@@ -1,5 +1,7 @@
 # Adapted from: https://github.com/fla-org/flash-linear-attention/blob/516143e31fce/fla/ops/common/chunk_delta_h.py
-# Verbatim copy (formatting aside) of the chunked GatedDeltaNet state-recurrence kernels.
+# Adapted with modifications (marked [ModelOpt]): optional in-kernel FP8 E4M3 fake quantization
+# of the carried chunk state (STATE_QDQ), BV as an explicit launch argument, no fla backend
+# dispatch or config-cache autotune.
 #
 # Copyright (c) 2023-2026, Songlin Yang, Yu Zhang, Zhiyuan Li
 #
@@ -27,10 +29,8 @@
 import torch
 import triton
 import triton.language as tl
-from fla.ops.backends import dispatch
 from fla.ops.utils import prepare_chunk_indices, prepare_chunk_offsets
 from fla.ops.utils.cache import fla_cache_autotune
-from fla.ops.utils.graph import get_static_buffer
 from fla.ops.utils.op import exp2
 from fla.utils import (
     IS_INTEL,
@@ -39,6 +39,27 @@ from fla.utils import (
     autotune_cache_kwargs,
     check_shared_mem,
 )
+
+from modelopt.torch.kernels.quantization.common.fp8_quant import fp8_scalar_qdq
+
+# ``STATE_QDQ`` modes of the forward state kernel.
+STATE_QDQ_OFF = 0
+STATE_QDQ_FP8_DYNAMIC = 1  # FP8 E4M3, one dynamic scale per program tile ([K, BV] of one head)
+STATE_QDQ_MAX_BLOCK_V = 128
+
+
+@triton.jit
+def _state_qdq_scale(b_h1, b_h2, b_h3, b_h4, K: tl.constexpr):
+    """[ModelOpt] Dynamic FP8 E4M3 scale over the up-to-four K tiles of one program's state."""
+    b_amax = tl.max(tl.abs(b_h1))
+    if K > 64:
+        b_amax = tl.maximum(b_amax, tl.max(tl.abs(b_h2)))
+    if K > 128:
+        b_amax = tl.maximum(b_amax, tl.max(tl.abs(b_h3)))
+    if K > 192:
+        b_amax = tl.maximum(b_amax, tl.max(tl.abs(b_h4)))
+    return tl.where(b_amax > 0, b_amax / 448.0, 1.0)
+
 
 NUM_WARPS = [2, 4] if IS_NVIDIA_HOPPER else [2, 4, 8, 16]
 
@@ -65,15 +86,15 @@ else:
         "IS_VARLEN": lambda args: args["cu_seqlens"] is not None,
     }
 )
-@fla_cache_autotune(
+# ``BV`` is an explicit argument rather than an autotuned config: with ``STATE_QDQ`` it sets the
+# quantization granularity, so it must not vary with the autotuner's choice.
+@triton.autotune(
     configs=[
-        triton.Config({"BV": BV}, num_warps=num_warps, num_stages=num_stages)
+        triton.Config({}, num_warps=num_warps, num_stages=num_stages)
         for num_warps in GATED_DELTA_RULE_FWD_H_NUM_WARPS
         for num_stages in ([2, 3, 4] if check_shared_mem("ampere") else [2, 1])
-        for BV in ([32, 64] if check_shared_mem("ada") else [32])
     ],
-    key=["H", "HV", "K", "V", "BT", "STATE_V_FIRST"],
-    **autotune_cache_kwargs,
+    key=["H", "HV", "K", "V", "BT", "BV", "STATE_V_FIRST", "STATE_QDQ"],
 )
 @triton.jit(do_not_specialize=["T"])
 def chunk_gated_delta_rule_fwd_kernel_h_blockdim64(
@@ -102,6 +123,7 @@ def chunk_gated_delta_rule_fwd_kernel_h_blockdim64(
     SAVE_NEW_VALUE: tl.constexpr,
     STATE_V_FIRST: tl.constexpr,
     IS_VARLEN: tl.constexpr,
+    STATE_QDQ: tl.constexpr,
 ):
     pid = tl.program_id(0)
     NV = tl.cdiv(V, BV)
@@ -193,6 +215,23 @@ def chunk_gated_delta_rule_fwd_kernel_h_blockdim64(
                 p_h0_4 = h0 + o_k4[:, None] * V + o_v[None, :]
                 m_h0_4 = m_k4[:, None] & m_v[None, :]
             b_h4 += tl.load(p_h0_4, mask=m_h0_4, other=0.0).to(tl.float32)
+        # [ModelOpt] A state read from an FP8 cache is quantized before the first chunk uses it.
+        if STATE_QDQ == 1:
+            if K > 192:
+                b_scale = _state_qdq_scale(b_h1, b_h2, b_h3, b_h4, K=K)
+            elif K > 128:
+                b_scale = _state_qdq_scale(b_h1, b_h2, b_h3, b_h3, K=K)
+            elif K > 64:
+                b_scale = _state_qdq_scale(b_h1, b_h2, b_h2, b_h2, K=K)
+            else:
+                b_scale = _state_qdq_scale(b_h1, b_h1, b_h1, b_h1, K=K)
+            b_h1 = fp8_scalar_qdq(b_h1, b_scale)
+            if K > 64:
+                b_h2 = fp8_scalar_qdq(b_h2, b_scale)
+            if K > 128:
+                b_h3 = fp8_scalar_qdq(b_h3, b_scale)
+            if K > 192:
+                b_h4 = fp8_scalar_qdq(b_h4, b_scale)
 
     # main recurrence
     for i_t in range(NT):
@@ -345,6 +384,26 @@ def chunk_gated_delta_rule_fwd_kernel_h_blockdim64(
                 b_h4 += tl.trans(tl.dot(b_k, b_v))
             else:
                 b_h4 = tl.dot(b_k, b_v, b_h4)
+
+        # [ModelOpt] Fake-quantize the state carried into the next chunk (and, after the last
+        # chunk, the stored final state) to FP8 E4M3. The scale is dynamic over this program's
+        # [K, BV] tile of the head state; BV == V makes it one scale per sequence and head.
+        if STATE_QDQ == 1:
+            if K > 192:
+                b_scale = _state_qdq_scale(b_h1, b_h2, b_h3, b_h4, K=K)
+            elif K > 128:
+                b_scale = _state_qdq_scale(b_h1, b_h2, b_h3, b_h3, K=K)
+            elif K > 64:
+                b_scale = _state_qdq_scale(b_h1, b_h2, b_h2, b_h2, K=K)
+            else:
+                b_scale = _state_qdq_scale(b_h1, b_h1, b_h1, b_h1, K=K)
+            b_h1 = fp8_scalar_qdq(b_h1, b_scale)
+            if K > 64:
+                b_h2 = fp8_scalar_qdq(b_h2, b_scale)
+            if K > 128:
+                b_h3 = fp8_scalar_qdq(b_h3, b_scale)
+            if K > 192:
+                b_h4 = fp8_scalar_qdq(b_h4, b_scale)
 
     if STORE_FINAL_STATE:
         if STATE_V_FIRST:
@@ -748,7 +807,6 @@ def chunk_gated_delta_rule_bwd_kernel_dhu_blockdim64(
             tl.store(p_dh3, b_dh4.to(p_dh3.dtype.element_ty), mask=m_dh3)
 
 
-@dispatch("common")
 def chunk_gated_delta_rule_fwd_h(
     k: torch.Tensor,
     w: torch.Tensor,
@@ -764,9 +822,12 @@ def chunk_gated_delta_rule_fwd_h(
     cu_seqlens_cpu: torch.LongTensor | None = None,
     chunk_indices: torch.LongTensor | None = None,
     chunk_offsets: torch.LongTensor | None = None,
+    state_qdq: int = STATE_QDQ_OFF,
+    state_qdq_block_v: int | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
     B, T, H, K, V, HV = *k.shape, u.shape[-1], u.shape[2]
     BT = chunk_size
+    BV = state_qdq_tile_v(V, state_qdq, state_qdq_block_v)
 
     if chunk_indices is None and cu_seqlens is not None:
         chunk_indices = prepare_chunk_indices(cu_seqlens, chunk_size)
@@ -788,9 +849,7 @@ def chunk_gated_delta_rule_fwd_h(
 
     v_new = torch.empty_like(u) if save_new_value else None
 
-    def grid(meta):
-        return (triton.cdiv(V, meta["BV"]) * N * HV,)
-
+    grid = (triton.cdiv(V, BV) * N * HV,)
     chunk_gated_delta_rule_fwd_kernel_h_blockdim64[grid](
         k=k,
         v=u,
@@ -809,12 +868,34 @@ def chunk_gated_delta_rule_fwd_h(
         K=K,
         V=V,
         BT=BT,
+        BV=BV,
         STATE_V_FIRST=state_v_first,
+        STATE_QDQ=state_qdq,
     )
     return h, v_new, final_state
 
 
-@dispatch("common")
+def state_qdq_tile_v(V: int, state_qdq: int, state_qdq_block_v: int | None) -> int:
+    """Return the V tile width ``BV`` of the forward state kernel.
+
+    Without state quantization this is fla's largest tile. With it, the tile is also the
+    quantization granularity: one dynamic scale per ``[K, BV]`` block of a head's state. The
+    default is fla's 64-column tile, i.e. one scale per sequence and head for ``V <= 64`` and two
+    for the usual ``V == 128``. ``state_qdq_block_v=128`` gives one scale per 128-wide head but
+    exceeds the register budget where the kernel is limited to two warps (Blackwell) and spills.
+    """
+    if state_qdq == STATE_QDQ_OFF:
+        return 64 if check_shared_mem("ada") else 32
+    if state_qdq != STATE_QDQ_FP8_DYNAMIC:
+        raise ValueError(f"Unsupported state_qdq mode {state_qdq}; expected 0 or 1.")
+    BV = min(triton.next_power_of_2(V), 64) if state_qdq_block_v is None else state_qdq_block_v
+    if BV < 16 or BV > STATE_QDQ_MAX_BLOCK_V or BV & (BV - 1):
+        raise ValueError(
+            f"state_qdq_block_v must be a power of two in [16, {STATE_QDQ_MAX_BLOCK_V}], got {BV}."
+        )
+    return BV
+
+
 def chunk_gated_delta_rule_bwd_dhu(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -848,6 +929,9 @@ def chunk_gated_delta_rule_bwd_dhu(
             chunk_offsets = prepare_chunk_offsets(cu_seqlens, BT)
 
     if use_graph:
+        # [ModelOpt] Imported here: fla.ops.utils.graph is absent from released fla versions.
+        from fla.ops.utils.graph import get_static_buffer
+
         if state_v_first:
             dh = get_static_buffer("dhu_dh_vf", (B, NT, HV, V, K), q.dtype, q.device)
         else:
