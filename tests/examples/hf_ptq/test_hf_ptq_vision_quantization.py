@@ -33,7 +33,7 @@ def hf_ptq(monkeypatch):
     ("recipe", "extracts_language_model"),
     [
         (None, True),
-        ("huggingface/qwen3_vl/ptq/fp8_vision-kv_none", False),
+        ("model_type/qwen3_vl/ptq/fp8_vision-kv_none", False),
     ],
 )
 def test_image_calibration_model_target_follows_recipe(
@@ -86,6 +86,16 @@ def test_image_calibration_model_target_follows_recipe(
     assert quantization_target is (
         extracted_language_model if extracts_language_model else full_model
     )
+
+
+def test_language_model_extraction_fails_closed_on_competing_roots(hf_ptq):
+    full_model = torch.nn.Module()
+    full_model.model = torch.nn.Module()
+    full_model.model.language_model = torch.nn.Module()
+    full_model.language_model = torch.nn.Module()
+
+    with pytest.raises(ValueError, match="multiple language-model roots"):
+        hf_ptq.extract_and_prepare_language_model_from_vl(full_model)
 
 
 def test_image_calibration_uses_full_vlm_forward(hf_ptq, monkeypatch):
@@ -150,10 +160,10 @@ def test_image_calibration_uses_full_vlm_forward(hf_ptq, monkeypatch):
 @pytest.mark.parametrize(
     "recipe",
     [
-        "huggingface/qwen3_vl/ptq/fp8_vision-kv_none",
-        "huggingface/qwen3_vl/ptq/fp8_vision_lm-kv_fp8_cast",
-        "huggingface/qwen3_5/ptq/fp8_vision-kv_none",
-        "huggingface/qwen3_5/ptq/fp8_vision_lm-kv_fp8_cast",
+        "model_type/qwen3_vl/ptq/fp8_vision-kv_none",
+        "model_type/qwen3_vl/ptq/fp8_vision_lm-kv_fp8_cast",
+        "model_type/qwen3_5/ptq/fp8_vision-kv_none",
+        "model_type/qwen3_5/ptq/fp8_vision_lm-kv_fp8_cast",
     ],
 )
 def test_vision_recipe_requires_image_calibration(hf_ptq, recipe):
