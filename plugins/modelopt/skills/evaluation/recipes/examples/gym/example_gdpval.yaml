@@ -167,13 +167,8 @@ evaluation:
   nemo_evaluator_config:
     config:
       params:
-        # Resolve per SKILL Step 3, including references/aa-methodology.md only for
-        # applicable AA reproduction; otherwise retain the normal provenance/default policy.
-        # These fields feed collect_rollout_params below; if omitting them, remove
-        # those overrides too and verify Gym/evaluator defaults in actual requests.
-        # Do not use null as a substitute for omission. Update export tags together.
-        temperature: ???
-        top_p: ???
+        temperature: 1.0
+        top_p: 0.95
         parallelism: 16384         # gym-internal concurrency, NOT a model-server cap
         request_timeout: 36000      # gym rollouts are long-running
         max_retries: 10
@@ -362,12 +357,12 @@ export:
   mlflow:
     tracking_uri: ${oc.env:MLFLOW_TRACKING_URI}   # from modelopttools:eval-config
     experiment_name: ${oc.env:USER}/CHANGEME-served-model-name
-    description: 'CHANGEME-served-model-name | GDPVal rubric | T=CHANGEME, top_p=CHANGEME, num_repeats=1'
+    description: 'CHANGEME-served-model-name | GDPVal rubric | T=1.0, top_p=0.95, num_repeats=1'
     log_logs: true
     only_required: false
     tags:
       framework: vllm
       model: CHANGEME-served-model-name
       benchmark: nemo_gym.gdpval
-      temperature: ???
-      top_p: ???
+      temperature: '1.0'
+      top_p: '0.95'
