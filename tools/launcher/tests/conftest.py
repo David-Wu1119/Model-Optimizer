@@ -43,7 +43,7 @@ def tmp_yaml(tmp_path):
 
     def _write(content, name="test.yaml"):
         p = tmp_path / name
-        p.write_text(content)
+        p.write_text(content, encoding="utf-8")
         return str(p)
 
     return _write

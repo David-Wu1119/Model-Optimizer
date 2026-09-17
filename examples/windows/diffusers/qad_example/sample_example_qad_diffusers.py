@@ -548,7 +548,7 @@ class LtxvQADTrainer(LtxvTrainer):
             amax_dict = extract_amax_values(state_dict)
             if amax_dict:
                 amax_path = save_dir / f"amax_step_{self._global_step:05d}.json"
-                with open(amax_path, "w") as f:
+                with open(amax_path, "w", encoding="utf-8") as f:
                     json.dump(
                         {"total_amax_keys": len(amax_dict), "amax_values": amax_dict},
                         f,
@@ -678,7 +678,7 @@ def create_inference_checkpoint(
     if amax_dict:
         amax_path = output_path.parent / (output_path.stem + "_amax.json")
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(amax_path, "w") as f:
+        with open(amax_path, "w", encoding="utf-8") as f:
             json.dump(
                 {"total_amax_keys": len(amax_dict), "amax_values": amax_dict},
                 f,
@@ -750,7 +750,7 @@ def create_inference_checkpoint(
             print(f"    {conv}: {cnt} tensors")
 
         dtype_log_path = output_path.parent / (output_path.stem + "_dtype_fixes.json")
-        with open(dtype_log_path, "w") as f:
+        with open(dtype_log_path, "w", encoding="utf-8") as f:
             json.dump({"total": dtype_fixed, "fixes": dtype_mismatches}, f, indent=2)
         print(f"  Dtype fix log saved to: {dtype_log_path}")
 
@@ -948,7 +948,7 @@ def main():
     # ── Train ──
     import yaml
 
-    with open(args.config) as f:
+    with open(args.config, encoding="utf-8") as f:
         config_dict = yaml.safe_load(f)
 
     # Extract QAD-specific config (not part of LtxTrainerConfig)

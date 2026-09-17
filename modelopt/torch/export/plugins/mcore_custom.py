@@ -310,7 +310,7 @@ def save_safetensors(state_dict, save_directory: str | os.PathLike):
             local_total_size += val.numel() * val.element_size()
             weight_map[key] = ckpt_filename
 
-        with open(save_directory + "/" + meta_filename, "w") as f:
+        with open(save_directory + "/" + meta_filename, "w", encoding="utf-8") as f:
             json.dump(
                 {"metadata": {"total_size": local_total_size}, "weight_map": weight_map},
                 f,
@@ -328,12 +328,12 @@ def save_safetensors(state_dict, save_directory: str | os.PathLike):
         }
         for global_idx in range(global_count):
             meta_filename = f"model-{global_idx + 1:05d}-of-{global_count:05d}.json"
-            with open(save_directory + "/" + meta_filename) as f:
+            with open(save_directory + "/" + meta_filename, encoding="utf-8") as f:
                 shard = json.load(f)
             safetensor_index["metadata"]["total_size"] += shard["metadata"]["total_size"]
             safetensor_index["weight_map"].update(shard["weight_map"])
 
-        with open(save_directory + "/model.safetensors.index.json", "w") as f:
+        with open(save_directory + "/model.safetensors.index.json", "w", encoding="utf-8") as f:
             json.dump(safetensor_index, f, indent=4)
 
 
@@ -371,7 +371,7 @@ def save_safetensors_by_layer_index(
             layer_total_size += tensor_size
             weight_map[key] = ckpt_filename
 
-        with open(save_directory + "/" + meta_filename, "w") as f:
+        with open(save_directory + "/" + meta_filename, "w", encoding="utf-8") as f:
             json.dump(
                 {"metadata": {"total_size": layer_total_size}, "weight_map": weight_map},
                 f,
@@ -388,12 +388,12 @@ def save_safetensors_by_layer_index(
         }
         for layer_index in range(total_layers):
             meta_filename = name_template.format(layer_index + 1, total_layers) + ".json"
-            with open(save_directory + "/" + meta_filename) as f:
+            with open(save_directory + "/" + meta_filename, encoding="utf-8") as f:
                 shard = json.load(f)
             safetensor_index["metadata"]["total_size"] += shard["metadata"]["total_size"]
             safetensor_index["weight_map"].update(shard["weight_map"])
 
-        with open(save_directory + "/model.safetensors.index.json", "w") as f:
+        with open(save_directory + "/model.safetensors.index.json", "w", encoding="utf-8") as f:
             json.dump(safetensor_index, f, indent=4)
 
 
@@ -409,7 +409,7 @@ def _get_safetensors_file(pretrained_model_path: str | Path, key: str) -> Path |
     if safetensors_file.is_file():
         pass
     elif safetensors_index_file.is_file():
-        with open(safetensors_index_file) as f:
+        with open(safetensors_index_file, encoding="utf-8") as f:
             safetensors_index = json.load(f)
         safetensors_file = (
             (Path(pretrained_model_path) / safetensors_index["weight_map"][key])

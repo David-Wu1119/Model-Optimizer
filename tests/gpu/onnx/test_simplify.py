@@ -38,7 +38,7 @@ def test_onnx_simplification(tmp_path):
     onnx_filename = os.path.join(tmp_path, "model_non_simplified.onnx")
     _create_test_model(onnx_filename)
 
-    with open(onnx_filename) as f:
+    with open(onnx_filename, encoding="utf-8") as f:
         graph = gs.import_onnx(onnx.load(f.name))
 
         # Check that the model contains Identity nodes, indicating that constant folding did not happen.

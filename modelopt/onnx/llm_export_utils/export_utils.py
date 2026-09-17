@@ -46,7 +46,7 @@ class ModelLoader:
 
     def get_model_type(self):
         """Get model type from config file."""
-        with open(self.config_path) as f:
+        with open(self.config_path, encoding="utf-8") as f:
             return json.load(f).get("model_type")
 
     def load_model(self, trust_remote_code: bool = False) -> AutoModelForCausalLM:

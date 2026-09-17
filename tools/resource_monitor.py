@@ -356,7 +356,7 @@ def _write_summary(path, duration, metrics: _Metrics):
     print(text, flush=True)
     if path:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
-        Path(path).write_text(text + "\n")
+        Path(path).write_text(text + "\n", encoding="utf-8")
 
 
 def main() -> None:
@@ -402,7 +402,7 @@ def main() -> None:
         "proc_cpu_util_pct",
     ]
     start = time.monotonic()
-    with open(args.out, "w", newline="") as f:
+    with open(args.out, "w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         while not stop:

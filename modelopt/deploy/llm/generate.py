@@ -79,7 +79,7 @@ class LLM(TRTLLM):
                 reuse, shared-prefix requests only return logits for the recomputed suffix, which
                 breaks per-token logprob computation.
         """
-        with open(Path(checkpoint_dir) / "config.json") as config_file:
+        with open(Path(checkpoint_dir) / "config.json", encoding="utf-8") as config_file:
             config = json.load(config_file)
 
             assert medusa_choices is None, "medusa_choices is not supported with the torch llmapi"

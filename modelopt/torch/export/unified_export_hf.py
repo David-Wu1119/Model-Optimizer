@@ -160,7 +160,7 @@ def _save_component_state_dict_safetensors(
         metadata=metadata,
     )
 
-    with open(component_export_dir / "config.json", "w") as f:
+    with open(component_export_dir / "config.json", "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=4)
 
 
@@ -1354,10 +1354,10 @@ def _export_diffusers_checkpoint(
                 if hf_quant_config is not None:
                     config_path = component_export_dir / "config.json"
                     if config_path.exists():
-                        with open(config_path) as file:
+                        with open(config_path, encoding="utf-8") as file:
                             config_data = json.load(file)
                         config_data["quantization_config"] = hf_quant_config
-                        with open(config_path, "w") as file:
+                        with open(config_path, "w", encoding="utf-8") as file:
                             json.dump(config_data, file, indent=4)
             finally:
                 # Drop the temporary promoted export buffers so the live module is
@@ -1375,10 +1375,10 @@ def _export_diffusers_checkpoint(
             if sparse_attn_config is not None:
                 config_path = component_export_dir / "config.json"
                 if config_path.exists():
-                    with open(config_path) as file:
+                    with open(config_path, encoding="utf-8") as file:
                         config_data = json.load(file)
                     config_data["sparse_attention_config"] = sparse_attn_config
-                    with open(config_path, "w") as file:
+                    with open(config_path, "w", encoding="utf-8") as file:
                         json.dump(config_data, file, indent=4)
                     print(f"  Added sparse_attention_config to {config_path.name}")
 
@@ -1426,9 +1426,9 @@ def _export_diffusers_checkpoint(
             if source_path:
                 candidate_model_index = Path(source_path) / "model_index.json"
                 if candidate_model_index.exists():
-                    with open(candidate_model_index) as file:
+                    with open(candidate_model_index, encoding="utf-8") as file:
                         model_index = json.load(file)
-                    with open(model_index_path, "w") as file:
+                    with open(model_index_path, "w", encoding="utf-8") as file:
                         json.dump(model_index, file, indent=4)
 
         # Full-export fallback to Diffusers-native config serialization.
@@ -1447,7 +1447,7 @@ def _export_diffusers_checkpoint(
                 library = module.split(".")[0]
                 model_index[name] = [library, type(comp).__name__]
 
-            with open(model_index_path, "w") as file:
+            with open(model_index_path, "w", encoding="utf-8") as file:
                 json.dump(model_index, file, indent=4)
 
     print(f"Export complete. Saved to: {export_dir}")
@@ -1561,12 +1561,12 @@ def _write_hf_export_config(
     )
     quantization_config = None
     if hf_quant_config is not None and is_quantized_export:
-        with open(f"{export_dir}/hf_quant_config.json", "w") as file:
+        with open(f"{export_dir}/hf_quant_config.json", "w", encoding="utf-8") as file:
             json.dump(hf_quant_config, file, indent=4)
         quantization_config = convert_hf_quant_config_format(hf_quant_config)
 
     original_config = f"{export_dir}/config.json"
-    with open(original_config) as file:
+    with open(original_config, encoding="utf-8") as file:
         config_data = json.load(file)
     sanitize_hf_config_for_deployment(config_data, model)
     if quantization_config is not None:
@@ -1575,7 +1575,7 @@ def _write_hf_export_config(
         sparse_attn_config = export_sparse_attention_config(model)
         if sparse_attn_config is not None:
             config_data["sparse_attention_config"] = sparse_attn_config
-    with open(original_config, "w") as file:
+    with open(original_config, "w", encoding="utf-8") as file:
         json.dump(config_data, file, indent=4)
 
 

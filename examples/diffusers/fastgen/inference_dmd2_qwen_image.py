@@ -483,7 +483,7 @@ def _smoke_test(
     os.makedirs(os.path.dirname(output_png), exist_ok=True)
     image.save(output_png)
     sidecar = output_png.replace(".png", "_stats.json")
-    with open(sidecar, "w") as f:
+    with open(sidecar, "w", encoding="utf-8") as f:
         json.dump(stats, f, indent=2)
     print(json.dumps(stats, indent=2))
     print(f"\nImage saved to: {output_png}")

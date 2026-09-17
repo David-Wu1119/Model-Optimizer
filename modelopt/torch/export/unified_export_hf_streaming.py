@@ -178,7 +178,7 @@ def name_shards_and_write_index(
 
     weight_map = {key: shard_names[part_idx] for key, part_idx in key_to_part.items()}
     index_path = export_dir / "model.safetensors.index.json"
-    with open(index_path, "w") as f:
+    with open(index_path, "w", encoding="utf-8") as f:
         json.dump({"metadata": {"total_size": total_size}, "weight_map": weight_map}, f)
     return weight_map
 

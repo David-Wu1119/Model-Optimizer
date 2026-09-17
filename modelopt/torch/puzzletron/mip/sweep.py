@@ -69,7 +69,7 @@ def _load_teacher_subblock_stats(hydra_cfg: DictConfig) -> tuple[dict[str, Any],
             "Please run the full pipeline first without --mip-only flag."
         )
 
-    with open(subblock_stats_path) as f:
+    with open(subblock_stats_path, encoding="utf-8") as f:
         subblock_stats_list = json.load(f)
 
     try:
@@ -158,7 +158,7 @@ def extract_solution_results(
 
     # Load solutions.json for actual memory and parameters
     solutions_file = solution_dir / "solutions.json"
-    with open(solutions_file) as f:
+    with open(solutions_file, encoding="utf-8") as f:
         solutions_data = json.load(f)
         solution = solutions_data[0]  # First solution
         total_costs = solution.get("total_costs", {})
@@ -170,7 +170,7 @@ def extract_solution_results(
     # TODO: There could be multiple solutions, but we only need the first one. Is it the best solution?
     solution_0_file = validation_dir / "solution_0.json"
 
-    with open(solution_0_file) as f:
+    with open(solution_0_file, encoding="utf-8") as f:
         validation_data = json.load(f)
         result["lm_loss"] = validation_data.get("lm_loss", {}).get("avg", None)
         result["token_accuracy_top_1"] = validation_data.get("token_accuracy_top_1", {}).get(
@@ -212,7 +212,7 @@ def write_results_to_csv(results: list, output_csv: str):
     output_path = Path(output_csv)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    with open(output_path, "w", newline="") as f:
+    with open(output_path, "w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=columns)
         writer.writeheader()
         writer.writerows(results)

@@ -274,7 +274,7 @@ def _task_from_metadata(artifacts_dir):
     """
     for fname in ("metadata.yaml", "config.yml"):
         try:
-            with open(os.path.join(artifacts_dir, fname)) as f:
+            with open(os.path.join(artifacts_dir, fname), encoding="utf-8") as f:
                 text = f.read()
         except OSError:
             continue
@@ -342,7 +342,7 @@ def harvest(side, glob="eval_*", exclude="", diagnostics=None):
             head, _, tail = name.rpartition(".")
             task = head if head and re.fullmatch(r"\d+", tail) else name
         try:
-            with open(path) as f:
+            with open(path, encoding="utf-8") as f:
                 stats = json.load(f).get("response_stats", {})
         except (OSError, json.JSONDecodeError) as e:
             unreadable.append(f"{path}: {e}")

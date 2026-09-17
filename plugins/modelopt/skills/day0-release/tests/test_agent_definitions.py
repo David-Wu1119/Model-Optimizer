@@ -30,7 +30,7 @@ _REFERENCED_DOC = re.compile(r"`((?:[\w-]+/SKILL|common/[\w-]+|references/[\w-]+
 
 
 def _load_claude_agent(path: Path) -> tuple[str, str]:
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     assert text.startswith("---\n"), f"{path} has no YAML frontmatter"
     frontmatter, body = text.removeprefix("---\n").split("\n---\n", 1)
     names = [

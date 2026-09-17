@@ -155,7 +155,7 @@ def test_standalone_writes_csv_and_summary(tmp_path):
         check=True,
     )
 
-    with open(csv_path, newline="") as f:
+    with open(csv_path, encoding="utf-8", newline="") as f:
         rows = list(csv.DictReader(f))
     assert rows, "expected at least one sample row"
     for col in (
@@ -169,7 +169,7 @@ def test_standalone_writes_csv_and_summary(tmp_path):
     ):
         assert col in rows[0]
 
-    summary = summary_path.read_text()
+    summary = summary_path.read_text(encoding="utf-8")
     assert "sys_cpu_total_mb:" in summary
     assert "peak_sys_cpu_used_mb:" in summary
     assert "min_sys_cpu_free_mb:" in summary
@@ -210,6 +210,6 @@ def test_wrap_mode_propagates_exit_code(tmp_path):
     assert fail.returncode == 3
 
     # Wrap mode tracks the child tree, so proc_rss is populated.
-    with open(tmp_path / "a.csv", newline="") as f:
+    with open(tmp_path / "a.csv", encoding="utf-8", newline="") as f:
         rows = list(csv.DictReader(f))
     assert rows and rows[0]["proc_rss_mb"] != ""

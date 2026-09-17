@@ -512,7 +512,7 @@ class LayerwiseExporter:
                     weight_map[key] = shard.name
             total_size += _shard_data_bytes(shard)
         index = {"metadata": {"total_size": total_size}, "weight_map": weight_map}
-        (self._export_dir / _INDEX_FILE).write_text(json.dumps(index, indent=2))
+        (self._export_dir / _INDEX_FILE).write_text(json.dumps(index, indent=2), encoding="utf-8")
 
 
 def _holds_meta_tensor(module: nn.Module) -> bool:

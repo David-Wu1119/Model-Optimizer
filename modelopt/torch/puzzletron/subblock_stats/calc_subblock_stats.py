@@ -295,7 +295,7 @@ def calculate_subblock_stats_for_puzzle_dir(
         )
 
     if subblock_stats_file.exists():
-        with open(subblock_stats_file) as f:
+        with open(subblock_stats_file, encoding="utf-8") as f:
             subblock_stats = json.load(f)
     else:
         subblock_stats = []
@@ -416,7 +416,9 @@ def _load_subblock_configs_from_replacement_library(
     Args:
         master_puzzle_dir: Directory with "replacement_library.json" file
     """
-    replacement_library = json.loads((master_puzzle_dir / "replacement_library.json").read_text())
+    replacement_library = json.loads(
+        (master_puzzle_dir / "replacement_library.json").read_text(encoding="utf-8")
+    )
     subblock_configs = set()
     for layer_replacement in replacement_library:
         layer_replacement = parse_layer_replacement(layer_replacement)

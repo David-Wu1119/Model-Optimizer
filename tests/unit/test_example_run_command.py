@@ -38,7 +38,7 @@ def test_run_capturing_does_not_block_on_a_survivor_holding_the_pipe(
             os.environ.copy(),
         )
 
-    survivor = int(pid_file.read_text())
+    survivor = int(pid_file.read_text(encoding="utf-8"))
     try:
         assert returncode == -9
         assert "out" in output  # captured despite the survivor

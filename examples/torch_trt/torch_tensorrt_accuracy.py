@@ -219,7 +219,7 @@ def main():
     results.append([tag, top1, top5])
 
     if args.results_path:
-        with open(args.results_path, "w", newline="") as f:
+        with open(args.results_path, "w", encoding="utf-8", newline="") as f:
             csv.writer(f).writerows(results)
         print(f"\nWrote results to {args.results_path}")
 

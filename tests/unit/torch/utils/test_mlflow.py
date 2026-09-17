@@ -85,7 +85,7 @@ class FakeMlflow:
 
     def log_artifact(self, local_path, artifact_path=None):
         self.artifacts.append((Path(local_path).name, artifact_path))
-        self.artifact_text[Path(local_path).name] = Path(local_path).read_text()
+        self.artifact_text[Path(local_path).name] = Path(local_path).read_text(encoding="utf-8")
 
     def log_metrics(self, metrics):
         self.metrics.update(metrics)
@@ -248,7 +248,9 @@ def test_logger_is_inert_when_disabled(monkeypatch):
 
 def test_logger_logs_inputs_and_outputs(fake_mlflow, tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "argv", ["hf_ptq.py", "--pyt_ckpt_path", "/models/Qwen3-0.6B"])
-    (tmp_path / ".quant_summary.txt").write_text("706 TensorQuantizers found in model\n")
+    (tmp_path / ".quant_summary.txt").write_text(
+        "706 TensorQuantizers found in model\n", encoding="utf-8"
+    )
     logger = _logger(run_name="unit-test")
 
     logger.start(
@@ -421,7 +423,7 @@ def test_capture_includes_preconfigured_library_logging(fake_mlflow, monkeypatch
         logger.start()
         log_path = logger._log_path
         library_logger.warning("Rate limited. Waiting 169.0s before retry")
-        captured = log_path.read_text()
+        captured = log_path.read_text(encoding="utf-8")
         logger.finish("FINISHED")
     finally:
         library_logger.removeHandler(handler)
@@ -599,19 +601,19 @@ def test_git_sha_resolves_in_a_checkout_and_a_worktree(tmp_path, monkeypatch, in
     main checkout -- a directory-only reader silently reports "unknown" for every worktree."""
     main = tmp_path / "repo" / ".git"
     (main / "refs" / "heads").mkdir(parents=True)
-    (main / "refs" / "heads" / "main").write_text("a" * 40 + "\n")
+    (main / "refs" / "heads" / "main").write_text("a" * 40 + "\n", encoding="utf-8")
 
     if in_worktree:
         checkout = tmp_path / "wt"
         wt_git = main / "worktrees" / "wt"
         wt_git.mkdir(parents=True)
-        (wt_git / "HEAD").write_text("ref: refs/heads/main\n")
-        (wt_git / "commondir").write_text("../..\n")
+        (wt_git / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+        (wt_git / "commondir").write_text("../..\n", encoding="utf-8")
         checkout.mkdir()
-        (checkout / ".git").write_text(f"gitdir: {wt_git}\n")
+        (checkout / ".git").write_text(f"gitdir: {wt_git}\n", encoding="utf-8")
     else:
         checkout = main.parent
-        (main / "HEAD").write_text("ref: refs/heads/main\n")
+        (main / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
 
     # _git_sha locates .git relative to the module file, three parents up.
     fake_module = checkout / "modelopt" / "torch" / "utils" / "mlflow.py"
@@ -625,7 +627,7 @@ def test_git_sha_resolves_in_a_checkout_and_a_worktree(tmp_path, monkeypatch, in
 def test_git_sha_handles_a_detached_head(tmp_path, monkeypatch):
     git_dir = tmp_path / "repo" / ".git"
     git_dir.mkdir(parents=True)
-    (git_dir / "HEAD").write_text("b" * 40 + "\n")
+    (git_dir / "HEAD").write_text("b" * 40 + "\n", encoding="utf-8")
     fake_module = tmp_path / "repo" / "modelopt" / "torch" / "utils" / "mlflow.py"
     fake_module.parent.mkdir(parents=True)
     fake_module.touch()
@@ -655,7 +657,7 @@ def test_track_marks_a_raising_block_failed(fake_mlflow, monkeypatch, tmp_path):
         _logger().track(files=summary),
     ):
         # post_quantize writes the summary during the run, so the test must too.
-        (tmp_path / ".quant_summary.txt").write_text("706 TensorQuantizers\n")
+        (tmp_path / ".quant_summary.txt").write_text("706 TensorQuantizers\n", encoding="utf-8")
         raise RuntimeError("calibration exploded")
 
     assert fake_mlflow.status == "FAILED"
@@ -699,13 +701,15 @@ def test_only_files_this_run_produced_are_uploaded(fake_mlflow, tmp_path, monkey
     summary must not upload the previous run's file as though it were its own."""
     monkeypatch.setattr(sys, "argv", ["hf_ptq.py"])
     stale = tmp_path / ".quant_summary.txt"
-    stale.write_text("from a previous run\n")
+    stale.write_text("from a previous run\n", encoding="utf-8")
     fresh = tmp_path / ".moe.html"
     logger = _logger()
 
     outputs = {"summary/quant_summary.txt": stale, "summary/moe.html": fresh}
     logger.start(files=outputs)
-    fresh.write_text("<html>written by this run</html>")  # produced during the run
+    fresh.write_text(
+        "<html>written by this run</html>", encoding="utf-8"
+    )  # produced during the run
     logger.finish("FAILED", files=outputs)
 
     uploaded = [name for name, _ in fake_mlflow.artifacts]
@@ -720,7 +724,7 @@ def test_stale_check_survives_unnormalized_string_paths(fake_mlflow, tmp_path, m
     monkeypatch.chdir(tmp_path)
     (tmp_path / "out").mkdir()
     stale = tmp_path / "out" / ".quant_summary.txt"
-    stale.write_text("from a previous run\n")
+    stale.write_text("from a previous run\n", encoding="utf-8")
     outputs = {"summary/quant_summary.txt": "./out/.quant_summary.txt"}
     logger = _logger()
 

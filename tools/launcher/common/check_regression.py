@@ -56,7 +56,7 @@ def find_trainer_state(output_dir):
 
 def get_final_metrics(trainer_state_path):
     """Extract final loss and accuracy from trainer_state.json."""
-    with open(trainer_state_path) as f:
+    with open(trainer_state_path, encoding="utf-8") as f:
         state = json.load(f)
 
     logs = [h for h in state.get("log_history", []) if "loss" in h]

@@ -367,7 +367,7 @@ def save_sharded_model(
 
         index = {"metadata": metadata, "weight_map": weight_map}
         index_path = Path(str(out_path) + ".index.json")
-        index_path.write_text(json.dumps(index, indent=2))
+        index_path.write_text(json.dumps(index, indent=2), encoding="utf-8")
 
     else:
         torch.distributed.gather_object(shard_metadata, dst=0)

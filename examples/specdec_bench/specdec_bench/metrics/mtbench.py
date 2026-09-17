@@ -62,7 +62,9 @@ class MTBench(AcceptanceRate):
         self._format_write_output(text_outputs)
 
     def _format_write_output(self, outputs):
-        with open(os.path.join(self.directory, "mtbench_responses.jsonl"), "w") as outfile:
+        with open(
+            os.path.join(self.directory, "mtbench_responses.jsonl"), "w", encoding="utf-8"
+        ) as outfile:
             for i, messages in enumerate(outputs):
                 q_id = i + 81
                 out_line = {}

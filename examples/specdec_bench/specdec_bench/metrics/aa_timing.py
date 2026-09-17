@@ -45,8 +45,8 @@ class AATiming(Metric):
 
     def process_final(self, text_outputs):
         gen_tp_time = []
-        start_time = min([t[0] for t in self.timing])
-        end_time = max([t[-1] for t in self.timing])
+        start_time = min(t[0] for t in self.timing)
+        end_time = max(t[-1] for t in self.timing)
         self.out["AA Output TPS"] = sum(self.total_tokens) / (end_time - start_time)
         for tokens, times in zip(self.total_tokens, self.timing):
             if len(times) > 2:

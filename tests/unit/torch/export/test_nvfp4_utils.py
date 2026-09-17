@@ -185,7 +185,7 @@ class TestPostprocessSafetensors:
 
     def test_sharded_guard(self, tmp_path):
         save_file({"w": torch.randn(2, 2)}, str(tmp_path / "model.safetensors"))
-        (tmp_path / "model.safetensors.index.json").write_text("{}")
+        (tmp_path / "model.safetensors.index.json").write_text("{}", encoding="utf-8")
 
         with pytest.raises(NotImplementedError, match="sharded"):
             _postprocess_safetensors(

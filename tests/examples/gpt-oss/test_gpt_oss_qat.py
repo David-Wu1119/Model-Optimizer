@@ -235,7 +235,7 @@ class GPTOSS:
 
         if not os.path.exists(benchmark_file) or os.path.getsize(benchmark_file) == 0:
             print(f"Creating dataset file '{benchmark_file}'...")
-            with open(benchmark_file, "w") as fp:
+            with open(benchmark_file, "w", encoding="utf-8") as fp:
                 subprocess.run(
                     f"python {script} --stdout --tokenizer={self.model_path} token-norm-dist --input-mean 128 \
                     --output-mean 128 --input-stdev 0 --output-stdev 0 --num-requests 1400",

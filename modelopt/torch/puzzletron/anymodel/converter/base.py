@@ -50,7 +50,7 @@ class Converter(ABC):
 
         if index_path.exists():
             # Sharded model
-            with open(index_path, "r") as f:
+            with open(index_path, "r", encoding="utf-8") as f:
                 index = json.load(f)
             return index["weight_map"]
         elif single_file_path.exists():

@@ -301,7 +301,7 @@ def _enforce_accuracy_gate(output_path, task, lower_bound):
         raise FileNotFoundError(f"No results*.json under {output_path}")
     # Sort by mtime, not path: a reused output_path nests results under a
     # <model_name>/ dir, and lexical order would pick the wrong run's file.
-    with open(max(files, key=os.path.getmtime)) as f:
+    with open(max(files, key=os.path.getmtime), encoding="utf-8") as f:
         scores = json.load(f)["results"].get(task, {})
     # lm-eval keys metrics by filter, e.g. "acc,none"; take acc (never acc_stderr).
     acc = next((float(v) for k, v in scores.items() if k == "acc" or k.startswith("acc,")), None)

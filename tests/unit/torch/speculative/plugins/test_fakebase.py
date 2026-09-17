@@ -57,7 +57,7 @@ def fake_checkpoint(tmp_path, fake_config):
     shard = tmp_path / "model-00001-of-00001.safetensors"
     safetensors.torch.save_file(tensors, shard)
     index = {"weight_map": dict.fromkeys(tensors, shard.name)}
-    (tmp_path / "model.safetensors.index.json").write_text(json.dumps(index))
+    (tmp_path / "model.safetensors.index.json").write_text(json.dumps(index), encoding="utf-8")
     return tmp_path
 
 

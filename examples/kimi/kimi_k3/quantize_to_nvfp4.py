@@ -663,7 +663,7 @@ def _rewrite_config_json(src: Path, dst_dir: Path, hf_quant_config: dict[str, An
     would make a loader dequantize the NVFP4 experts as MXFP4. It is replaced
     wholesale by the ModelOpt mixed-precision manifest.
     """
-    cfg = json.loads(src.read_text())
+    cfg = json.loads(src.read_text(encoding="utf-8"))
     quant_cfg = convert_hf_quant_config_format(hf_quant_config)
     # ``convert_hf_quant_config_format`` targets the llm-compressor layout and
     # stamps ``quant_method="modelopt"``. Loaders gate their mixed-precision
@@ -679,7 +679,9 @@ def _rewrite_config_json(src: Path, dst_dir: Path, hf_quant_config: dict[str, An
     if isinstance(text_cfg, dict):
         text_cfg.pop("quantization_config", None)
     cfg["quantization_config"] = quant_cfg
-    (dst_dir / "config.json").write_text(json.dumps(cfg, indent=2, sort_keys=True) + "\n")
+    (dst_dir / "config.json").write_text(
+        json.dumps(cfg, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
 
 
 def _write_index_and_manifest(
@@ -724,15 +726,19 @@ def _write_index_and_manifest(
     metadata = dict(src_index.get("metadata", {}))
     metadata["total_size"] = sum(r["tensor_bytes"] for r in results)
     new_index = {"metadata": metadata, "weight_map": weight_map}
-    (output_ckpt / "model.safetensors.index.json").write_text(json.dumps(new_index, indent=2))
+    (output_ckpt / "model.safetensors.index.json").write_text(
+        json.dumps(new_index, indent=2), encoding="utf-8"
+    )
     _log(f"[index] wrote model.safetensors.index.json ({len(weight_map)} keys)")
 
-    (output_ckpt / "hf_quant_config.json").write_text(json.dumps(hf_quant_config, indent=2))
+    (output_ckpt / "hf_quant_config.json").write_text(
+        json.dumps(hf_quant_config, indent=2), encoding="utf-8"
+    )
 
 
 def _write_json_atomic(path: Path, value: Any) -> None:
     tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(value, indent=2, sort_keys=True))
+    tmp.write_text(json.dumps(value, indent=2, sort_keys=True), encoding="utf-8")
     os.replace(tmp, path)
 
 
@@ -786,7 +792,7 @@ def _rank0_ready(
     """Check that rank 0 published matching rendezvous settings."""
     if not ready_path.exists():
         return False
-    ready = json.loads(ready_path.read_text())
+    ready = json.loads(ready_path.read_text(encoding="utf-8"))
     if ready.get("run_id") != run_id:
         return False
     published_world_size = ready.get("world_size")
@@ -809,7 +815,7 @@ def _rank_report_ready(
     if not report_path.exists():
         return False
     try:
-        report = json.loads(report_path.read_text())
+        report = json.loads(report_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return False
     if report.get("run_id") != run_id:
@@ -958,7 +964,7 @@ def main():
         "model.safetensors.index.json",
     )
     src_config_path = resolve_checkpoint_file(args.source_ckpt, "config.json")
-    src_index = json.loads(src_index_path.read_text())
+    src_index = json.loads(src_index_path.read_text(encoding="utf-8"))
 
     shards = sorted(args.source_ckpt.glob("model-*-of-*.safetensors"))
     assert shards, f"no HF-style shards in {args.source_ckpt}"
@@ -1074,7 +1080,7 @@ def main():
         )
 
     _wait_for(all_ranks_done, f"{args.world_size} rank reports", args.sync_timeout)
-    rank_reports = [json.loads(path.read_text()) for path in rank_paths]
+    rank_reports = [json.loads(path.read_text(encoding="utf-8")) for path in rank_paths]
     for rank, report in enumerate(rank_reports):
         if report.get("run_id") != args.run_id or report.get("rank") != rank:
             raise RuntimeError(f"rank {rank} report changed after rendezvous validation")

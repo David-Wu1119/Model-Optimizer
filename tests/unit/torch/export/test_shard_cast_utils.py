@@ -89,10 +89,10 @@ def test_link_aux_files_preserves_sidecars_and_applies_skips(tmp_path):
     output = tmp_path / "output"
     (source / "assets").mkdir(parents=True)
     (source / ".cache").mkdir()
-    (source / "tokenizer_config.json").write_text("{}")
+    (source / "tokenizer_config.json").write_text("{}", encoding="utf-8")
     (source / "model.safetensors").write_bytes(b"shard")
-    (source / "assets" / "config.txt").write_text("keep")
-    (source / ".cache" / "stale.json").write_text("{}")
+    (source / "assets" / "config.txt").write_text("keep", encoding="utf-8")
+    (source / ".cache" / "stale.json").write_text("{}", encoding="utf-8")
 
     link_aux_files(
         source,
@@ -102,8 +102,8 @@ def test_link_aux_files_preserves_sidecars_and_applies_skips(tmp_path):
         skip_file=lambda path: path.suffix == ".safetensors",
     )
 
-    assert (output / "tokenizer_config.json").read_text() == "{}"
-    assert (output / "assets" / "config.txt").read_text() == "keep"
+    assert (output / "tokenizer_config.json").read_text(encoding="utf-8") == "{}"
+    assert (output / "assets" / "config.txt").read_text(encoding="utf-8") == "keep"
     assert not (output / "model.safetensors").exists()
     assert not (output / ".cache").exists()
 
@@ -115,7 +115,7 @@ def test_link_aux_files_accepts_huggingface_snapshot_blobs(tmp_path):
     blob = repository / "blobs" / "tokenizer-blob"
     snapshot.mkdir(parents=True)
     blob.parent.mkdir()
-    blob.write_text("tokenizer")
+    blob.write_text("tokenizer", encoding="utf-8")
     (snapshot / "tokenizer.json").symlink_to(os.path.relpath(blob, snapshot))
 
     assert resolve_checkpoint_file(snapshot, "tokenizer.json") == blob.resolve()
@@ -123,7 +123,7 @@ def test_link_aux_files_accepts_huggingface_snapshot_blobs(tmp_path):
     output = tmp_path / "output"
     link_aux_files(snapshot, output)
 
-    assert (output / "tokenizer.json").read_text() == "tokenizer"
+    assert (output / "tokenizer.json").read_text(encoding="utf-8") == "tokenizer"
     assert not (output / "tokenizer.json").is_symlink()
 
 
@@ -138,7 +138,7 @@ def test_link_aux_files_rejects_unsafe_sources(tmp_path, source_kind, message):
     unsafe = source / "unsafe"
     if source_kind == "symlink":
         outside = tmp_path / "outside"
-        outside.write_text("secret")
+        outside.write_text("secret", encoding="utf-8")
         unsafe.symlink_to(outside)
     else:
         os.mkfifo(unsafe)
@@ -154,7 +154,7 @@ def test_link_aux_files_rejects_unsafe_sources(tmp_path, source_kind, message):
 def test_resolve_checkpoint_file_rejects_oversized_metadata(tmp_path):
     source = tmp_path / "source"
     source.mkdir()
-    (source / "config.json").write_text("12345")
+    (source / "config.json").write_text("12345", encoding="utf-8")
 
     with pytest.raises(ValueError, match="4-byte size limit"):
         resolve_checkpoint_file(source, "config.json", max_bytes=4)

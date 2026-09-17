@@ -237,7 +237,7 @@ def load_multimodal_components(
         index_file = index_dir / "model.safetensors.index.json"
         if index_file.is_file():
             try:
-                weight_map = json.loads(index_file.read_text())["weight_map"]
+                weight_map = json.loads(index_file.read_text(encoding="utf-8"))["weight_map"]
             except (json.JSONDecodeError, KeyError) as exc:
                 raise ValueError(f"Malformed safetensors index in {repo_id}.") from exc
             wanted = sorted(
@@ -273,7 +273,7 @@ def load_multimodal_components(
 
     elif safetensors_index_file.is_file():
         print(f"Loading multimodal components from sharded model: {hf_checkpoint_path}")
-        with open(safetensors_index_file) as f:
+        with open(safetensors_index_file, encoding="utf-8") as f:
             safetensors_index = json.load(f)
 
         all_shard_files = sorted(

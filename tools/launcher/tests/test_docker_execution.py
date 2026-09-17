@@ -289,7 +289,7 @@ class TestRunJobsDockerPath:
 
         metadata_path = os.path.join("experiments", "cicd", "test_exp_meta", "metadata.json")
         assert os.path.exists(metadata_path)
-        with open(metadata_path) as f:
+        with open(metadata_path, encoding="utf-8") as f:
             meta = json.load(f)
         assert meta["experiment_id"] == "test_exp_meta"
         assert meta["job_name"] == "meta_job"

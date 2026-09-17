@@ -142,7 +142,7 @@ def _load_paul_graham_essays_from_files(data_dir: Path) -> str:
 
     all_essays = []
     for filepath in essay_files:
-        text = filepath.read_text()
+        text = filepath.read_text(encoding="utf-8")
         all_essays.append(text)
 
     combined_text = " ".join(all_essays)
@@ -740,7 +740,7 @@ class RulerDatasetBuilder:
         """Load calibration data from cache if it exists."""
         if cache_path.exists():
             try:
-                with open(cache_path) as f:
+                with open(cache_path, encoding="utf-8") as f:
                     data = json.load(f)
                 print(f"Loaded {len(data)} cached calibration samples from {cache_path}")
                 return data
@@ -752,7 +752,7 @@ class RulerDatasetBuilder:
         """Save calibration data to cache."""
         try:
             cache_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(cache_path, "w") as f:
+            with open(cache_path, "w", encoding="utf-8") as f:
                 json.dump(data, f)
             print(f"Saved calibration samples to cache: {cache_path}")
         except Exception as e:

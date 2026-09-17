@@ -503,8 +503,8 @@ def interpret_trt_plugins_precision_flag(
         if not custom_op_nodes:
             logger.warning(f"No nodes of type {op_type} were found. Skipping.")
             continue
-        num_inps = max([len(node.inputs) for node in custom_op_nodes])
-        num_outs = max([len(node.outputs) for node in custom_op_nodes])
+        num_inps = max(len(node.inputs) for node in custom_op_nodes)
+        num_outs = max(len(node.outputs) for node in custom_op_nodes)
 
         # Now split the remainder of the string to get the I/O precisions
         if trt_plugin_precision.count(":") == 1:

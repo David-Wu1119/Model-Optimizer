@@ -187,7 +187,7 @@ def test_layerwise_calibrate_cpu_offloaded(tmp_path, use_checkpoint):
     if use_checkpoint:
         manifest_path = os.path.join(ckpt_dir, "manifest.json")
         assert os.path.isfile(manifest_path)
-        with open(manifest_path) as f:
+        with open(manifest_path, encoding="utf-8") as f:
             manifest = json.load(f)
         assert manifest["last_completed_layer"] == num_layers - 1
         assert manifest["num_layers"] == num_layers
@@ -233,7 +233,7 @@ def test_sequential_checkpoint_resume_cpu_offloaded(tmp_path):
     # Simulate crash after layer 0 by truncating the manifest and removing later layers
     last_completed_layer = 0
     manifest_path = os.path.join(ckpt_dir, "manifest.json")
-    with open(manifest_path, "w") as f:
+    with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump({"last_completed_layer": last_completed_layer, "num_layers": num_layers}, f)
     for i in range(last_completed_layer + 1, num_layers):
         d = _layer_dir(ckpt_dir, i)
@@ -288,7 +288,7 @@ def test_sequential_checkpoint_resume_multi_offload(tmp_path):
     # Simulate crash after layer 0
     last_completed_layer = 0
     manifest_path = os.path.join(ckpt_dir, "manifest.json")
-    with open(manifest_path, "w") as f:
+    with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump({"last_completed_layer": last_completed_layer, "num_layers": num_layers}, f)
     for i in range(last_completed_layer + 1, num_layers):
         d = _layer_dir(ckpt_dir, i)
@@ -378,7 +378,7 @@ def test_sequential_gptq_checkpoint_resume_cpu_offloaded(tmp_path):
     # Simulate crash after layer 0
     last_completed_layer = 0
     manifest_path = os.path.join(ckpt_dir, "manifest.json")
-    with open(manifest_path, "w") as f:
+    with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump({"last_completed_layer": last_completed_layer, "num_layers": num_layers}, f)
     for i in range(last_completed_layer + 1, num_layers):
         d = _layer_dir(ckpt_dir, i)

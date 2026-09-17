@@ -175,7 +175,7 @@ def dump_trt_layer_info(trt_model: torch.nn.Module, path: Path) -> None:
         print("No TorchTensorRTModule found; nothing to dump (whole graph fell back to PyTorch?).")
         return
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(infos))
+    path.write_text("\n".join(infos), encoding="utf-8")
     print(f"Wrote TRT layer info ({len(infos)} engine(s)) to {path}")
 
 

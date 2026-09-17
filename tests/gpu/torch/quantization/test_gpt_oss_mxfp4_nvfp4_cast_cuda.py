@@ -74,7 +74,8 @@ def _write_lossless_mxfp4_source(model, ckpt_dir: Path) -> None:
     (ckpt_dir / "model.safetensors.index.json").write_text(
         json.dumps(
             {"metadata": {}, "weight_map": dict.fromkeys(state, "model-00001-of-00001.safetensors")}
-        )
+        ),
+        encoding="utf-8",
     )
 
 

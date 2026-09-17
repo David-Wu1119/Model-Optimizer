@@ -107,7 +107,8 @@ def test_torch_onnx_recipe_flag(tmp_path):
         "  algorithm: max\n"
         "  quant_cfg:\n"
         "    - quantizer_name: '*'\n"
-        "      enable: false\n"
+        "      enable: false\n",
+        encoding="utf-8",
     )
 
     cmd_parts = extend_cmd_parts(
@@ -150,7 +151,8 @@ def test_torch_onnx_auto_quantize_recipe(tmp_path):
         "    - $import: fp8\n"
         "    - $import: int8\n"
         "  auto_quantize_method: gradient\n"
-        "  score_size: 1\n"
+        "  score_size: 1\n",
+        encoding="utf-8",
     )
 
     cmd_parts = extend_cmd_parts(

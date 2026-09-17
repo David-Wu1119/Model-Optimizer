@@ -102,7 +102,11 @@ def _disable_tqdm():
 def no_stdout():
     """Silences stdout within the invoked context."""
     # Special disable for tqdm
-    with open(os.devnull, "w") as f, contextlib.redirect_stdout(f), _disable_tqdm():
+    with (
+        open(os.devnull, "w", encoding="utf-8") as f,
+        contextlib.redirect_stdout(f),
+        _disable_tqdm(),
+    ):
         yield
 
 

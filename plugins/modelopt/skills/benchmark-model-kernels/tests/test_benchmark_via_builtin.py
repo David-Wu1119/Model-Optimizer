@@ -395,7 +395,7 @@ def test_case_rows_with_foreign_tags_are_treated_as_failures(monkeypatch, tmp_pa
 
     def fake_run_case(benchmarks_dir, argv, log):
         output = Path(argv[argv.index("--output_path") + 1])
-        output.write_text("case_tag,median_time\nsomeone_else,0.001\n")
+        output.write_text("case_tag,median_time\nsomeone_else,0.001\n", encoding="utf-8")
         return 0, []
 
     monkeypatch.setattr(benchmark, "_run_case", fake_run_case)

@@ -138,7 +138,7 @@ class Benchmark(ABC):
             file = Path(file)
         try:
             file.parent.mkdir(parents=True, exist_ok=True)
-            file.write_text(content)
+            file.write_text(content, encoding="utf-8")
             self.logger.debug(f"Saved logs to: {file}")
         except Exception as e:
             self.logger.warning(f"Failed to save logs to {file}: {e}")

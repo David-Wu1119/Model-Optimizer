@@ -186,7 +186,7 @@ def deduce_experts_for_layer(
 
 def load_original_index(path: str) -> Dict[str, Any]:
     """Load the original model's safetensors index."""
-    with open(path, "r") as f:
+    with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -381,7 +381,7 @@ def copy_config_files(student_path: str, output_path: str):
     if not os.path.exists(src_config):
         raise FileNotFoundError(f"config.json not found at {src_config}")
 
-    with open(src_config, "r") as f:
+    with open(src_config, "r", encoding="utf-8") as f:
         config = json.load(f)  # type: ignore[arg-type]
 
     # Set architecture to DeciGptOssForCausalLM for MXFP4 support
@@ -399,7 +399,7 @@ def copy_config_files(student_path: str, output_path: str):
     }
 
     dst_config = os.path.join(output_path, "config.json")
-    with open(dst_config, "w") as f:
+    with open(dst_config, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=2)  # type: ignore[arg-type]
 
 
@@ -475,7 +475,7 @@ def main():
 
     # Save experts_to_keep.json
     experts_to_keep_output = os.path.join(args.output_path, "experts_to_keep.json")
-    with open(experts_to_keep_output, "w") as f:
+    with open(experts_to_keep_output, "w", encoding="utf-8") as f:
         json.dump(experts_to_keep, f, indent=2)
     print(f"  Saved experts_to_keep mapping to {experts_to_keep_output}")
 
@@ -515,7 +515,7 @@ def main():
     index = {"metadata": {"total_size": total_size}, "weight_map": weight_map}
 
     index_path = os.path.join(args.output_path, "model.safetensors.index.json")
-    with open(index_path, "w") as f:
+    with open(index_path, "w", encoding="utf-8") as f:
         json.dump(index, f, indent=2)
 
     print(f"\nCheckpoint created successfully at: {args.output_path}")

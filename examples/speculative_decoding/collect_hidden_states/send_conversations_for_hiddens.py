@@ -142,7 +142,7 @@ async def main(args: argparse.Namespace) -> None:
 
         # Use /tmp/meta.json to communicate with the local serving engine.
         # See usage guide for more details
-        with temp_meta_file.open("w") as f:
+        with temp_meta_file.open("w", encoding="utf-8") as f:
             json.dump(
                 {
                     "conversation_id": conversation_id,

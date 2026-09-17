@@ -568,7 +568,7 @@ def _read_manifest(checkpoint_dir: str) -> dict | None:
     if not os.path.isfile(path):
         return None
     try:
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             return json.load(f)
     except (json.JSONDecodeError, OSError):
         return None
@@ -585,7 +585,7 @@ def _write_manifest(
     """Atomically write manifest.json. Config keys are persisted so resume can detect drift."""
     path = os.path.join(checkpoint_dir, "manifest.json")
     tmp = path + ".tmp"
-    with open(tmp, "w") as f:
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(
             {
                 "last_completed_layer": last_completed_layer,

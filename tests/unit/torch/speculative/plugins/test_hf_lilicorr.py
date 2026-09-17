@@ -479,7 +479,7 @@ class TestLiLiCorrExporter:
         A checkpoint that declares DFlashDraftModel loads as plain DFlash and silently
         ignores the head, which reads as a small acceptance delta rather than an error.
         """
-        with open(self._export(tmp_path) / "config.json") as f:
+        with open(self._export(tmp_path) / "config.json", encoding="utf-8") as f:
             config = json.load(f)
         assert config["architectures"] == ["LiLiCorrDraftModel"]
 
@@ -502,7 +502,7 @@ class TestLiLiCorrExporter:
         """Geometry is read off the built head, so it cannot drift from the tensors."""
         export_dir = self._export(tmp_path)
         state_dict = load_file(str(export_dir / "model.safetensors"))
-        with open(export_dir / "config.json") as f:
+        with open(export_dir / "config.json", encoding="utf-8") as f:
             dflash_config = json.load(f)["dflash_config"]
         out_head = state_dict["lilicorr.out_head.weight"]
         assert out_head.shape == (

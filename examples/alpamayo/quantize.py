@@ -641,7 +641,9 @@ def main():
         model.config.save_pretrained(args.output_dir)
 
         quant_cfg = get_quant_config(model)
-        with open(os.path.join(args.output_dir, "hf_quant_config.json"), "w") as f:
+        with open(
+            os.path.join(args.output_dir, "hf_quant_config.json"), "w", encoding="utf-8"
+        ) as f:
             json.dump(quant_cfg, f)
 
     print(f"Quantized checkpoint saved to {args.output_dir}")

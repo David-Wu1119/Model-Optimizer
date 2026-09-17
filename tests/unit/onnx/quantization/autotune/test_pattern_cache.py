@@ -121,7 +121,9 @@ class TestPatternCache:
         scheme.latency_ms = 15.0
         ps.schemes.append(scheme)
         cache.add_pattern_schemes(ps)
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        with tempfile.NamedTemporaryFile(
+            encoding="utf-8", mode="w", suffix=".yaml", delete=False
+        ) as f:
             yaml_path = f.name
         try:
             cache.save(yaml_path)

@@ -28,17 +28,15 @@ class Timing(Metric):
 
     def process_step(self, step_outputs, request_id, turn_id):
         self.timing.append(step_outputs["token_times"])
-        self.total_tokens.append(
-            sum([sum([len(j) for j in i]) for i in step_outputs["output_ids"]])
-        )
+        self.total_tokens.append(sum(sum(len(j) for j in i) for i in step_outputs["output_ids"]))
 
     def process_final(self, text_outputs):
         e2e_time = []
         ttft_time = []
         tpot_time = []
         gen_tp_time = []
-        start_time = min([t[0] for t in self.timing])
-        end_time = max([t[-1] for t in self.timing])
+        start_time = min(t[0] for t in self.timing)
+        end_time = max(t[-1] for t in self.timing)
         self.out["Output TPS"] = sum(self.total_tokens) / (end_time - start_time)
         self.out["Output TPS/gpu"] = self.out["Output TPS"] / self.tp_size
         for tokens, times in zip(self.total_tokens, self.timing):

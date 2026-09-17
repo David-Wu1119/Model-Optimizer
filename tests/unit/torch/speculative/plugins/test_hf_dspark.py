@@ -306,7 +306,7 @@ class TestDSparkExporter:
     def test_export_config_has_dspark_fields(self, tmp_path):
         """config.json carries the dflash_config DSpark head fields."""
         export_dir = self._export(tmp_path, head_type="gated")
-        with open(export_dir / "config.json") as f:
+        with open(export_dir / "config.json", encoding="utf-8") as f:
             cfg = json.load(f)
 
         assert cfg["architectures"] == ["DFlashDraftModel"]
@@ -410,7 +410,7 @@ class TestDraftAttentionPattern:
             model = self._make_model(mode)
             export_dir = tmp_path / f"exp_{mode}"
             model.get_exporter().export(export_dir)
-            with open(export_dir / "config.json") as f:
+            with open(export_dir / "config.json", encoding="utf-8") as f:
                 cfg = json.load(f)
             assert cfg["dflash_config"]["causal"] is expected
 
@@ -514,7 +514,7 @@ class TestAttentionSink:
             assert key in sd, f"missing {key}"
             assert sd[key].shape == (heads,)
 
-        with open(export_dir / "config.json") as f:
+        with open(export_dir / "config.json", encoding="utf-8") as f:
             cfg = json.load(f)
         assert cfg["dflash_config"]["attention_sink_bias"] is True
         assert cfg["attention_sink_bias"] is True
@@ -525,7 +525,7 @@ class TestAttentionSink:
         model.get_exporter().export(export_dir)
         sd = load_file(str(export_dir / "model.safetensors"))
         assert not any("attention_sink_bias" in k for k in sd)
-        with open(export_dir / "config.json") as f:
+        with open(export_dir / "config.json", encoding="utf-8") as f:
             cfg = json.load(f)
         assert "attention_sink_bias" not in cfg["dflash_config"]
 
@@ -767,6 +767,6 @@ class TestExplicitTargetLayerIds:
     def test_export_round_trips_explicit_ids(self, tmp_path):
         model = self._make_model(target_layer_ids=[0, 7])
         model.get_exporter().export(tmp_path / "exp")
-        with open(tmp_path / "exp" / "config.json") as f:
+        with open(tmp_path / "exp" / "config.json", encoding="utf-8") as f:
             cfg = json.load(f)
         assert cfg["dflash_config"]["target_layer_ids"] == [0, 7]

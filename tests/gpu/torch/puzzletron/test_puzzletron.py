@@ -236,7 +236,7 @@ def _check_lm_loss(puzzle_dir: Path, hf_model_name: str, tolerance: float = 0.15
     if not solution_0_path.exists():
         errors.append(f"Expected {solution_0_path} to exist for lm_loss check")
         return errors
-    with open(solution_0_path) as f:
+    with open(solution_0_path, encoding="utf-8") as f:
         validation = json.load(f)
 
     actual_lm_loss = validation["lm_loss"]["avg"]

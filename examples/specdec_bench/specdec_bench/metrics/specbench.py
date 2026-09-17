@@ -72,7 +72,9 @@ class SpecBench(AcceptanceRate):
         self._create_visualizations(text_outputs)
 
     def _format_write_output(self, outputs):
-        with open(os.path.join(self.directory, "specbench_responses.jsonl"), "w") as outfile:
+        with open(
+            os.path.join(self.directory, "specbench_responses.jsonl"), "w", encoding="utf-8"
+        ) as outfile:
             for i, messages in enumerate(outputs):
                 out_line = {}
                 out_line["question_id"] = self.requests[i].question_id
@@ -106,7 +108,9 @@ class SpecBench(AcceptanceRate):
         console.print(table)
 
     def _dump_results(self):
-        with open(os.path.join(self.directory, "specbench_results.json"), "w") as outfile:
+        with open(
+            os.path.join(self.directory, "specbench_results.json"), "w", encoding="utf-8"
+        ) as outfile:
             json.dump(self.out, outfile, indent=4)
 
     def _create_visualizations(

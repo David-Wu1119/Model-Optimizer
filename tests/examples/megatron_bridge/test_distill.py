@@ -94,7 +94,7 @@ def test_distill_llm_sft(tmp_path, num_gpus):
     records = [{"input": f"Q: what follows {i}?\nA:", "output": f" {i + 1}"} for i in range(64)]
     for split in ("training", "validation"):
         (dataset_root / f"{split}.jsonl").write_text(
-            "\n".join(json.dumps(r) for r in records) + "\n"
+            "\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8"
         )
 
     distill_output_dir = tmp_path / "distill_output"

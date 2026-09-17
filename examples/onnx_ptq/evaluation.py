@@ -77,7 +77,7 @@ class LocalImageNetDataset(torch.utils.data.Dataset):
             transform: Optional transform to apply to images.
         """
         img_dir = Path(root) / "validation"
-        with open(Path(root) / "val.txt") as f:
+        with open(Path(root) / "val.txt", encoding="utf-8") as f:
             entries = [line.strip().split() for line in f]
         self.samples = [(img_dir / name, int(label)) for name, label in entries]
         self.transform = transform

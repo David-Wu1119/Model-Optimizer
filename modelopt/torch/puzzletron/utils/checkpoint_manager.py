@@ -75,7 +75,7 @@ class ScoringCheckpointManager:
             return None
 
         try:
-            with open(self.progress_file) as f:
+            with open(self.progress_file, encoding="utf-8") as f:
                 checkpoint_data = json.load(f)
 
             # Validate checkpoint
@@ -222,7 +222,7 @@ class ScoringCheckpointManager:
 
             # Write progress atomically
             temp_file = self.progress_file.with_suffix(".tmp")
-            with open(temp_file, "w") as f:
+            with open(temp_file, "w", encoding="utf-8") as f:
                 json.dump(progress_data, f, indent=2)
             temp_file.replace(self.progress_file)
 

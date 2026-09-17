@@ -87,7 +87,7 @@ def test_full_run_creates_checkpoints(monkeypatch, tmp_path):
 
     manifest_path = os.path.join(ckpt_dir, "manifest.json")
     assert os.path.isfile(manifest_path)
-    with open(manifest_path) as f:
+    with open(manifest_path, encoding="utf-8") as f:
         manifest = json.load(f)
     assert manifest["last_completed_layer"] == 2
     assert manifest["num_layers"] == 3
@@ -116,7 +116,7 @@ def test_resume_matches_full_run(monkeypatch, tmp_path):
 
     # Simulate crash after layer 0: truncate manifest
     manifest_path = os.path.join(ckpt_dir, "manifest.json")
-    with open(manifest_path, "w") as f:
+    with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump({"last_completed_layer": 0, "num_layers": 3}, f)
 
     # Resume from a fresh model

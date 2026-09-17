@@ -137,7 +137,7 @@ def test_wan22_export_sparse_checkpoint(tiny_wan22_path, tmp_path):
         assert component_dir.exists(), f"Missing component dir: {component}"
         config_path = component_dir / "config.json"
         assert config_path.exists(), f"Missing config.json for {component}"
-        with open(config_path) as f:
+        with open(config_path, encoding="utf-8") as f:
             config_data = json.load(f)
         # Fixed (uncalibrated) threshold has nothing to export.
         assert "sparse_attention_config" not in config_data, (
@@ -208,7 +208,7 @@ def test_wan22_calibrated_export(tiny_wan22_path, tmp_path):
     for component in ["transformer", "transformer_2"]:
         config_path = export_dir / component / "config.json"
         assert config_path.exists(), f"Missing config.json for {component}"
-        with open(config_path) as f:
+        with open(config_path, encoding="utf-8") as f:
             config_data = json.load(f)
         assert "sparse_attention_config" in config_data, (
             f"No sparse_attention_config in {component}/config.json"

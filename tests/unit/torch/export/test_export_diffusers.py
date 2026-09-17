@@ -42,7 +42,7 @@ from modelopt.torch.export.unified_export_hf import _postprocess_safetensors, ex
 
 
 def _load_config(config_path):
-    with open(config_path) as file:
+    with open(config_path, encoding="utf-8") as file:
         return json.load(file)
 
 
@@ -63,7 +63,9 @@ def _write_sharded_checkpoint(export_dir, shards):
             weight_map[key] = filename
             total_size += tensor.numel() * tensor.element_size()
     index = {"metadata": {"total_size": total_size}, "weight_map": weight_map}
-    with open(export_dir / "diffusion_pytorch_model.safetensors.index.json", "w") as file:
+    with open(
+        export_dir / "diffusion_pytorch_model.safetensors.index.json", "w", encoding="utf-8"
+    ) as file:
         json.dump(index, file)
 
 

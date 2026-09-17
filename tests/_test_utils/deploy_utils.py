@@ -178,7 +178,9 @@ if __name__ == '__main__':
         cmd = [sys.executable, "-c", code]
 
     if backend == "trtllm":
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
+        with tempfile.NamedTemporaryFile(
+            encoding="utf-8", mode="w", suffix=".py", delete=False
+        ) as f:
             f.write(code)
             tmp_path = f.name
         try:

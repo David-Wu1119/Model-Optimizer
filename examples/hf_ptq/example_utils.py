@@ -462,7 +462,7 @@ def _load_tensors_matching(
 
     index_file = model_dir / "model.safetensors.index.json"
     if index_file.exists():
-        with open(index_file) as f:
+        with open(index_file, encoding="utf-8") as f:
             weight_map = json.load(f)["weight_map"]
         per_shard: dict[str, list[str]] = {}
         for key, shard_name in weight_map.items():
@@ -506,7 +506,7 @@ def mtp_layer_prefixes_from_checkpoint(model_path: str) -> list[str]:
     index_file = Path(model_path) / "model.safetensors.index.json"
     if not index_file.exists():
         return []
-    weight_map = json.load(open(index_file))["weight_map"]
+    weight_map = json.load(open(index_file, encoding="utf-8"))["weight_map"]
     mtp_keys = [k for k, v in weight_map.items() if "mtp" in k or "mtp" in v]
     return list(_keys_to_prefixes(mtp_keys))
 
@@ -607,7 +607,7 @@ def _unpack_compressed_linear_weights(model, ckpt_path=None):
     checkpoint_weights = {}
     index_file = _resolve_file("model.safetensors.index.json")
     if index_file:
-        with open(index_file) as f:
+        with open(index_file, encoding="utf-8") as f:
             index = json.load(f)
         st_filenames = list(set(index.get("weight_map", {}).values()))
     else:
@@ -1449,7 +1449,7 @@ def _log_experiment_json(
     if not args.checkpoint_exported:
         return
     try:
-        (export_path / _EXPERIMENT_JSON).write_text(text)
+        (export_path / _EXPERIMENT_JSON).write_text(text, encoding="utf-8")
     except OSError as e:
         print(f"[mlflow] WARNING: could not write {export_path / _EXPERIMENT_JSON}: {e}")
 

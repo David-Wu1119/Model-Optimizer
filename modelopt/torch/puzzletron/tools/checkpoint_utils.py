@@ -182,7 +182,9 @@ def copy_tokenizer(
     """
     source_tokenizer_name_path = Path(source_dir_or_tokenizer_name) / "tokenizer_name.txt"
     if source_tokenizer_name_path.exists():
-        source_dir_or_tokenizer_name = source_tokenizer_name_path.read_text().strip()
+        source_dir_or_tokenizer_name = source_tokenizer_name_path.read_text(
+            encoding="utf-8"
+        ).strip()
 
     tokenizer = None
     try:
@@ -204,4 +206,4 @@ def copy_tokenizer(
         target_tokenizer_name_path = target_dir / "tokenizer_name.txt"
         is_given_tokenizer_name_as_argument = not Path(source_dir_or_tokenizer_name).exists()
         if is_given_tokenizer_name_as_argument:
-            target_tokenizer_name_path.write_text(source_dir_or_tokenizer_name)
+            target_tokenizer_name_path.write_text(source_dir_or_tokenizer_name, encoding="utf-8")

@@ -71,7 +71,7 @@ def convert_and_save(model, tokenizer, output_path: str):
     config_path = os.path.join(output_path, "config.json")
     config_data = {}
 
-    with open(config_path) as file:
+    with open(config_path, encoding="utf-8") as file:
         config_data = json.load(file)
 
     config_data["quantization_config"] = {
@@ -86,7 +86,7 @@ def convert_and_save(model, tokenizer, output_path: str):
 
     config_data.pop("torch_dtype", None)
 
-    with open(config_path, "w") as file:
+    with open(config_path, "w", encoding="utf-8") as file:
         json.dump(config_data, file, indent=4)
 
     # Save tokenizer

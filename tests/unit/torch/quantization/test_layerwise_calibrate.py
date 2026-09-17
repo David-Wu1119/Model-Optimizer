@@ -1239,7 +1239,8 @@ def test_layerwise_checkpoint_resume_matches_one_shot_amax(
                 "save_every": save_every,
                 "calib_mutates_weights": calib_mutates_weights,
             }
-        )
+        ),
+        encoding="utf-8",
     )
 
     torch.manual_seed(0)
@@ -1290,7 +1291,7 @@ def test_layerwise_save_every_mid_window_crash_recovers_at_prev_boundary(monkeyp
     with pytest.raises(RuntimeError, match="simulated crash"):
         mtq.quantize(model, cfg, forward_loop=lambda m: [m(b) for b in calib_data])
 
-    manifest = json.loads((tmp_path / "manifest.json").read_text())
+    manifest = json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["last_completed_layer"] == 1, f"manifest leaked mid-window state: {manifest}"
 
 
@@ -1325,7 +1326,8 @@ def test_layerwise_checkpoint_mismatch_save_every_raises(monkeypatch, tmp_path):
                 "save_every": 2,
                 "calib_mutates_weights": True,
             }
-        )
+        ),
+        encoding="utf-8",
     )
     cfg_mismatched = _int8_cfg_with_algorithm(
         {

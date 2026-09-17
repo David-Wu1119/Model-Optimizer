@@ -35,11 +35,11 @@ from modelopt.torch.export.plugins import hf_checkpoint_utils
 def test_copy_non_safetensor_files_from_ckpt_supports_additional_exclusions(tmp_path):
     src_dir = tmp_path / "src"
     src_dir.mkdir()
-    (src_dir / "model.safetensors").write_text("weights")
-    (src_dir / "model.safetensors.index.json").write_text('{"weight_map": {}}')
-    (src_dir / "pytorch_model.bin").write_text("weights")
-    (src_dir / "stats.npy").write_text("stats")
-    (src_dir / "reasoning_parser.py").write_text("parser")
+    (src_dir / "model.safetensors").write_text("weights", encoding="utf-8")
+    (src_dir / "model.safetensors.index.json").write_text('{"weight_map": {}}', encoding="utf-8")
+    (src_dir / "pytorch_model.bin").write_text("weights", encoding="utf-8")
+    (src_dir / "stats.npy").write_text("stats", encoding="utf-8")
+    (src_dir / "reasoning_parser.py").write_text("parser", encoding="utf-8")
 
     default_dst = tmp_path / "default"
     copy_non_safetensor_files_from_ckpt(src_dir, default_dst)
@@ -62,8 +62,8 @@ def test_copy_non_safetensor_files_from_ckpt_supports_additional_exclusions(tmp_
 def test_copy_non_safetensor_files_from_ckpt_continues_after_copy_failure(tmp_path, monkeypatch):
     src_dir = tmp_path / "src"
     src_dir.mkdir()
-    (src_dir / "bad.py").write_text("bad")
-    (src_dir / "good.py").write_text("good")
+    (src_dir / "bad.py").write_text("bad", encoding="utf-8")
+    (src_dir / "good.py").write_text("good", encoding="utf-8")
 
     original_copy2 = hf_checkpoint_utils.shutil.copy2
 
@@ -83,19 +83,21 @@ def test_copy_hf_ckpt_remote_code_local_dir(tmp_path):
     """copy_hf_ckpt_remote_code copies top-level .py files from a local directory."""
     src_dir = tmp_path / "src"
     src_dir.mkdir()
-    (src_dir / "modeling_custom.py").write_text("# custom model")
-    (src_dir / "configuration_custom.py").write_text("# custom config")
-    (src_dir / "not_python.txt").write_text("not python")
+    (src_dir / "modeling_custom.py").write_text("# custom model", encoding="utf-8")
+    (src_dir / "configuration_custom.py").write_text("# custom config", encoding="utf-8")
+    (src_dir / "not_python.txt").write_text("not python", encoding="utf-8")
     (src_dir / "subdir").mkdir()
-    (src_dir / "subdir" / "nested.py").write_text("# nested — should not be copied")
+    (src_dir / "subdir" / "nested.py").write_text(
+        "# nested — should not be copied", encoding="utf-8"
+    )
 
     dst_dir = tmp_path / "dst"
     dst_dir.mkdir()
 
     copy_hf_ckpt_remote_code(src_dir, dst_dir)
 
-    assert (dst_dir / "modeling_custom.py").read_text() == "# custom model"
-    assert (dst_dir / "configuration_custom.py").read_text() == "# custom config"
+    assert (dst_dir / "modeling_custom.py").read_text(encoding="utf-8") == "# custom model"
+    assert (dst_dir / "configuration_custom.py").read_text(encoding="utf-8") == "# custom config"
     assert not (dst_dir / "not_python.txt").exists(), "non-.py files should not be copied"
     assert not (dst_dir / "nested.py").exists(), "nested .py files should not be copied"
 
@@ -104,7 +106,7 @@ def test_copy_hf_ckpt_remote_code_local_dir_no_py_files(tmp_path):
     """copy_hf_ckpt_remote_code is a no-op when the local directory has no .py files."""
     src_dir = tmp_path / "src"
     src_dir.mkdir()
-    (src_dir / "config.json").write_text("{}")
+    (src_dir / "config.json").write_text("{}", encoding="utf-8")
 
     dst_dir = tmp_path / "dst"
     dst_dir.mkdir()
@@ -119,8 +121,8 @@ def test_copy_hf_ckpt_remote_code_hub_id(tmp_path, monkeypatch):
     dst_dir = tmp_path / "dst"
     snapshot_dir = tmp_path / "snapshot"
     snapshot_dir.mkdir()
-    (snapshot_dir / "modeling_custom.py").write_text("# custom model")
-    (snapshot_dir / "not_python.txt").write_text("not python")
+    (snapshot_dir / "modeling_custom.py").write_text("# custom model", encoding="utf-8")
+    (snapshot_dir / "not_python.txt").write_text("not python", encoding="utf-8")
 
     monkeypatch.delenv("HF_HUB_OFFLINE", raising=False)
     with patch(
@@ -134,7 +136,7 @@ def test_copy_hf_ckpt_remote_code_hub_id(tmp_path, monkeypatch):
         allow_patterns=["*.py"],
         local_files_only=False,
     )
-    assert (dst_dir / "modeling_custom.py").read_text() == "# custom model"
+    assert (dst_dir / "modeling_custom.py").read_text(encoding="utf-8") == "# custom model"
     assert not (dst_dir / "not_python.txt").exists(), "non-.py files should not be copied"
 
 
@@ -143,7 +145,7 @@ def test_copy_hf_ckpt_remote_code_hub_id_offline_uses_cache(tmp_path, monkeypatc
     dst_dir = tmp_path / "dst"
     snapshot_dir = tmp_path / "snapshot"
     snapshot_dir.mkdir()
-    (snapshot_dir / "nemotron_reasoning_parser.py").write_text("# parser")
+    (snapshot_dir / "nemotron_reasoning_parser.py").write_text("# parser", encoding="utf-8")
 
     monkeypatch.setenv("HF_HUB_OFFLINE", "1")
     with patch(
@@ -157,7 +159,7 @@ def test_copy_hf_ckpt_remote_code_hub_id_offline_uses_cache(tmp_path, monkeypatc
         allow_patterns=["*.py"],
         local_files_only=True,
     )
-    assert (dst_dir / "nemotron_reasoning_parser.py").read_text() == "# parser"
+    assert (dst_dir / "nemotron_reasoning_parser.py").read_text(encoding="utf-8") == "# parser"
 
 
 def test_copy_hf_ckpt_remote_code_hub_id_offline_missing_cache_raises(tmp_path, monkeypatch):

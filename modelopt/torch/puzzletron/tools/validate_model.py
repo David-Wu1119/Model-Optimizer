@@ -198,7 +198,9 @@ def validate_model(
         results_str = textwrap.dedent(results_str)
         aprint(results_str)
         if args.write_results:
-            Path(f"{args.model_name_or_path}/validate_model_results.txt").write_text(results_str)
+            Path(f"{args.model_name_or_path}/validate_model_results.txt").write_text(
+                results_str, encoding="utf-8"
+            )
 
     if activation_hooks is not None:
         hook_class.dump_activations_logs(activation_hooks, args.activations_log_dir, args)

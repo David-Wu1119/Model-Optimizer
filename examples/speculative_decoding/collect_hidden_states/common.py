@@ -106,7 +106,7 @@ def load_chat_template(path: Path | None) -> str | None:
     """Read a Jinja chat template from ``path``, or return ``None`` if not provided."""
     if path is None:
         return None
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         return f.read()
 
 

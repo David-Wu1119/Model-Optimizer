@@ -309,7 +309,7 @@ def main(argv=None):
         return 2
 
     try:
-        with open(args.summary) as f:
+        with open(args.summary, encoding="utf-8") as f:
             summary = json.load(f)
     except (OSError, json.JSONDecodeError) as e:
         print(

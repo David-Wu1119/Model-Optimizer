@@ -405,7 +405,7 @@ def main():
         out_dir = os.path.dirname(args.output)
         if out_dir:
             os.makedirs(out_dir, exist_ok=True)
-        with open(args.output, "w") as f:
+        with open(args.output, "w", encoding="utf-8") as f:
             json.dump(result, f, indent=2)
         log.info(f"Results saved to {args.output}")
 

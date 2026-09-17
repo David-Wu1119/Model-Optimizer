@@ -65,7 +65,7 @@ def _log(message: str) -> None:
 
 
 def _load_index(checkpoint: Path) -> dict[str, str]:
-    index = json.loads((checkpoint / "model.safetensors.index.json").read_text())
+    index = json.loads((checkpoint / "model.safetensors.index.json").read_text(encoding="utf-8"))
     return index["weight_map"]
 
 
@@ -332,7 +332,7 @@ def main() -> None:
     _copy_mxfp8_base(mxfp8, destination, mxfp8_map, new_index)
     new_index = _rename_checkpoint_shards(destination, new_index)
 
-    mxfp8_config = json.loads((mxfp8 / "config.json").read_text())
+    mxfp8_config = json.loads((mxfp8 / "config.json").read_text(encoding="utf-8"))
     vendor_quantization = mxfp8_config.get("quantization_config", {})
     mixed_quant_config = _build_quant_config(
         mxfp8_map,
@@ -341,10 +341,13 @@ def main() -> None:
     )
     mxfp8_config["quantization_config"] = mixed_quant_config["quantization"]
 
-    (destination / "config.json").write_text(json.dumps(mxfp8_config, indent=2))
-    (destination / "hf_quant_config.json").write_text(json.dumps(mixed_quant_config, indent=2))
+    (destination / "config.json").write_text(json.dumps(mxfp8_config, indent=2), encoding="utf-8")
+    (destination / "hf_quant_config.json").write_text(
+        json.dumps(mixed_quant_config, indent=2), encoding="utf-8"
+    )
     (destination / "model.safetensors.index.json").write_text(
-        json.dumps({"metadata": {"format": "pt"}, "weight_map": new_index}, indent=2)
+        json.dumps({"metadata": {"format": "pt"}, "weight_map": new_index}, indent=2),
+        encoding="utf-8",
     )
     _copy_ancillary_files(mxfp8, destination)
     _log(f"[mixed] done -> {destination}")

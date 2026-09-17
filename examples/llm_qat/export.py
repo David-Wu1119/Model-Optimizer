@@ -86,7 +86,7 @@ def main(args):
             model, is_modelopt_qlora=is_qlora
         )
 
-        with open(f"{base_model_dir}/hf_quant_config.json", "w") as file:
+        with open(f"{base_model_dir}/hf_quant_config.json", "w", encoding="utf-8") as file:
             json.dump(hf_quant_config, file, indent=4)
 
         hf_quant_config = convert_hf_quant_config_format(hf_quant_config)
@@ -104,7 +104,7 @@ def main(args):
 
         config_data["quantization_config"] = hf_quant_config
 
-        with open(config_path, "w") as file:
+        with open(config_path, "w", encoding="utf-8") as file:
             json.dump(config_data, file, indent=4)
 
         # Save tokenizer

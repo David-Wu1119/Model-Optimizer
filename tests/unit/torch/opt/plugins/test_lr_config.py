@@ -58,7 +58,7 @@ def dummy_dataset():
 
 def _write_lr_config(tmp_path, cfg: dict) -> str:
     path = tmp_path / "lr_config.yaml"
-    path.write_text(yaml.dump(cfg))
+    path.write_text(yaml.dump(cfg), encoding="utf-8")
     return str(path)
 
 
@@ -114,13 +114,13 @@ class TestLoadLrConfig:
 
     def test_load_invalid_not_dict(self, tmp_path):
         path = tmp_path / "lr_config.yaml"
-        path.write_text("- item1\n- item2\n")
+        path.write_text("- item1\n- item2\n", encoding="utf-8")
         with pytest.raises(ValueError, match="YAML mapping"):
             ModelOptHFTrainer.load_lr_config(str(path))
 
     def test_load_invalid_entry(self, tmp_path):
         path = tmp_path / "lr_config.yaml"
-        path.write_text('"*lm_head*": 0.001\n')
+        path.write_text('"*lm_head*": 0.001\n', encoding="utf-8")
         with pytest.raises(ValueError, match="str -> dict"):
             ModelOptHFTrainer.load_lr_config(str(path))
 

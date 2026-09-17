@@ -227,7 +227,7 @@ class TestDominoExporter:
     def test_export_config_has_domino_fields(self, tmp_path):
         """config.json carries the dflash_config domino fields + top-level emb_dim."""
         export_dir = self._export(tmp_path)
-        with open(export_dir / "config.json") as f:
+        with open(export_dir / "config.json", encoding="utf-8") as f:
             cfg = json.load(f)
 
         assert cfg["architectures"] == ["DFlashDraftModel"]

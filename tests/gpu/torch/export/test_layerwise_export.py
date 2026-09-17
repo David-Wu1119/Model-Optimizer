@@ -90,7 +90,7 @@ def _layerwise_cfg(export_dir, checkpoint_dir, base=None):
 def _load_checkpoint(export_dir):
     index = export_dir / "model.safetensors.index.json"
     shards = (
-        set(json.loads(index.read_text())["weight_map"].values())
+        set(json.loads(index.read_text(encoding="utf-8"))["weight_map"].values())
         if index.exists()
         else ["model.safetensors"]
     )
@@ -128,8 +128,8 @@ def _assert_same_quant_config(baseline_dir, export_dir):
         )
         if not want.is_file():
             continue
-        expected = json.loads(want.read_text()).get(key)
-        actual = json.loads(got.read_text()).get(key)
+        expected = json.loads(want.read_text(encoding="utf-8")).get(key)
+        actual = json.loads(got.read_text(encoding="utf-8")).get(key)
         assert actual == expected, (
             f"{name}[{key}] differs:\n  baseline={expected}\n  fused={actual}"
         )
@@ -397,7 +397,9 @@ def test_orphaned_tensors_reach_the_tail_shard(tmp_path):
     for key, value in orphans.items():
         assert key in exported, f"{key} missing from the exported checkpoint"
         assert torch.equal(exported[key].cpu(), value)
-    weight_map = json.loads((export_dir / "model.safetensors.index.json").read_text())["weight_map"]
+    weight_map = json.loads(
+        (export_dir / "model.safetensors.index.json").read_text(encoding="utf-8")
+    )["weight_map"]
     assert set(orphans) <= set(weight_map), "orphans written but left out of the index"
 
 
@@ -456,7 +458,9 @@ def test_index_resolves_every_key_to_the_shard_holding_it(tmp_path):
     export_dir = tmp_path / "fused"
     _layerwise_quantize(_build_model(), _layerwise_cfg(export_dir, tmp_path / "ckpt"))
 
-    weight_map = json.loads((export_dir / "model.safetensors.index.json").read_text())["weight_map"]
+    weight_map = json.loads(
+        (export_dir / "model.safetensors.index.json").read_text(encoding="utf-8")
+    )["weight_map"]
     on_disk = {}
     for shard in sorted(set(weight_map.values())):
         assert (export_dir / shard).is_file(), f"index names a missing shard {shard}"
@@ -506,9 +510,9 @@ def test_resume_without_matching_shards_fails_fast(tmp_path):
     _layerwise_quantize(_build_model(), _layerwise_cfg(tmp_path / "fused", checkpoint_dir))
 
     manifest_path = checkpoint_dir / "manifest.json"
-    manifest = json.loads(manifest_path.read_text())
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["last_completed_layer"] = 1
-    manifest_path.write_text(json.dumps(manifest))
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
     with pytest.raises(RuntimeError, match="shards are missing"):
         _layerwise_quantize(
@@ -555,9 +559,9 @@ def test_shards_without_resume_record_refuse(tmp_path, damage):
     if damage == "deleted":
         manifest.unlink()
     else:
-        record = json.loads(manifest.read_text())
+        record = json.loads(manifest.read_text(encoding="utf-8"))
         record.pop("last_completed_layer")
-        manifest.write_text(json.dumps(record))
+        manifest.write_text(json.dumps(record), encoding="utf-8")
 
     with pytest.raises(RuntimeError, match="no usable resume record"):
         _layerwise_quantize(_build_model(), _layerwise_cfg(export_dir, checkpoint_dir))

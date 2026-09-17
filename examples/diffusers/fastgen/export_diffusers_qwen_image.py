@@ -117,9 +117,9 @@ def export_diffusers(
     # 1. model_index.json — copy verbatim (the class registry is the same
     #    whether the transformer weights are live or DMD-distilled).
     dst_index = os.path.join(output_dir, "model_index.json")
-    with open(base_index) as f:
+    with open(base_index, encoding="utf-8") as f:
         index = json.load(f)
-    with open(dst_index, "w") as f:
+    with open(dst_index, "w", encoding="utf-8") as f:
         json.dump(index, f, indent=2)
     logger.info("[Diffusers-Export] Wrote %s", dst_index)
 

@@ -87,7 +87,7 @@ def get_node_filter_list(node_filter_list_path: str) -> list | None:
     if node_filter_list_path:
         filter_file = validate_file_path(node_filter_list_path, "Node filter list file")
         if filter_file:
-            with open(filter_file) as f:
+            with open(filter_file, encoding="utf-8") as f:
                 node_filter_list = [
                     line.strip() for line in f if line.strip() and not line.strip().startswith("#")
                 ]

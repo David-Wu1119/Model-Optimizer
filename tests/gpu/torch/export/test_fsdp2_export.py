@@ -428,7 +428,9 @@ def _streaming_export_matches_reference_test(rank, size, export_dir, quant_confi
 
         export_dir = Path(export_dir)
         assert not list(export_dir.glob("__shard_part*")), "part files left behind after the merge"
-        index = json.loads((export_dir / "model.safetensors.index.json").read_text())
+        index = json.loads(
+            (export_dir / "model.safetensors.index.json").read_text(encoding="utf-8")
+        )
         weight_map = index["weight_map"]
         assert len(set(weight_map.values())) >= 2, (
             "every key landed in one shard file, so the ranks did not each write their own share"

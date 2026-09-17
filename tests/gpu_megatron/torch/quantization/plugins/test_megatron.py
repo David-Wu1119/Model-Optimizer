@@ -1518,7 +1518,7 @@ def _auto_quantize_mamba_hybrid_cost_helper(rank, size, expert_model_parallel_si
         assert summed_cost == pytest.approx(local_total, rel=1e-6)
 
     if rank == 0:
-        Path(result_path).write_text(repr(summed_cost))
+        Path(result_path).write_text(repr(summed_cost), encoding="utf-8")
 
 
 @pytest.mark.skipif(not HAS_MAMBA, reason="Mamba not installed")
@@ -1543,8 +1543,8 @@ def test_auto_quantize_mamba_hybrid_ep_cost(dist_workers, tmp_path):
             result_path=str(ep2_path),
         )
     )
-    cost_ep1 = float(ep1_path.read_text())
-    cost_ep2 = float(ep2_path.read_text())
+    cost_ep1 = float(ep1_path.read_text(encoding="utf-8"))
+    cost_ep2 = float(ep2_path.read_text(encoding="utf-8"))
     assert cost_ep1 == pytest.approx(cost_ep2, rel=1e-6)
 
 

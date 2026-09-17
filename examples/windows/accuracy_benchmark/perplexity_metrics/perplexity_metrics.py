@@ -336,7 +336,7 @@ def perplexity_eval(model_dir, input_len=1024, chunk_size=None):
     # Load model configuration from JSON file (optional)
     model_cfg_json = None
     try:
-        with open(f"{model_dir}/genai_config.json") as file:
+        with open(f"{model_dir}/genai_config.json", encoding="utf-8") as file:
             model_cfg_json = json.load(file)
         if DEBUG:
             print(

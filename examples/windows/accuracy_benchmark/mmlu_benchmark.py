@@ -409,7 +409,7 @@ def evaluate_ort_native(args, subject, sess, tokenizer, dev_df, test_df, config)
 
 def save_results_to_json(results, output_file="results.json"):
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
-    with open(output_file, "w") as f:
+    with open(output_file, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=4)
 
 
@@ -487,7 +487,7 @@ def main(
         # Create the InferenceSession with the selected provider
         sess = rt.InferenceSession(os.path.join(onnx_model_path, "model.onnx"), providers=providers)
 
-        with open(os.path.join(onnx_model_path, "config.json")) as config_file:
+        with open(os.path.join(onnx_model_path, "config.json"), encoding="utf-8") as config_file:
             config = json.load(config_file)
 
         tokenizer = AutoTokenizer.from_pretrained(onnx_model_path, local_files_only=True)

@@ -315,7 +315,7 @@ def _write_builtin(path: Path, rows: list[dict[str, str]]) -> None:
     for row in rows:
         for key in row:
             fieldnames.setdefault(key, None)
-    with path.open("w", newline="") as stream:
+    with path.open("w", encoding="utf-8", newline="") as stream:
         writer = csv.DictWriter(
             stream, fieldnames=list(fieldnames), restval="", lineterminator="\n"
         )
@@ -645,7 +645,7 @@ def _write_results(
     columns = ["module_name", "M", "N", "K", "backend", "with_quant", "runtime"]
     gemm = [case for case in cases if case.section == "gemm" and case.result is not None]
     moe = [case for case in cases if case.section == "moe" and case.result is not None]
-    with path.open("w", newline="") as stream:
+    with path.open("w", encoding="utf-8", newline="") as stream:
         writer = csv.writer(stream, lineterminator="\n")
         if header:
             writer.writerow([header])
@@ -752,7 +752,7 @@ def _execute_cases(
     """
     case_csv = workdir / "case_result.csv"
     rows: list[dict[str, str]] = []
-    with driver_log.open("w") as log:
+    with driver_log.open("w", encoding="utf-8") as log:
         print(header, flush=True)
         log.write(header + "\n")
         for case in cases:

@@ -43,9 +43,9 @@ def test_save_safetensors_by_layer_index_uses_single_snapshot(monkeypatch, tmp_p
     )
 
     shard_name = "model-00001-of-00001.safetensors"
-    with open(tmp_path / "model-00001-of-00001.json") as f:
+    with open(tmp_path / "model-00001-of-00001.json", encoding="utf-8") as f:
         shard_meta = json.load(f)
-    with open(tmp_path / "model.safetensors.index.json") as f:
+    with open(tmp_path / "model.safetensors.index.json", encoding="utf-8") as f:
         index_meta = json.load(f)
 
     json_keys = set(shard_meta["weight_map"].keys())

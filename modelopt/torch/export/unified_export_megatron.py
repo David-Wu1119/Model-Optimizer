@@ -402,7 +402,7 @@ class GPTModelExporter:
                 },
                 "quantization": quantization_config,
             }
-            with open(save_directory + "/hf_quant_config.json", "w") as f:
+            with open(save_directory + "/hf_quant_config.json", "w", encoding="utf-8") as f:
                 json.dump(self._hf_quant_config, f, indent=4)
 
         # Add multimodal components to state_dict. Since only support decoder model quantization,
@@ -427,12 +427,12 @@ class GPTModelExporter:
         torch.distributed.barrier()
         config_json_file = save_directory + "/config.json"
         if is_writer_rank and self._hf_quant_config and os.path.exists(config_json_file):
-            with open(config_json_file) as f:
+            with open(config_json_file, encoding="utf-8") as f:
                 config_dict = json.load(f)
             config_dict["quantization_config"] = convert_hf_quant_config_format(
                 self._hf_quant_config
             )
-            with open(config_json_file, "w") as f:
+            with open(config_json_file, "w", encoding="utf-8") as f:
                 json.dump(config_dict, f, indent=4)
         torch.distributed.barrier()
 
@@ -491,7 +491,7 @@ class GPTModelExporter:
             with safe_open(str(single), framework="pt", device="cpu") as f:
                 exported = set(f.keys())
         else:
-            with open(index_file) as f:
+            with open(index_file, encoding="utf-8") as f:
                 exported = set(json.load(f)["weight_map"])
         if not source:
             warn_rank_0(f"Export self-check skipped: no tensor index found in {source_dir}.")
@@ -838,7 +838,7 @@ class GPTModelExporter:
                     return mtp_state_dict
 
         if safetensors_index_file is not None and safetensors_index_file.exists():
-            with open(safetensors_index_file) as f:
+            with open(safetensors_index_file, encoding="utf-8") as f:
                 safetensors_index = json.load(f)
             model_dir = safetensors_index_file.parent
             for key in safetensors_index["weight_map"]:
@@ -2023,7 +2023,7 @@ def _read_checkpoint_keys(checkpoint_dir) -> set[str]:
     directory = Path(checkpoint_dir)
     index_file = directory / "model.safetensors.index.json"
     if index_file.exists():
-        with open(index_file) as f:
+        with open(index_file, encoding="utf-8") as f:
             return set(json.load(f)["weight_map"])
     single_file = directory / "model.safetensors"
     if single_file.exists():

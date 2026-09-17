@@ -247,7 +247,7 @@ def load_deepseek_v4(
         torch.cuda.set_device(local_rank)
     torch.set_default_dtype(torch.bfloat16)
 
-    with open(model_config) as f:
+    with open(model_config, encoding="utf-8") as f:
         margs = deekseep_v4_model.ModelArgs(**json.load(f))
         margs.max_batch_size = max(batch_size, margs.max_batch_size)
     with torch.device("cuda"):
@@ -534,7 +534,9 @@ def save_amax_and_quant_config(model, output_path: str):
             assert m is not None
             merged.update(m["quantized_layers"])
         manifest["quantized_layers"] = sorted(merged)
-        with open(os.path.join(output_path, "quantized_layers_manifest.json"), "w") as f:
+        with open(
+            os.path.join(output_path, "quantized_layers_manifest.json"), "w", encoding="utf-8"
+        ) as f:
             json.dump(manifest, f, indent=2)
 
 

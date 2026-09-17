@@ -46,13 +46,13 @@ def run_vllm_latency_benchmark(model_path: Path, runtime_config: RuntimeConfig) 
     output_json_path = model_path / "vllm_latency_benchmark.json"
     max_model_len = runtime_config.prefill_seq_len + runtime_config.generation_seq_len
 
-    with open(model_path / "config.json") as f:
+    with open(model_path / "config.json", encoding="utf-8") as f:
         config = json.load(f)
 
     config = SimpleNamespace(**config)
     if convert_block_configs_to_per_layer_config(config):
         mprint("Converted block configs to per-layer config")
-        with open(model_path / "config.json", "w") as f:
+        with open(model_path / "config.json", "w", encoding="utf-8") as f:
             json.dump(vars(config), f, indent=2)
     else:
         mprint("No block configs to convert")
@@ -109,7 +109,7 @@ def run_vllm_latency_benchmark(model_path: Path, runtime_config: RuntimeConfig) 
         raise RuntimeError(exc.stderr or exc.stdout or "vLLM latency benchmark failed") from exc
 
     if output_json_path.exists():
-        with open(output_json_path) as f:
+        with open(output_json_path, encoding="utf-8") as f:
             vllm_results = json.load(f)
         if "avg_latency" in vllm_results:
             return vllm_results["avg_latency"] * 1000  # seconds -> milliseconds

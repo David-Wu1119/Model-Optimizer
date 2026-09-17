@@ -47,7 +47,7 @@ def main():
 
     print("Calibrating vocab...")
     tokenizer = AutoTokenizer.from_pretrained(args.model)
-    with open(args.data) as f:
+    with open(args.data, encoding="utf-8") as f:
         lines = islice(f, args.calibrate_size) if args.calibrate_size else f
         conversations = [
             (d := json.loads(line)).get("messages") or d["conversations"] for line in lines

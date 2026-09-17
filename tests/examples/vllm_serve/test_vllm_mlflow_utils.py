@@ -99,7 +99,10 @@ class FakeMlflow:
         self.texts[artifact_file] = text
 
     def log_artifact(self, local_path, artifact_path=None):
-        self.artifacts[Path(local_path).name] = (artifact_path, Path(local_path).read_text())
+        self.artifacts[Path(local_path).name] = (
+            artifact_path,
+            Path(local_path).read_text(encoding="utf-8"),
+        )
 
     def log_metrics(self, metrics):
         self.metrics.update(metrics)
@@ -462,7 +465,9 @@ def test_quant_summary_is_uploaded_from_the_staging_directory(
 
     # Stand in for mtq.print_quant_summary(model, output_dir=...), which is what writes it.
     def write_summary(model, output_dir):
-        Path(output_dir, ".quant_summary.txt").write_text("2 TensorQuantizers found in model\n")
+        Path(output_dir, ".quant_summary.txt").write_text(
+            "2 TensorQuantizers found in model\n", encoding="utf-8"
+        )
 
     monkeypatch.setattr(
         importlib.import_module("modelopt.torch.quantization"),

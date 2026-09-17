@@ -570,13 +570,13 @@ def export_tensorrt_llm_checkpoint(
                     tensorrt_llm_config["quantization"] = {
                         k: quant_config[k] for k in ("quant_algo", "kv_cache_quant_algo")
                     }
-                    with open(export_dir / "quant_cfg.json", "w") as f:
+                    with open(export_dir / "quant_cfg.json", "w", encoding="utf-8") as f:
                         json.dump(quant_config, f, indent=4)
                 else:
                     # Excluded modules information is only included in non auto_quant case
                     tensorrt_llm_config["quantization"]["exclude_modules"] = list(exclude_modules)
 
-                with open(export_dir / "config.json", "w") as f:
+                with open(export_dir / "config.json", "w", encoding="utf-8") as f:
                     json.dump(tensorrt_llm_config, f, indent=4)
 
             # Hacky implementation for Encoder-Decoder for now

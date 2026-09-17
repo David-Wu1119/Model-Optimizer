@@ -83,7 +83,7 @@ def weight_map_for(ckpt_path: str) -> dict[str, str]:
     index_path = os.path.join(ckpt_path, "model.safetensors.index.json")
     single_file = os.path.join(ckpt_path, "model.safetensors")
     if os.path.exists(index_path):
-        with open(index_path) as f:
+        with open(index_path, encoding="utf-8") as f:
             return json.load(f)["weight_map"]
     if os.path.exists(single_file):
         with safe_open(single_file, framework="pt", device="cpu") as f:

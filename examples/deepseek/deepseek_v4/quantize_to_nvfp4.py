@@ -433,7 +433,7 @@ def _rewrite_config_json(
     sibling ``hf_quant_config.json``.
     """
     dst = dst_dir / "config.json"
-    cfg = json.loads(src.read_text())
+    cfg = json.loads(src.read_text(encoding="utf-8"))
     quant_cfg = cfg.get("quantization_config")
     if not isinstance(quant_cfg, dict):
         quant_cfg = {}
@@ -453,7 +453,7 @@ def _rewrite_config_json(
     quant_cfg.pop("exclude_modules", None)
     quant_cfg["ignore"] = moe_quantization["exclude_modules"]
     cfg["quantization_config"] = quant_cfg
-    dst.write_text(json.dumps(cfg, indent=2, sort_keys=True) + "\n")
+    dst.write_text(json.dumps(cfg, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def _write_index_and_manifest(
@@ -471,11 +471,13 @@ def _write_index_and_manifest(
         for k in added:
             weight_map[k] = shard_name
     new_index = {"metadata": src_index.get("metadata", {}), "weight_map": weight_map}
-    (output_ckpt / "model.safetensors.index.json").write_text(json.dumps(new_index, indent=2))
+    (output_ckpt / "model.safetensors.index.json").write_text(
+        json.dumps(new_index, indent=2), encoding="utf-8"
+    )
     _log(f"[index] wrote model.safetensors.index.json ({len(weight_map)} keys)")
 
     cfg = _build_hf_quant_config(quantized_layer_names)
-    (output_ckpt / "hf_quant_config.json").write_text(json.dumps(cfg, indent=2))
+    (output_ckpt / "hf_quant_config.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
 
 
 def _routed_experts_prefix(expert_proj: str) -> str:
@@ -538,7 +540,7 @@ def main():
         "model.safetensors.index.json",
     )
     src_config_path = resolve_checkpoint_file(args.source_ckpt, "config.json")
-    src_index = json.loads(src_index_path.read_text())
+    src_index = json.loads(src_index_path.read_text(encoding="utf-8"))
 
     amax, input_fallback = _load_merged_amax(args.amax_path, world_size=args.world_size)
 

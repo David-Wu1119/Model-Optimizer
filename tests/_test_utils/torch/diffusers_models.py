@@ -355,8 +355,8 @@ def _build_local_qwen2_tokenizer(out_dir: Path):
     vocab = {token: idx for idx, token in enumerate(_byte_level_unicode_chars())}
     for special in ("<|endoftext|>", "<|im_start|>", "<|im_end|>"):
         vocab.setdefault(special, len(vocab))
-    (out_dir / "vocab.json").write_text(json.dumps(vocab))
-    (out_dir / "merges.txt").write_text("#version: 0.2\n")
+    (out_dir / "vocab.json").write_text(json.dumps(vocab), encoding="utf-8")
+    (out_dir / "merges.txt").write_text("#version: 0.2\n", encoding="utf-8")
 
     special_kwargs = {
         "unk_token": "<|endoftext|>",

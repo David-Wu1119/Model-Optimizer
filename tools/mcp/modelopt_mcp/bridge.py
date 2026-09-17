@@ -186,7 +186,7 @@ def _tail_docker_launch_log(log_path: Path, proc: subprocess.Popen) -> tuple[str
     text = ""
     while True:
         try:
-            text = log_path.read_text(errors="replace")
+            text = log_path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             text = ""
         complete_text = text if text.endswith(("\n", "\r")) else text.rsplit("\n", 1)[0]
@@ -635,7 +635,7 @@ def list_examples_impl() -> dict:
         # the path-derived defaults when present. Don't crash on a
         # malformed YAML.
         try:
-            with open(path) as f:
+            with open(path, encoding="utf-8") as f:
                 doc = yaml.safe_load(f) or {}
             if isinstance(doc, dict):
                 body_model = doc.get("model") or doc.get("base_model") or doc.get("job_name")

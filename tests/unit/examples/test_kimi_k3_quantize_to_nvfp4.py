@@ -112,7 +112,8 @@ def test_rank0_rendezvous_rejects_mismatched_configuration(tmp_path):
     ready_path = tmp_path / "ready.json"
     fingerprint = {"source_ckpt": "/models/Kimi-K3", "shards": ["model-1.safetensors"]}
     ready_path.write_text(
-        json.dumps({"run_id": "run-1", "world_size": 4, "fingerprint": fingerprint})
+        json.dumps({"run_id": "run-1", "world_size": 4, "fingerprint": fingerprint}),
+        encoding="utf-8",
     )
 
     assert not k3_cast._rank0_ready(
@@ -141,7 +142,8 @@ def test_rank_report_rejects_mismatched_fingerprint(tmp_path):
                 "rank": 1,
                 "fingerprint": {"cast_mxfp4_to_nvfp4": False},
             }
-        )
+        ),
+        encoding="utf-8",
     )
 
     with pytest.raises(ValueError, match="rank 1 report conversion fingerprint"):
@@ -195,7 +197,7 @@ def _write_source_checkpoint(tmp_path: Path) -> tuple[Path, str, dict[str, torch
         "metadata": {"total_size": sum(t.numel() * t.element_size() for t in state.values())},
         "weight_map": dict.fromkeys(state, shard_name),
     }
-    (source / "model.safetensors.index.json").write_text(json.dumps(index))
+    (source / "model.safetensors.index.json").write_text(json.dumps(index), encoding="utf-8")
     (source / "config.json").write_text(
         json.dumps(
             {
@@ -207,9 +209,10 @@ def _write_source_checkpoint(tmp_path: Path) -> tuple[Path, str, dict[str, torch
                     }
                 },
             }
-        )
+        ),
+        encoding="utf-8",
     )
-    (source / "tokenizer_config.json").write_text("{}")
+    (source / "tokenizer_config.json").write_text("{}", encoding="utf-8")
     return source, shard_name, state
 
 
@@ -411,7 +414,7 @@ def test_manifest_and_index_replace_source_mxfp4_schema(tmp_path):
     hf_quant_config = k3_cast._build_hf_quant_config(
         report["banks"], report["attn_modules"], attn_fp8=True
     )
-    source_index = json.loads((source / "model.safetensors.index.json").read_text())
+    source_index = json.loads((source / "model.safetensors.index.json").read_text(encoding="utf-8"))
     k3_cast._write_index_and_manifest(
         output,
         source_index,
@@ -421,7 +424,7 @@ def test_manifest_and_index_replace_source_mxfp4_schema(tmp_path):
     )
     k3_cast._rewrite_config_json(source / "config.json", output, hf_quant_config)
 
-    index = json.loads((output / "model.safetensors.index.json").read_text())
+    index = json.loads((output / "model.safetensors.index.json").read_text(encoding="utf-8"))
     weight_map = index["weight_map"]
     expert = "language_model.model.layers.1.block_sparse_moe.experts.0.w1"
     assert expert + ".weight_packed" not in weight_map
@@ -431,7 +434,7 @@ def test_manifest_and_index_replace_source_mxfp4_schema(tmp_path):
     assert weight_map[expert + ".input_scale"] == shard_name
     assert index["metadata"]["total_size"] == report["tensor_bytes"]
 
-    config = json.loads((output / "config.json").read_text())
+    config = json.loads((output / "config.json").read_text(encoding="utf-8"))
     assert "quantization_config" not in config["text_config"]
     quant = config["quantization_config"]
     assert quant["quant_method"] == "modelopt_mixed"

@@ -33,7 +33,7 @@ def quant(x, amax, num_bits=8, fake=False, narrow_range=True):
 
 
 def get_model_size(model):
-    return sum([p.element_size() * p.nelement() for p in model.parameters()])
+    return sum(p.element_size() * p.nelement() for p in model.parameters())
 
 
 def nvfp4_static_amax_dtypes(model):

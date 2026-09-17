@@ -791,7 +791,7 @@ class TestDFlashExporter:
         export_dir = tmp_path / "exported"
         exporter.export(export_dir)
 
-        with open(export_dir / "config.json") as f:
+        with open(export_dir / "config.json", encoding="utf-8") as f:
             cfg = json.load(f)
 
         assert cfg["architectures"] == ["DFlashDraftModel"]
@@ -819,7 +819,7 @@ class TestDFlashExporter:
         export_dir = tmp_path / "exported"
         exporter.export(export_dir)
 
-        with open(export_dir / "config.json") as f:
+        with open(export_dir / "config.json", encoding="utf-8") as f:
             cfg = json.load(f)
 
         # vLLM _resolve_layer_attention reads these; all-full layer_types + use_swa=True

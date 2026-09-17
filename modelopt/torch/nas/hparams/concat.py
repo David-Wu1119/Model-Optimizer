@@ -178,7 +178,7 @@ class ConcatTracedHp(TracedHp):
 
         # We need to aggregate between split importances when the come from the same hparam!
         imps = [
-            sum([imp_ for imp_, hp in zip(imps, self._inputs) if hp is self._inputs[i]])
+            sum(imp_ for imp_, hp in zip(imps, self._inputs) if hp is self._inputs[i])
             for i, imp in enumerate(imps)
         ]
 

@@ -161,7 +161,7 @@ def import_scales_from_calib_cache(cache_path: str) -> dict[str, float]:
         Dictionary with scales in the format {tensor_name: float_scale}.
     """
     logger.info(f"Importing scales from calibration cache: {cache_path}")
-    with open(cache_path) as f:
+    with open(cache_path, encoding="utf-8") as f:
         scales_dict = {}
         lines = f.readlines()
         for i, line in enumerate(lines):

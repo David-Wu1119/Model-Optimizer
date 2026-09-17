@@ -39,7 +39,8 @@ def test_weight_map_for_sharded(tmp_path):
     (tmp_path / "model.safetensors.index.json").write_text(
         json.dumps(
             {"weight_map": {"a.weight": "shard1.safetensors", "b.weight": "shard2.safetensors"}}
-        )
+        ),
+        encoding="utf-8",
     )
 
     assert weight_map_for(str(tmp_path)) == {

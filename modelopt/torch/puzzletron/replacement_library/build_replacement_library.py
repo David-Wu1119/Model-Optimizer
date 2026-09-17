@@ -521,7 +521,7 @@ def _gather_layer_replacements_from_checkpoints(
     )
     for checkpoint_dir in checkpoint_dirs:
         if (layer_replacements_path := checkpoint_dir / "replacement_library.json").exists():
-            layer_replacements = json.loads(layer_replacements_path.read_text())
+            layer_replacements = json.loads(layer_replacements_path.read_text(encoding="utf-8"))
             for layer_replacement in layer_replacements:
                 layer_replacement["child_block_configs"] = [
                     BlockConfig(**block_config_dict)

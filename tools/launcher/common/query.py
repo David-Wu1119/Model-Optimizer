@@ -254,7 +254,7 @@ for shard_id in shard_ids:
         shard = shard.map(disable_thinking_column, num_proc=num_proc)
     updated_shard = shard.map(synthesize, num_proc=num_proc)
     updated_shard.to_json(file_path)
-    with open(done_path, "w") as done_file:
+    with open(done_path, "w", encoding="utf-8") as done_file:
         done_file.write("done\n")
     print(updated_shard[0])
 

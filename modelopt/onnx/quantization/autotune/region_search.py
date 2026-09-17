@@ -884,9 +884,7 @@ class TopDownRegionBuilder(RegionSearchBase):
                 nodes_after_merge.update(consumer.get_nodes())
                 nodes_after_merge.update(common_use_region.get_nodes())
                 node_ops = [self.graph.nodes[idx].op for idx in nodes_after_merge]
-                boundary_op_count = sum(
-                    [1 if op in self.boundary_op_types else 0 for op in node_ops]
-                )
+                boundary_op_count = sum(1 if op in self.boundary_op_types else 0 for op in node_ops)
                 if boundary_op_count > 3:
                     can_merge = False
                     continue

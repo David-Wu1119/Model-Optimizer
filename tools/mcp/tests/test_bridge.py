@@ -46,11 +46,11 @@ def test_list_examples_returns_structured_metadata(tmp_path, monkeypatch):
     examples = tmp_path / "examples"
     (examples / "Qwen").mkdir(parents=True)
     (examples / "Qwen" / "ptq.yaml").write_text(
-        "job_name: qwen-ptq\nmodel: Qwen/Qwen3-8B\ndescription: PTQ test\n"
+        "job_name: qwen-ptq\nmodel: Qwen/Qwen3-8B\ndescription: PTQ test\n", encoding="utf-8"
     )
     (examples / "moonshotai").mkdir(parents=True)
     (examples / "moonshotai" / "train.yaml").write_text(
-        "job_name: kimi-train\nbase_model: moonshotai/Kimi-K2\n"
+        "job_name: kimi-train\nbase_model: moonshotai/Kimi-K2\n", encoding="utf-8"
     )
     monkeypatch.setenv("MODELOPT_LAUNCHER_EXAMPLES_DIR", str(examples))
 
@@ -75,8 +75,8 @@ def test_list_examples_tolerates_malformed_yaml(tmp_path, monkeypatch):
     """A single malformed YAML doesn't crash list_examples — it lands with model=None."""
     examples = tmp_path / "examples"
     examples.mkdir()
-    (examples / "good.yaml").write_text("job_name: g\nmodel: ok\n")
-    (examples / "bad.yaml").write_text("not: [unbalanced\n")
+    (examples / "good.yaml").write_text("job_name: g\nmodel: ok\n", encoding="utf-8")
+    (examples / "bad.yaml").write_text("not: [unbalanced\n", encoding="utf-8")
     monkeypatch.setenv("MODELOPT_LAUNCHER_EXAMPLES_DIR", str(examples))
 
     result = bridge.list_examples_impl()
@@ -397,7 +397,7 @@ def test_submit_job_dry_run_uses_managed_source_checkout(monkeypatch, tmp_path):
     yaml_dir = checkout_root / "tools" / "launcher" / "examples" / "fam" / "model"
     yaml_dir.mkdir(parents=True)
     yaml_path = yaml_dir / "config.yaml"
-    yaml_path.write_text("job_name: t\npipeline: []\n")
+    yaml_path.write_text("job_name: t\npipeline: []\n", encoding="utf-8")
     checkout = bridge.SourceCheckout(
         repo="https://example.com/modelopt.git",
         ref="feature/ref",
@@ -489,7 +489,7 @@ def test_submit_job_docker_captures_experiment_id_from_launcher_output(monkeypat
     yaml_dir = tmp_path / "examples"
     yaml_dir.mkdir()
     yaml_path = yaml_dir / "config.yaml"
-    yaml_path.write_text("job_name: t\npipeline: []\n")
+    yaml_path.write_text("job_name: t\npipeline: []\n", encoding="utf-8")
     monkeypatch.setenv("MODELOPT_LAUNCHER_EXAMPLES_DIR", str(yaml_dir))
     monkeypatch.setenv("NEMORUN_HOME", str(tmp_path / "nemo"))
     monkeypatch.setattr(bridge, "verify_docker_setup_impl", lambda: {"ok": True})
@@ -536,7 +536,7 @@ def test_submit_job_docker_no_experiment_id_returns_pid_and_log(monkeypatch, tmp
     yaml_dir = tmp_path / "examples"
     yaml_dir.mkdir()
     yaml_path = yaml_dir / "config.yaml"
-    yaml_path.write_text("job_name: t\npipeline: []\n")
+    yaml_path.write_text("job_name: t\npipeline: []\n", encoding="utf-8")
     monkeypatch.setenv("MODELOPT_LAUNCHER_EXAMPLES_DIR", str(yaml_dir))
     monkeypatch.setenv("NEMORUN_HOME", str(tmp_path / "nemo"))
     monkeypatch.setenv("MODELOPT_MCP_DOCKER_ID_TIMEOUT_SEC", "0")
@@ -590,7 +590,7 @@ def test_submit_job_docker_log_creation_failure_is_structured(monkeypatch, tmp_p
     yaml_dir = tmp_path / "examples"
     yaml_dir.mkdir()
     yaml_path = yaml_dir / "config.yaml"
-    yaml_path.write_text("job_name: t\npipeline: []\n")
+    yaml_path.write_text("job_name: t\npipeline: []\n", encoding="utf-8")
     monkeypatch.setenv("MODELOPT_LAUNCHER_EXAMPLES_DIR", str(yaml_dir))
     monkeypatch.setenv("NEMORUN_HOME", str(tmp_path / "nemo"))
     monkeypatch.setattr(bridge, "verify_docker_setup_impl", lambda: {"ok": True})
@@ -623,7 +623,7 @@ def test_submit_job_slurm_zero_exit_without_ids_is_failure(monkeypatch, tmp_path
     yaml_dir = tmp_path / "examples"
     yaml_dir.mkdir()
     yaml_path = yaml_dir / "config.yaml"
-    yaml_path.write_text("job_name: t\npipeline: []\n")
+    yaml_path.write_text("job_name: t\npipeline: []\n", encoding="utf-8")
     monkeypatch.setenv("MODELOPT_LAUNCHER_EXAMPLES_DIR", str(yaml_dir))
     monkeypatch.setattr(
         bridge,
@@ -661,7 +661,7 @@ def test_submit_job_slurm_parses_nemo_job_id(monkeypatch, tmp_path):
     yaml_dir = tmp_path / "examples"
     yaml_dir.mkdir()
     yaml_path = yaml_dir / "config.yaml"
-    yaml_path.write_text("job_name: t\npipeline: []\n")
+    yaml_path.write_text("job_name: t\npipeline: []\n", encoding="utf-8")
     monkeypatch.setenv("MODELOPT_LAUNCHER_EXAMPLES_DIR", str(yaml_dir))
     monkeypatch.setenv("NEMORUN_HOME", str(tmp_path))
     exp_dir = tmp_path / "experiments" / "cicd" / "cicd_1782173197"
@@ -700,7 +700,7 @@ def test_submit_job_slurm_parses_nemo_job_id(monkeypatch, tmp_path):
     assert result["ok"] is True
     assert result["slurm_job_id"] == "13049989"
     assert result["experiment_id"] == "cicd_1782173197"
-    meta = json.loads((exp_dir / bridge._SLURM_STATUS_META).read_text())
+    meta = json.loads((exp_dir / bridge._SLURM_STATUS_META).read_text(encoding="utf-8"))
     assert meta["slurm_job_id"] == "13049989"
     assert meta["cluster_host"] == "cluster.example.com"
     assert meta["cluster_user"] == "user"
@@ -710,7 +710,7 @@ def test_submit_job_slurm_accepts_nmm_cluster_fields(monkeypatch, tmp_path):
     """nmm-sandbox resolved cluster config maps to launcher overrides and env."""
     yaml_dir = tmp_path / "examples"
     yaml_dir.mkdir()
-    (yaml_dir / "config.yaml").write_text("job_name: t\npipeline: []\n")
+    (yaml_dir / "config.yaml").write_text("job_name: t\npipeline: []\n", encoding="utf-8")
     monkeypatch.setenv("MODELOPT_LAUNCHER_EXAMPLES_DIR", str(yaml_dir))
 
     verify_seen = {}
@@ -769,7 +769,7 @@ def test_submit_job_slurm_job_id_without_experiment_id_is_failure(monkeypatch, t
     yaml_dir = tmp_path / "examples"
     yaml_dir.mkdir()
     yaml_path = yaml_dir / "config.yaml"
-    yaml_path.write_text("job_name: t\npipeline: []\n")
+    yaml_path.write_text("job_name: t\npipeline: []\n", encoding="utf-8")
     monkeypatch.setenv("MODELOPT_LAUNCHER_EXAMPLES_DIR", str(yaml_dir))
     monkeypatch.setattr(
         bridge,
@@ -808,7 +808,7 @@ def test_submit_job_slurm_zero_exit_with_launcher_error_is_failure(monkeypatch, 
     yaml_dir = tmp_path / "examples"
     yaml_dir.mkdir()
     yaml_path = yaml_dir / "config.yaml"
-    yaml_path.write_text("job_name: t\npipeline: []\n")
+    yaml_path.write_text("job_name: t\npipeline: []\n", encoding="utf-8")
     monkeypatch.setenv("MODELOPT_LAUNCHER_EXAMPLES_DIR", str(yaml_dir))
     monkeypatch.setattr(
         bridge,
@@ -852,7 +852,7 @@ def test_submit_job_dry_run_yaml_validates(monkeypatch, tmp_path):
     yaml_dir = tmp_path / "examples" / "fam" / "model"
     yaml_dir.mkdir(parents=True)
     yaml_path = yaml_dir / "config.yaml"
-    yaml_path.write_text("job_name: t\npipeline: []\n")
+    yaml_path.write_text("job_name: t\npipeline: []\n", encoding="utf-8")
     monkeypatch.setenv("MODELOPT_LAUNCHER_EXAMPLES_DIR", str(tmp_path / "examples"))
 
     captured = {}
@@ -892,7 +892,7 @@ def test_submit_job_dry_run_uses_slurm_inventory_fields(monkeypatch, tmp_path):
     """dry-run must mirror live submit Slurm overrides and env."""
     yaml_dir = tmp_path / "examples"
     yaml_dir.mkdir()
-    (yaml_dir / "config.yaml").write_text("job_name: t\npipeline: []\n")
+    (yaml_dir / "config.yaml").write_text("job_name: t\npipeline: []\n", encoding="utf-8")
     monkeypatch.setenv("MODELOPT_LAUNCHER_EXAMPLES_DIR", str(yaml_dir))
 
     captured = {}
@@ -940,7 +940,7 @@ def test_submit_job_dry_run_yaml_invalid(monkeypatch, tmp_path):
     yaml_dir = tmp_path / "examples"
     yaml_dir.mkdir()
     yaml_path = yaml_dir / "bad.yaml"
-    yaml_path.write_text("not: [unbalanced\n")
+    yaml_path.write_text("not: [unbalanced\n", encoding="utf-8")
     monkeypatch.setenv("MODELOPT_LAUNCHER_EXAMPLES_DIR", str(yaml_dir))
 
     def fake_run(argv, **kwargs):
@@ -977,7 +977,7 @@ def test_submit_job_dry_run_zero_exit_with_launcher_error_is_invalid(monkeypatch
     yaml_dir = tmp_path / "examples"
     yaml_dir.mkdir()
     yaml_path = yaml_dir / "bad.yaml"
-    yaml_path.write_text("job_name: t\npipeline: []\n")
+    yaml_path.write_text("job_name: t\npipeline: []\n", encoding="utf-8")
     monkeypatch.setenv("MODELOPT_LAUNCHER_EXAMPLES_DIR", str(yaml_dir))
 
     def fake_run(argv, **kwargs):
@@ -1033,7 +1033,7 @@ def test_submit_job_dry_run_skips_verify(monkeypatch, tmp_path):
     """dry_run=True bypasses verify_setup even when skip_verify=False."""
     yaml_dir = tmp_path / "examples"
     yaml_dir.mkdir()
-    (yaml_dir / "ok.yaml").write_text("job_name: ok\npipeline: []\n")
+    (yaml_dir / "ok.yaml").write_text("job_name: ok\npipeline: []\n", encoding="utf-8")
     monkeypatch.setenv("MODELOPT_LAUNCHER_EXAMPLES_DIR", str(yaml_dir))
 
     verify_called = {"n": 0}
@@ -1082,8 +1082,8 @@ def test_job_status_done_success(tmp_path, monkeypatch):
     exp = tmp_path / "experiments" / "exp_1781000000"
     exp.mkdir(parents=True)
     (exp / "_DONE").touch()
-    (exp / "status_task_0.out").write_text("succeeded\n")
-    (exp / "status_task_1.out").write_text("succeeded\n")
+    (exp / "status_task_0.out").write_text("succeeded\n", encoding="utf-8")
+    (exp / "status_task_1.out").write_text("succeeded\n", encoding="utf-8")
     monkeypatch.setenv("NEMORUN_HOME", str(tmp_path))
 
     result = bridge.job_status_impl("exp_1781000000")
@@ -1097,8 +1097,8 @@ def test_job_status_failed_task(tmp_path, monkeypatch):
     exp = tmp_path / "experiments" / "exp_1781000001"
     exp.mkdir(parents=True)
     (exp / "_DONE").touch()
-    (exp / "status_task_0.out").write_text("succeeded\n")
-    (exp / "status_task_1.out").write_text("failed (rc=1)\n")
+    (exp / "status_task_0.out").write_text("succeeded\n", encoding="utf-8")
+    (exp / "status_task_1.out").write_text("failed (rc=1)\n", encoding="utf-8")
     monkeypatch.setenv("NEMORUN_HOME", str(tmp_path))
 
     result = bridge.job_status_impl("exp_1781000001")
@@ -1111,7 +1111,7 @@ def test_job_status_running(tmp_path, monkeypatch):
     """No _DONE marker → running."""
     exp = tmp_path / "experiments" / "exp_1781000002"
     exp.mkdir(parents=True)
-    (exp / "status_task_0.out").write_text("running\n")
+    (exp / "status_task_0.out").write_text("running\n", encoding="utf-8")
     monkeypatch.setenv("NEMORUN_HOME", str(tmp_path))
 
     result = bridge.job_status_impl("exp_1781000002")
@@ -1124,7 +1124,7 @@ def test_job_status_nested_nemo_title_dir(tmp_path, monkeypatch):
     """nemo_run stores experiments under experiments/<title>/<experiment_id>."""
     exp = tmp_path / "experiments" / "cicd" / "exp_1781000006"
     exp.mkdir(parents=True)
-    (exp / "status_task_0.out").write_text("running\n")
+    (exp / "status_task_0.out").write_text("running\n", encoding="utf-8")
     monkeypatch.setenv("NEMORUN_HOME", str(tmp_path))
 
     result = bridge.job_status_impl("exp_1781000006")
@@ -1147,7 +1147,8 @@ def test_job_status_slurm_sidecar_overrides_local_done_marker(tmp_path, monkeypa
                 "cluster_host": "cluster.example.com",
                 "cluster_user": "alice",
             }
-        )
+        ),
+        encoding="utf-8",
     )
     monkeypatch.setenv("NEMORUN_HOME", str(tmp_path))
 
@@ -1184,7 +1185,8 @@ def test_job_status_slurm_sidecar_reports_terminal_state(tmp_path, monkeypatch):
                 "cluster_host": "cluster.example.com",
                 "cluster_user": "alice",
             }
-        )
+        ),
+        encoding="utf-8",
     )
     monkeypatch.setenv("NEMORUN_HOME", str(tmp_path))
 
@@ -1222,7 +1224,8 @@ def test_job_status_slurm_not_found_falls_back_to_local_done_marker(tmp_path, mo
                 "cluster_host": "cluster.example.com",
                 "cluster_user": "alice",
             }
-        )
+        ),
+        encoding="utf-8",
     )
     monkeypatch.setenv("NEMORUN_HOME", str(tmp_path))
     monkeypatch.setattr(
@@ -1247,7 +1250,7 @@ def test_job_status_slurm_not_found_falls_back_to_local_failed_marker(tmp_path, 
     exp = tmp_path / "experiments" / "cicd" / "exp_slurm_aged_out_failed"
     exp.mkdir(parents=True)
     (exp / "_DONE").touch()
-    (exp / "status_task_0.out").write_text("failed (rc=1)\n")
+    (exp / "status_task_0.out").write_text("failed (rc=1)\n", encoding="utf-8")
     (exp / bridge._SLURM_STATUS_META).write_text(
         json.dumps(
             {
@@ -1257,7 +1260,8 @@ def test_job_status_slurm_not_found_falls_back_to_local_failed_marker(tmp_path, 
                 "cluster_host": "cluster.example.com",
                 "cluster_user": "alice",
             }
-        )
+        ),
+        encoding="utf-8",
     )
     monkeypatch.setenv("NEMORUN_HOME", str(tmp_path))
     monkeypatch.setattr(
@@ -1281,7 +1285,7 @@ def test_job_status_launcher_experiments_fallback(tmp_path, monkeypatch):
     launcher_dir = tmp_path / "launcher"
     exp = launcher_dir / "experiments" / "cicd" / "exp_1781000007"
     exp.mkdir(parents=True)
-    (exp / "status_task_0.out").write_text("running\n")
+    (exp / "status_task_0.out").write_text("running\n", encoding="utf-8")
     monkeypatch.delenv("NEMORUN_HOME", raising=False)
     other_cwd = tmp_path / "other"
     other_cwd.mkdir()
@@ -1327,8 +1331,8 @@ def test_job_logs_all_tasks(tmp_path, monkeypatch):
     """task=None returns logs for every log_*.out under the experiment dir."""
     exp = tmp_path / "experiments" / "exp_1781000003"
     exp.mkdir(parents=True)
-    (exp / "log_task_0.out").write_text("hello\nworld\n")
-    (exp / "log_task_1.out").write_text("done\n")
+    (exp / "log_task_0.out").write_text("hello\nworld\n", encoding="utf-8")
+    (exp / "log_task_1.out").write_text("done\n", encoding="utf-8")
     monkeypatch.setenv("NEMORUN_HOME", str(tmp_path))
 
     result = bridge.job_logs_impl("exp_1781000003", task=None, tail=None)
@@ -1341,7 +1345,7 @@ def test_job_logs_with_tail(tmp_path, monkeypatch):
     """tail=N returns only the last N lines per task."""
     exp = tmp_path / "experiments" / "exp_1781000004"
     exp.mkdir(parents=True)
-    (exp / "log_task_0.out").write_text("line1\nline2\nline3\nline4\n")
+    (exp / "log_task_0.out").write_text("line1\nline2\nline3\nline4\n", encoding="utf-8")
     monkeypatch.setenv("NEMORUN_HOME", str(tmp_path))
 
     result = bridge.job_logs_impl("exp_1781000004", task="task_0", tail=2)
@@ -1354,7 +1358,7 @@ def test_job_logs_missing_task(tmp_path, monkeypatch):
     """Requested task name has no log file → task_log_not_found."""
     exp = tmp_path / "experiments" / "exp_1781000005"
     exp.mkdir(parents=True)
-    (exp / "log_task_0.out").write_text("only task 0\n")
+    (exp / "log_task_0.out").write_text("only task 0\n", encoding="utf-8")
     monkeypatch.setenv("NEMORUN_HOME", str(tmp_path))
 
     result = bridge.job_logs_impl("exp_1781000005", task="task_99", tail=None)
@@ -1379,7 +1383,7 @@ def test_wait_for_experiment_returns_terminal_immediately(tmp_path, monkeypatch)
     exp = tmp_path / "experiments" / "exp_already_done"
     exp.mkdir(parents=True)
     (exp / "_DONE").touch()
-    (exp / "status_task_0.out").write_text("succeeded\n")
+    (exp / "status_task_0.out").write_text("succeeded\n", encoding="utf-8")
     monkeypatch.setenv("NEMORUN_HOME", str(tmp_path))
 
     result = bridge.wait_for_experiment_impl(
@@ -1396,7 +1400,7 @@ def test_wait_for_experiment_polls_until_done(tmp_path, monkeypatch):
     """Spin through running → done."""
     exp = tmp_path / "experiments" / "exp_in_flight"
     exp.mkdir(parents=True)
-    (exp / "status_task_0.out").write_text("running\n")
+    (exp / "status_task_0.out").write_text("running\n", encoding="utf-8")
     monkeypatch.setenv("NEMORUN_HOME", str(tmp_path))
 
     # Flip the marker after 2 polls via a counter side-effect
@@ -1434,7 +1438,8 @@ def test_wait_for_experiment_polls_slurm_despite_local_done_marker(tmp_path, mon
                 "cluster_host": "cluster.example.com",
                 "cluster_user": "alice",
             }
-        )
+        ),
+        encoding="utf-8",
     )
     monkeypatch.setenv("NEMORUN_HOME", str(tmp_path))
 
@@ -1467,7 +1472,7 @@ def test_wait_for_experiment_timeout(tmp_path, monkeypatch):
     """Never reaches terminal → wait_timeout with last_status."""
     exp = tmp_path / "experiments" / "exp_stuck"
     exp.mkdir(parents=True)
-    (exp / "status_task_0.out").write_text("running\n")
+    (exp / "status_task_0.out").write_text("running\n", encoding="utf-8")
     monkeypatch.setenv("NEMORUN_HOME", str(tmp_path))
 
     result = bridge.wait_for_experiment_impl(
@@ -1523,9 +1528,9 @@ def test_provision_ssh_key_present_emits_copy_id(tmp_path, monkeypatch):
     fake_home = tmp_path / "home"
     ssh = fake_home / ".ssh"
     ssh.mkdir(parents=True)
-    (ssh / "id_ed25519").write_text("PRIVKEY")
+    (ssh / "id_ed25519").write_text("PRIVKEY", encoding="utf-8")
     pubkey_content = "ssh-ed25519 AAAAC3NzaC... alice@host"
-    (ssh / "id_ed25519.pub").write_text(pubkey_content + "\n")
+    (ssh / "id_ed25519.pub").write_text(pubkey_content + "\n", encoding="utf-8")
     monkeypatch.setenv("HOME", str(fake_home))
     monkeypatch.delenv("IDENTITY", raising=False)
 
@@ -1547,7 +1552,7 @@ def test_provision_ssh_priv_without_pub_surfaces_failure(tmp_path, monkeypatch):
     fake_home = tmp_path / "home"
     ssh = fake_home / ".ssh"
     ssh.mkdir(parents=True)
-    (ssh / "id_ed25519").write_text("PRIVKEY")
+    (ssh / "id_ed25519").write_text("PRIVKEY", encoding="utf-8")
     monkeypatch.setenv("HOME", str(fake_home))
     monkeypatch.delenv("IDENTITY", raising=False)
 
@@ -1564,8 +1569,8 @@ def test_provision_ssh_priv_without_pub_surfaces_failure(tmp_path, monkeypatch):
 def test_provision_ssh_explicit_identity_overrides_default(tmp_path, monkeypatch):
     """Explicit identity arg wins over $IDENTITY and ~/.ssh/id_ed25519."""
     explicit = tmp_path / "custom_key"
-    explicit.write_text("CUSTOM")
-    (tmp_path / "custom_key.pub").write_text("ssh-ed25519 AAAA alice\n")
+    explicit.write_text("CUSTOM", encoding="utf-8")
+    (tmp_path / "custom_key.pub").write_text("ssh-ed25519 AAAA alice\n", encoding="utf-8")
     monkeypatch.setenv("IDENTITY", "/wrong/path")  # should be ignored
 
     result = bridge.provision_passwordless_ssh_dry_run_impl(

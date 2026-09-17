@@ -49,7 +49,7 @@ class TestModelOptArgParser:
 
     def test_yaml_config(self, tmp_path):
         config_file = tmp_path / "config.yaml"
-        config_file.write_text("model_name: yaml-model\nepochs: 10\n")
+        config_file.write_text("model_name: yaml-model\nepochs: 10\n", encoding="utf-8")
 
         parser = ModelOptArgParser((_ModelArgs, _TrainArgs))
         model_args, train_args = parser.parse_args_into_dataclasses(
@@ -60,7 +60,7 @@ class TestModelOptArgParser:
 
     def test_cli_overrides_yaml(self, tmp_path):
         config_file = tmp_path / "config.yaml"
-        config_file.write_text("model_name: yaml-model\nlearning_rate: 0.001\n")
+        config_file.write_text("model_name: yaml-model\nlearning_rate: 0.001\n", encoding="utf-8")
 
         parser = ModelOptArgParser((_ModelArgs, _TrainArgs))
         model_args, train_args = parser.parse_args_into_dataclasses(
@@ -71,7 +71,7 @@ class TestModelOptArgParser:
 
     def test_empty_yaml_config(self, tmp_path):
         config_file = tmp_path / "empty.yaml"
-        config_file.write_text("")
+        config_file.write_text("", encoding="utf-8")
 
         parser = ModelOptArgParser((_ModelArgs, _TrainArgs))
         model_args, train_args = parser.parse_args_into_dataclasses(
@@ -88,7 +88,7 @@ class TestModelOptArgParser:
             parser.parse_args_into_dataclasses(args=["--generate_docs", str(output_path)])
         assert exc_info.value.code == 0
 
-        content = output_path.read_text()
+        content = output_path.read_text(encoding="utf-8")
         assert "## _ModelArgs" in content
         assert "## _TrainArgs" in content
         assert "--model_name" in content
@@ -103,7 +103,7 @@ class TestModelOptArgParser:
             parser.parse_args_into_dataclasses(args=["--generate_docs"])
         assert exc_info.value.code == 0
 
-        content = Path("ARGUMENTS.md").read_text()
+        content = Path("ARGUMENTS.md").read_text(encoding="utf-8")
         assert "# Argument Reference" in content
 
     def test_docs_table_format(self, tmp_path):
@@ -113,7 +113,7 @@ class TestModelOptArgParser:
         with pytest.raises(SystemExit):
             parser.parse_args_into_dataclasses(args=["--generate_docs", str(output_path)])
 
-        content = output_path.read_text()
+        content = output_path.read_text(encoding="utf-8")
         # Check table headers
         assert "| Argument | Type | Default | Description |" in content
         # Check a specific row
