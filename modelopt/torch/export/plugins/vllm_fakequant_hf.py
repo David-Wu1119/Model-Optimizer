@@ -17,6 +17,7 @@
 import copy
 import logging
 import re
+import shutil
 import warnings
 from collections.abc import Callable
 from contextlib import ExitStack, contextmanager
@@ -526,6 +527,53 @@ def _resmooth_experts_for_export(
     return out, requant_weights
 
 
+def _copy_source_config(model: nn.Module, export_dir: Path) -> None:
+    """Preserve the source checkpoint's config.json without reserializing it.
+
+    A model loaded by a newer Transformers release can use a native config class whose
+    serialized schema differs from the checkpoint's remote-code config class. Since an HF
+    fakequant export retains that remote code, its config must come from the same checkpoint
+    revision. save_pretrained writes its generated config first; this helper replaces it
+    with the original bytes.
+    """
+    source = getattr(getattr(model, "config", None), "_name_or_path", None)
+    if not source:
+        warnings.warn(
+            "Could not identify the source checkpoint config; keeping the config generated "
+            "by save_pretrained."
+        )
+        return
+
+    source_config = Path(source) / "config.json"
+    if not source_config.is_file():
+        try:
+            from transformers.utils import cached_file
+
+            resolved = cached_file(
+                source,
+                "config.json",
+                _raise_exceptions_for_gated_repo=False,
+                _raise_exceptions_for_missing_entries=False,
+                _raise_exceptions_for_connection_errors=False,
+            )
+            source_config = Path(resolved) if resolved else source_config
+        except Exception as e:
+            logging.getLogger(__name__).warning(
+                "Could not resolve source config for %r: %s", source, e
+            )
+
+    if not source_config.is_file():
+        warnings.warn(
+            f"Source checkpoint config not found for {source!r}; keeping the config generated "
+            "by save_pretrained."
+        )
+        return
+
+    export_config = export_dir / "config.json"
+    if source_config.resolve() != export_config.resolve():
+        shutil.copyfile(source_config, export_config)
+
+
 def export_hf_vllm_fq_checkpoint(
     model: nn.Module,
     export_dir: Path | str,
@@ -704,6 +752,8 @@ def export_hf_vllm_fq_checkpoint(
                 model._keys_to_ignore_on_save = prev_ignore
         else:
             model.save_pretrained(export_dir, state_dict=clean_sd, save_modelopt_state=False)
+
+        _copy_source_config(model, export_dir)
 
     finally:
         if not inplace_mem_efficient:
