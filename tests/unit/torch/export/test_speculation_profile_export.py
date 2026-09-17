@@ -19,7 +19,10 @@ import json
 
 import pytest
 
-from modelopt.torch.export.plugins.hf_spec_export import SpeculativeDecodingExporter
+from modelopt.torch.export.plugins.hf_spec_export import (
+    SPECULATION_PROFILE_SCHEMA_VERSION,
+    SpeculativeDecodingExporter,
+)
 
 
 class _Exporter(SpeculativeDecodingExporter):
@@ -46,7 +49,7 @@ def test_supplied_profile_is_copied_verbatim(tmp_path, exporter):
     out = tmp_path / "export"
     out.mkdir()
 
-    exporter.write_speculation_profile(out, src)
+    exporter.write_speculation_profile(out, exporter.load_speculation_profile(src))
 
     assert json.loads((out / "speculation_profile.json").read_text()) == payload
 
@@ -55,20 +58,25 @@ def test_stub_is_written_when_none_supplied(tmp_path, exporter):
     out = tmp_path / "export"
     out.mkdir()
 
-    exporter.write_speculation_profile(out, None)
+    exporter.write_speculation_profile(out, exporter.load_speculation_profile(None))
 
     stub = json.loads((out / "speculation_profile.json").read_text())
     # "not measured" must be distinguishable from "predates the schema"; absent then
     # means a genuinely old checkpoint rather than an ambiguous one.
     assert stub["measured"] is False
     assert "specdec_bench" in stub["note"]
+    # A version-dispatching reader gets no further on null than on a missing file, and
+    # the key set matches a measured profile so one parser handles both.
+    assert stub["schema_version"] == SPECULATION_PROFILE_SCHEMA_VERSION
+    assert stub["marginal_accept_rates"] is None
+    assert stub["accept_length_by_k"] == {}
 
 
 def test_missing_file_is_a_hard_error(tmp_path, exporter):
     out = tmp_path / "export"
     out.mkdir()
     with pytest.raises(FileNotFoundError):
-        exporter.write_speculation_profile(out, tmp_path / "nope.json")
+        exporter.load_speculation_profile(tmp_path / "nope.json")
 
 
 @pytest.mark.parametrize("payload", ['{"no_version": true}', "[1, 2, 3]", '"a string"'])
@@ -79,7 +87,7 @@ def test_non_profile_json_is_rejected(tmp_path, exporter, payload):
     out = tmp_path / "export"
     out.mkdir()
     with pytest.raises(ValueError, match="schema_version"):
-        exporter.write_speculation_profile(out, src)
+        exporter.write_speculation_profile(out, exporter.load_speculation_profile(src))
 
 
 def test_malformed_json_is_rejected(tmp_path, exporter):
@@ -94,7 +102,7 @@ def test_malformed_json_is_rejected(tmp_path, exporter):
     out = tmp_path / "export"
     out.mkdir()
     with pytest.raises(json.JSONDecodeError):
-        exporter.write_speculation_profile(out, src)
+        exporter.write_speculation_profile(out, exporter.load_speculation_profile(src))
 
 
 def test_schema_version_is_not_pinned(tmp_path, exporter):
@@ -105,6 +113,6 @@ def test_schema_version_is_not_pinned(tmp_path, exporter):
     out = tmp_path / "export"
     out.mkdir()
 
-    exporter.write_speculation_profile(out, src)
+    exporter.write_speculation_profile(out, exporter.load_speculation_profile(src))
 
     assert json.loads((out / "speculation_profile.json").read_text())["schema_version"] == "99.0"

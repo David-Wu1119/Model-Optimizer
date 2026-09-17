@@ -129,10 +129,9 @@ def per_step_mean_accept_length(histogram):
     decode step*.
 
     It is deliberately not ``AcceptanceRate.out["Average_AL"]``, which averages
-    per-*request* accept length over requests and so weights a short request the
-    same as a long one. On real data the two differ materially -- 2.4733 vs 2.5467
-    on the first MiniMax-M2.7 DFlash run -- and conflating them makes the identity
-    below look broken when nothing is wrong.
+    per-*request* accept length and so weights a short request the same as a long
+    one. The two differ on real data, and conflating them makes the consistency
+    check below look broken when nothing is wrong.
     """
     if not histogram:
         return None
@@ -173,7 +172,10 @@ def _monotonicity_check(marginal_accept_rates):
     """vLLM's synthetic sampler requires marginals to be non-increasing.
 
     A survival function cannot increase, so a violation indicates a malformed
-    histogram rather than an unusual draft model.
+    histogram rather than an unusual draft model. The construction in
+    ``_dense_survival`` already guarantees it, and ``_validate_rates`` rejects the
+    ratios that would arise from a violation, so this is a belt-and-braces assertion
+    recorded in the profile rather than a check expected to fire.
     """
     violations = [
         {"position": i, "value": marginal_accept_rates[i], "previous": marginal_accept_rates[i - 1]}
@@ -328,7 +330,9 @@ def build_profile(
             "mean_consistency": (
                 _consistency_check(mean_accept_length, marginal) if measured else None
             ),
-            "marginal_monotonicity": _monotonicity_check(marginal),
+            # Reported only when the vectors are published: a verdict about a vector
+            # withheld as null says nothing a consumer can act on.
+            "marginal_monotonicity": _monotonicity_check(marginal) if vectors_apply else None,
         },
     }
     return profile

@@ -59,35 +59,31 @@ datasets_available = {
 }
 
 
+# Methods the engine wrappers configure via ``--block_size`` rather than
+# ``--draft_length``; reading K off the wrong flag mislabels the vectors.
+_BLOCK_CONFIGURED_METHODS = frozenset({"dflash", "dspark"})
+
+
 def _speculation_profile_metadata(args):
-    """Describe the measurement for speculation_profile.json.
+    """Describe the measurement for speculation_profile.json, or None if there is none.
 
     Only the fields needed to interpret the acceptance vectors standalone live here;
-    the exhaustive run record (engine version, checkpoint hashes, redacted argv, GPU)
-    is already written to configuration.json by dump_env().
+    the exhaustive run record is already written to configuration.json by dump_env().
 
-    On K -- which flag actually sets it depends on the method, so this mirrors the
-    engine wrappers rather than guessing:
-
-    * DFLASH is configured by ``--block_size``. Both the vLLM and SGLang wrappers
-      forward it as ``num_speculative_tokens`` / ``speculative_num_draft_tokens`` and
-      *ignore* ``--draft_length`` (``models/sglang.py`` warns about this explicitly).
-    * Everything else uses ``--draft_length``, forwarded as ``speculative_num_steps``
-      (TRT-LLM turns it into ``max_draft_len``).
-
-    Reading K off the wrong flag would silently mislabel the vectors, so it is
-    derived here rather than assumed.
-
-    ``max_supported_k`` is deliberately left to default to the measured K. A
-    block-parallel draft does have a hard architectural ceiling, but specdec_bench
-    cannot observe it: ``--block_size`` here is the value handed to the engine as
-    num_speculative_tokens, which is not the same quantity as the trained
-    ``dflash_block_size`` in the checkpoint config despite the shared name. Publishing
-    a ceiling we cannot verify would be worse than publishing none.
+    ``max_supported_k`` is left to default to the measured K: a block-parallel draft
+    has an architectural ceiling, but ``--block_size`` here is the value handed to the
+    engine, not the trained ``dflash_block_size`` in the checkpoint config, so the
+    ceiling cannot be verified from this side.
     """
     method = (args.speculative_algorithm or "").lower() or None
+    # A non-speculative baseline still produces steps -- every one emitting exactly
+    # one token -- so build_profile would mark it measured with all-zero acceptance,
+    # indistinguishable from a genuinely terrible draft. There is no draft to
+    # describe, so emit nothing and let the caller skip the write.
+    if method in (None, "none"):
+        return None
     block_size = getattr(args, "block_size", None)
-    if method == "dflash" and block_size:
+    if method in _BLOCK_CONFIGURED_METHODS and block_size:
         num_speculative_tokens = block_size
     else:
         num_speculative_tokens = args.draft_length

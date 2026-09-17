@@ -109,6 +109,9 @@ def has_quant_opt(model: nn.Module):
     return any(mode[0] == "quantize" for mode in opt_modes)
 
 
+SPECULATION_PROFILE_SCHEMA_VERSION = "1.0"
+
+
 def read_speculation_profile(speculation_profile: Path | str) -> dict:
     """Read and validate a ``speculation_profile.json``. Needs no model or exporter.
 
@@ -119,7 +122,7 @@ def read_speculation_profile(speculation_profile: Path | str) -> dict:
     """
     source = Path(speculation_profile)
     if not source.is_file():
-        raise FileNotFoundError(f"--speculation_profile not found: {source}")
+        raise FileNotFoundError(f"speculation_profile not found: {source}")
     with open(source) as f:
         profile = json.load(f)
     if not isinstance(profile, dict) or "schema_version" not in profile:
@@ -146,39 +149,17 @@ class SpeculativeDecodingExporter(ABC):
         """Export the model to the deployment format."""
         raise NotImplementedError("Subclasses must implement this method.")
 
-    def write_speculation_profile(
-        self,
-        export_dir: Path | str,
-        speculation_profile: Path | str | None = None,
-        profile: dict | None = None,
-    ):
-        """Attach a ``speculation_profile.json`` describing this draft's acceptance.
+    def write_speculation_profile(self, export_dir: Path | str, profile: dict):
+        """Write ``speculation_profile.json`` beside the exported weights.
 
-        Deployment consumers otherwise have to guess how good a draft is -- dynamo's
-        simulator, for instance, models every draft model in existence with one
-        hardcoded acceptance vector. Shipping the measurement next to the weights is
-        what stops the guessing.
-
-        This method deliberately only *transports* a profile; it does not build one.
-        Acceptance is measured by a benchmark harness (``examples/specdec_bench``),
-        which commonly runs in an engine container without modelopt installed -- the
-        MiniMax-M2.7 DFlash measurement ran under ``vllm/vllm-openai:nightly``, where
-        ``modelopt_version`` resolved to ``null``. So the producer cannot import from
-        here, and this side stays a carrier: it validates that the file is JSON
-        carrying a ``schema_version`` and copies it in.
-
-        For the same reason the version is recorded rather than checked against a
-        constant. Producers own the schema; pinning an expected version here would
-        create two sources of truth that drift.
-
-        With no profile supplied, an unmeasured stub is written so consumers can
-        distinguish "not measured" from "predates the schema" -- absent then means a
-        genuinely old checkpoint rather than an ambiguous one.
+        This side transports a profile, it does not build one: the producer
+        (``examples/specdec_bench``) commonly runs in an engine container without
+        modelopt installed, so it cannot import from here. The version is therefore
+        recorded rather than checked -- producers own the schema, and pinning an
+        expected version here would create a second source of truth that drifts.
         """
         export_dir = Path(export_dir)
         target = export_dir / "speculation_profile.json"
-        if profile is None:
-            profile = self.load_speculation_profile(speculation_profile)
         with open(target, "w") as f:
             json.dump(profile, f, indent=2)
 
@@ -186,20 +167,43 @@ class SpeculativeDecodingExporter(ABC):
         """Read and validate a profile, or build the unmeasured stub. Touches no weights.
 
         Split out so callers can validate *before* an export writes anything: a bad
-        ``--speculation_profile`` should fail while the destination is still empty,
-        not leave a partial checkpoint with a stale profile beside it.
+        ``speculation_profile`` should fail while the destination is still empty, not
+        leave a partial checkpoint with a stale profile beside it. With none supplied,
+        the stub lets a consumer tell "not measured" from a checkpoint that predates
+        the schema, where the file is simply absent.
         """
         if speculation_profile is not None:
             profile = read_speculation_profile(speculation_profile)
         else:
+            # Same key set as a measured profile, so a consumer reads both with one
+            # code path and branches on `measured` rather than on which keys exist.
             profile = {
-                "schema_version": None,
+                "schema_version": SPECULATION_PROFILE_SCHEMA_VERSION,
                 "measured": False,
                 "method": self._profile_method(),
+                "draft_checkpoint": None,
+                "target_model": None,
+                "num_speculative_tokens": None,
+                "block_size": None,
+                "max_supported_k": None,
+                "verification_method": None,
+                "conditional_accept_rates": None,
+                "marginal_accept_rates": None,
+                "vectors_unavailable_reason": (
+                    "no acceptance measurement was supplied at export time"
+                ),
+                "mean_accept_length": None,
+                "mean_accept_length_per_request": None,
+                "accept_length_model": None,
+                "accept_length_by_k": {},
+                "acceptance_length_histogram": None,
+                "per_category": None,
+                "measurement_conditions": None,
+                "validation": None,
                 "note": (
                     "No acceptance measurement was supplied at export time. Produce one with "
-                    "examples/specdec_bench and re-export with --speculation_profile, or build "
-                    "it from an existing acceptance_rate.json."
+                    "examples/specdec_bench and attach it with "
+                    "examples/speculative_decoding/scripts/attach_speculation_profile.py."
                 ),
             }
         return profile

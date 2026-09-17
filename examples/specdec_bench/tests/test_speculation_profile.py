@@ -23,7 +23,10 @@ which is why they get explicit coverage rather than relying on the end-to-end ru
   2. densification of a sparse histogram to a fixed-length vector.
 """
 
+import sys
 from itertools import pairwise
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from specdec_bench.metrics.acceptance_rate import AcceptanceRate
@@ -229,3 +232,49 @@ def test_block_verification_withholds_the_vectors():
     assert "longest-prefix" in profile["vectors_unavailable_reason"]
     # The histogram and mean still describe something real and are kept.
     assert profile["acceptance_length_histogram"]
+
+
+class TestNonSpeculativeBaseline:
+    """``--speculative_algorithm NONE`` is a valid run and must not publish a profile."""
+
+    @staticmethod
+    def _metadata(**overrides):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        from run import _speculation_profile_metadata
+
+        fields = {
+            "speculative_algorithm": None,
+            "draft_length": 3,
+            "block_size": None,
+            "model_dir": "/models/target",
+            "draft_model_dir": None,
+            "dataset": "mtbench",
+            "mtbench": False,
+            "concurrency": 1,
+            "temperature": 0.0,
+            "engine": "VLLM",
+            "tp_size": 1,
+        }
+        fields.update(overrides)
+        args = SimpleNamespace(**fields)
+        return _speculation_profile_metadata(args)
+
+    @pytest.mark.parametrize("algorithm", [None, "NONE", "none"])
+    def test_no_metadata_for_a_baseline_run(self, algorithm):
+        """Every step emits one token, so build_profile would call it measured with
+        zero acceptance -- indistinguishable from a genuinely terrible draft."""
+        assert self._metadata(speculative_algorithm=algorithm) is None
+
+    def test_metadata_for_a_speculative_run(self):
+        metadata = self._metadata(speculative_algorithm="EAGLE3")
+        assert metadata is not None
+        assert metadata["method"] == "eagle3"
+        assert metadata["num_speculative_tokens"] == 3
+
+    @pytest.mark.parametrize("method", ["DFLASH", "DSPARK"])
+    def test_block_configured_methods_read_k_off_block_size(self, method):
+        """Both are configured by --block_size; keying on one name would truncate the
+        other's vectors to --draft_length."""
+        metadata = self._metadata(speculative_algorithm=method, block_size=8)
+        assert metadata["num_speculative_tokens"] == 8
+        assert metadata["block_size"] == 8
