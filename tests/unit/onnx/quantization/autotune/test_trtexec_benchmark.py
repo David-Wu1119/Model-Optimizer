@@ -782,7 +782,7 @@ def test_probe_absent_uses_trtexec_safe_flag(tmp_path):
 
 
 def test_remote_run_scp_then_ssh_trtexec_safe(remote_bench, tmp_path):
-    """The remote path runs trtexec → scp → ssh trtexec_safe, parsing _SAFE_PATTERN."""
+    """The remote path runs trtexec → scp → ssh trtexec_safe, parsing GPU Compute Time median."""
     trtexec_proc = _make_proc(stdout="")  # build only; --skipInference
     scp_proc = _make_proc()
     safe_stdout = (

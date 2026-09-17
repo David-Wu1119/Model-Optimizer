@@ -138,6 +138,10 @@ def init_benchmark_instance(
             f"cache={timing_cache_file or 'trtexec_timing.cache'}, plugin_libraries={plugin_libraries}"
         )
         return _benchmark_instance
+    except (ValueError, ImportError):
+        # Configuration errors (bad URL, incompatible plugin_libraries + remote, TRT < 10.15)
+        # should surface directly so the user sees the specific message rather than a generic log.
+        raise
     except Exception as e:
         logger.error(f"TensorRT initialization failed: {e}", exc_info=True)
         return None
