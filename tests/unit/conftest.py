@@ -16,6 +16,8 @@
 import contextlib
 import os
 
+import pytest
+
 # Enforce no HuggingFace Hub network access for unit tests
 os.environ["HF_HUB_OFFLINE"] = "1"
 os.environ["HF_DATASETS_OFFLINE"] = "1"
@@ -25,3 +27,28 @@ with contextlib.suppress(ImportError):
     import huggingface_hub.constants as _hf_constants
 
     _hf_constants.HF_HUB_OFFLINE = True
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _prebuild_onnx_round_and_pack_ext():
+    """Build the ONNX round-and-pack extension before per-test timeouts start.
+
+    ``modelopt/onnx/quantization/extensions.py`` runs ``cppimport.imp`` at module import, and
+    that module is imported lazily from inside ``quant_utils.round_and_pack``. So the first test
+    to need it pays a full C++ compile INSIDE its own per-test timeout -- on the Windows runner
+    that is an MSVC build measured in minutes, and the test dies with pytest-timeout while
+    ``compiler.compile`` is still running. Which test pays is down to collection order, so the
+    failure appears to wander between runs.
+
+    ``pyproject`` sets ``timeout_func_only``, so the per-test clock covers the call only; doing
+    the import here in session setup puts the build outside it. This mirrors
+    ``tests/gpu_megatron/conftest.py``, which prebuilds the quant CUDA extensions for the same
+    reason -- but it cannot reuse that helper: ``load_cpp_extension`` skips every quant extension
+    when CUDA is unavailable, which is exactly the case on the CPU-only Windows runner, so
+    ``precompile()`` would warm nothing here.
+
+    Best-effort. The extension is an optimisation with a Python fallback -- ``extensions.py``
+    already swallows its own build failures -- so a failure to prebuild must not fail the session.
+    """
+    with contextlib.suppress(Exception):
+        import modelopt.onnx.quantization.extensions  # noqa: F401
