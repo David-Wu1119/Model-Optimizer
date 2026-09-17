@@ -92,6 +92,13 @@ jobs:
         with:
           python-version: "3.12"
       - name: Run unit tests (without coverage)
+        # PEP 540 UTF-8 mode. Windows defaults text I/O to the locale codepage (cp1252 on these
+        # runners), so any read of a UTF-8 file without an explicit encoding= dies with
+        # UnicodeDecodeError on the first non-Latin-1 byte -- a failure no other platform sees.
+        # This makes the whole test process read UTF-8 regardless of locale. It does NOT excuse
+        # library code from passing encoding= explicitly: user processes will not have this set.
+        env:
+          PYTHONUTF8: "1"
         run: pip install nox uv && nox -s "unit-3.12(torch_214, tf_latest)"
   multi-version:
     if: needs.check-file-changes.outputs.any_changed == 'true'
