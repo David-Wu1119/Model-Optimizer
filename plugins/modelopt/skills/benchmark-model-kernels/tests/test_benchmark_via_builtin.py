@@ -248,8 +248,12 @@ def test_driver_errors_are_added_to_kernel_and_with_quant_rows(tmp_path):
     benchmark._write_results(csv_path, [case], {(1280, 2880): ["1280x2880"]})
 
     expected = "ERROR: K must be divisible by 128; got 2880"
-    assert f"1280x2880,8,1280,2880,fp8_trtllm,False,{expected}\n" in csv_path.read_text(encoding="utf-8")
-    assert f"1280x2880,8,1280,2880,fp8_trtllm,True,{expected}\n" in csv_path.read_text(encoding="utf-8")
+    assert f"1280x2880,8,1280,2880,fp8_trtllm,False,{expected}\n" in csv_path.read_text(
+        encoding="utf-8"
+    )
+    assert f"1280x2880,8,1280,2880,fp8_trtllm,True,{expected}\n" in csv_path.read_text(
+        encoding="utf-8"
+    )
 
 
 def test_empty_driver_error_has_no_synthetic_reason():
@@ -426,8 +430,8 @@ def test_run_case_streams_and_appends_to_the_driver_log(tmp_path, capsys):
     benchmarks_dir = tmp_path / "benchmarks"
     benchmarks_dir.mkdir()
     (benchmarks_dir / "flashinfer_benchmark.py").write_text(
-        "print('line one')\nprint('line two')\n"
-    , encoding="utf-8")
+        "print('line one')\nprint('line two')\n", encoding="utf-8"
+    )
     driver_log = tmp_path / "driver.log"
 
     with driver_log.open("w") as log:

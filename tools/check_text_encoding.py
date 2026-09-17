@@ -16,6 +16,11 @@ TARGETS = {"read_text", "write_text"}
 
 
 def violations(path: str) -> list[tuple[int, str]]:
+    """Return ``(lineno, method)`` for each offending call in ``path``.
+
+    A file that will not parse is not ours to police -- ruff and the formatter already have
+    an opinion about it, and a syntax error reported from here would only be noise.
+    """
     try:
         tree = ast.parse(open(path, encoding="utf-8").read(), filename=path)
     except (SyntaxError, UnicodeDecodeError):
@@ -33,9 +38,12 @@ def violations(path: str) -> list[tuple[int, str]]:
 
 
 def main(argv: list[str]) -> int:
+    """Report every offending call across ``argv``; exit non-zero when any is found."""
     bad = [(p, ln, name) for p in argv for ln, name in violations(p)]
     for path, lineno, name in bad:
-        print(f"{path}:{lineno}: {name}() without an explicit encoding= (locale codepage on Windows)")
+        print(
+            f"{path}:{lineno}: {name}() without an explicit encoding= (locale codepage on Windows)"
+        )
     return 1 if bad else 0
 
 

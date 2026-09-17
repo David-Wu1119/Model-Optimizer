@@ -23,7 +23,9 @@ SCRIPT = Path(__file__).parents[1] / "scripts" / "nel-gdpval.sh"
 def test_launcher_uses_validated_pin_despite_environment_override(tmp_path):
     args_file = tmp_path / "uvx-args"
     uvx = tmp_path / "uvx"
-    uvx.write_text('#!/usr/bin/env bash\nprintf "%s\\n" "$@" > "$UVX_ARGS_FILE"\n', encoding="utf-8")
+    uvx.write_text(
+        '#!/usr/bin/env bash\nprintf "%s\\n" "$@" > "$UVX_ARGS_FILE"\n', encoding="utf-8"
+    )
     uvx.chmod(0o755)
 
     env = os.environ.copy()

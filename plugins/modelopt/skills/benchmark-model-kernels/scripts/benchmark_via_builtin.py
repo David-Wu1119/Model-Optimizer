@@ -838,8 +838,9 @@ def main(argv: list[str] | None = None) -> None:
     if builtin_csv.exists() or combined_csv.exists():
         parser.error(f"{args.workdir} already contains results; choose a fresh --workdir")
     testlist.write_text(
-        "\n".join(shlex.join([*case.argv, "--case_tag", case.tag]) for case in cases) + "\n"
-    , encoding="utf-8")
+        "\n".join(shlex.join([*case.argv, "--case_tag", case.tag]) for case in cases) + "\n",
+        encoding="utf-8",
+    )
 
     header = _environment_header(args.flashinfer_repo)
     rows = _execute_cases(cases, benchmarks_dir, args.workdir, driver_log, header)
