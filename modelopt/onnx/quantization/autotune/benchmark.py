@@ -452,6 +452,7 @@ class TrtExecBenchmark(Benchmark):
         safe_binary = os.path.join(self.remote_bin_path, "trtexec_safe")
         probe_cmd = [
             "ssh",
+            "-oBatchMode=yes",
             "-oStrictHostKeyChecking=accept-new",
             "-p",
             str(self.remote_port),
@@ -536,11 +537,12 @@ class TrtExecBenchmark(Benchmark):
                 self.logger.error(f"stderr: {_redact_url_password(result.stderr)}")
                 return float("inf")
             if self.has_remote_config:
-                # need to push the model to the device and use trtexec_safe to run
+                # Push the engine to the remote device and run trtexec_safe (or trtexec --safe).
                 scp_cmd = [
                     "scp",
                     "-P",
                     str(self.remote_port),
+                    "-oBatchMode=yes",
                     "-oStrictHostKeyChecking=accept-new",
                     self.engine_path,
                     f"{self.remote_user}@{self.remote_ip}:{shlex.quote(self.remote_engine_path)}",
@@ -572,6 +574,7 @@ class TrtExecBenchmark(Benchmark):
                         extra_flags = "--safe "
                     remote_run_cmd = [
                         "ssh",
+                        "-oBatchMode=yes",
                         "-oStrictHostKeyChecking=accept-new",
                         "-p",
                         f"{self.remote_port}",
@@ -591,6 +594,7 @@ class TrtExecBenchmark(Benchmark):
                     # Cleanup remote engine file after benchmarking to avoid disk filling up
                     cleanup_cmd = [
                         "ssh",
+                        "-oBatchMode=yes",
                         "-p",
                         str(self.remote_port),
                         "-oStrictHostKeyChecking=accept-new",
@@ -621,7 +625,7 @@ class TrtExecBenchmark(Benchmark):
             # trtexec_safe / trtexec --safe emit "GPU Compute Time"; local trtexec emits "Latency"
             _latency_pattern = (
                 r"\[I\]\s+GPU Compute Time:.*?median\s*=\s*([\d.]+)\s*ms"
-                if self._remote_use_trtexec_safe
+                if self._remote_use_trtexec_safe is not None
                 else r"\[I\]\s+Latency:.*?median\s*=\s*([\d.]+)\s*ms"
             )
             if not (match := re.search(_latency_pattern, result.stdout, re.IGNORECASE)):
