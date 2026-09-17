@@ -53,7 +53,7 @@ pipeline:
       - KEY: value
 """
         path = tmp_yaml(content)
-        with open(path, encoding="utf-8") as f:
+        with open(path) as f:
             data = yaml.safe_load(f)
 
         assert data["job_name"] == "test_job"
@@ -77,7 +77,7 @@ allow_to_fail: false
 skip: false
 """
         path = tmp_yaml(content)
-        with open(path, encoding="utf-8") as f:
+        with open(path) as f:
             data = yaml.safe_load(f)
 
         # Verify the YAML parses into valid SandboxPipeline kwargs
@@ -186,7 +186,7 @@ class TestTestYamlFormat:
     allow_to_fail: false
 """
         path = tmp_yaml(content)
-        with open(path, encoding="utf-8") as f:
+        with open(path) as f:
             data = yaml.safe_load(f)
 
         assert isinstance(data, list)

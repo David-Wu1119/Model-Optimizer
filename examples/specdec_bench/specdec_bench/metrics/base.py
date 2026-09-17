@@ -38,13 +38,13 @@ class Metric:
         if self.out:
             filename = os.path.join(self.directory, f"{self.name}.json")
             if os.path.exists(filename):
-                with open(filename, encoding="utf-8") as json_file:
+                with open(filename) as json_file:
                     existing_data = json.load(json_file)
                 existing_data.append(self.out)
             else:
                 existing_data = [self.out]
 
-            with open(filename, "w", encoding="utf-8") as json_file:
+            with open(filename, "w") as json_file:
                 json.dump(existing_data, json_file, indent=4)
 
     @classmethod

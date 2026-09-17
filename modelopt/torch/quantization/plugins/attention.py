@@ -255,7 +255,7 @@ def _create_quantized_class_from_ast(
             temp_file_name = temp_file.name
             print(f"Definition of {new_class_name} saved to {temp_file_name}")
     else:
-        with open(temp_file_name, "w", encoding="utf-8") as f:
+        with open(temp_file_name, "w") as f:
             f.write(module_code_str)
 
     # Exec with python runtime and extract the new class

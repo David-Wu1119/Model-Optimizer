@@ -61,7 +61,7 @@ class ReplacementLibrary:
 
     @staticmethod
     def _load_replacement_library(replacement_library_path: str | Path) -> list[dict]:
-        replacement_library = json.loads(Path(replacement_library_path).read_text(encoding="utf-8"))
+        replacement_library = json.loads(Path(replacement_library_path).read_text())
         replacement_library = [
             parse_layer_replacement(layer_replacement) for layer_replacement in replacement_library
         ]

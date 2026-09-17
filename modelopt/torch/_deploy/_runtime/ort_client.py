@@ -114,7 +114,7 @@ class ORTLocalClient(RuntimeClient):
 
             # end profiling and load results
             prof_file = ort_session.end_profiling()
-            with open(prof_file, encoding="utf-8") as p_file:
+            with open(prof_file) as p_file:
                 results = json.load(p_file)
 
         # get latency from profiling results (latencies are in nano-seconds)

@@ -344,7 +344,7 @@ class ModelOptArgParser(HfArgumentParser):
             args = args[:idx] + args[idx + 2 :]  # strip --config <path> from argv
             import yaml
 
-            with open(config_path, encoding="utf-8") as f:
+            with open(config_path) as f:
                 config = yaml.safe_load(f)
             if config:
                 known_by_parser = {a.dest for a in self._actions}
@@ -446,7 +446,7 @@ class ModelOptArgParser(HfArgumentParser):
         # Remove trailing blank lines so markdownlint won't modify the file
         while lines and lines[-1] == "":
             lines.pop()
-        Path(output_path).write_text("\n".join(lines) + "\n", encoding="utf-8")
+        Path(output_path).write_text("\n".join(lines) + "\n")
         print(f"Generated {output_path}")
 
     @staticmethod
@@ -676,7 +676,7 @@ class ModelOptHFTrainer(Trainer):
         """
         import yaml
 
-        with open(path, encoding="utf-8") as f:
+        with open(path) as f:
             cfg = yaml.safe_load(f)
         if not isinstance(cfg, dict):
             raise ValueError(f"lr_config must be a YAML mapping, got {type(cfg).__name__}")

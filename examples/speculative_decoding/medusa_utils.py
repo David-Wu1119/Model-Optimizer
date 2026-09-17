@@ -209,10 +209,10 @@ def make_medusa_supervised_data_module(
     print_rank_0("Loading data...")
 
     if data_args.data_path.endswith("jsonl"):
-        with open(data_args.data_path, encoding="utf-8") as f:
+        with open(data_args.data_path) as f:
             data_json = [json.loads(line) for line in f]
     else:
-        data_json = json.load(open(data_args.data_path, encoding="utf-8"))
+        data_json = json.load(open(data_args.data_path))
     train_dataset = dataset_cls(data_json[: int(len(data_json) * 0.95)], tokenizer=tokenizer)
     eval_dataset = dataset_cls(data_json[int(len(data_json) * 0.95) :], tokenizer=tokenizer)
 

@@ -77,7 +77,7 @@ def test_all_configs_target_vendored_builders():
     configs = sorted((_FASTGEN_DIR / "configs").glob("*.yaml"))
     assert configs, "no configs found under configs/"
     for cfg in configs:
-        text = cfg.read_text(encoding="utf-8")
+        text = cfg.read_text()
         assert "nemo_automodel.components.datasets.diffusion.build_" not in text, (
             f"{cfg.name} still targets the upstream dataloader builder (breaks on stock upstream)"
         )
@@ -93,7 +93,7 @@ def test_no_tools_star_imports_in_vendored_code():
         str(py.relative_to(_FASTGEN_DIR))
         for sub in ("fastgen_data", "preprocess")
         for py in (_FASTGEN_DIR / sub).rglob("*.py")
-        if pat.search(py.read_text(encoding="utf-8"))
+        if pat.search(py.read_text())
     ]
     assert not offenders, f"tools.* imports found in vendored code: {offenders}"
 
@@ -133,7 +133,7 @@ FORMERLY_VENDORED = [
 def test_formerly_vendored_files_use_standard_nvidia_header():
     """They carry only the standard NVIDIA SPDX header — no provenance note, no duplicate license."""
     for target in FORMERLY_VENDORED:
-        text = (_FASTGEN_DIR / target).read_text(encoding="utf-8")
+        text = (_FASTGEN_DIR / target).read_text()
         assert text.startswith(
             "# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES"
         ), f"{target}: must start with the standard NVIDIA SPDX header"
@@ -220,7 +220,7 @@ def test_partial_load_checkpointer_overrides_only_load_optimizer():
 
 def test_recipe_injects_partial_load_checkpointer_in_load_checkpoint():
     """The recipe upgrades self.checkpointer in load_checkpoint (before the parent restore)."""
-    src = (_FASTGEN_DIR / "dmd2_recipe.py").read_text(encoding="utf-8")
+    src = (_FASTGEN_DIR / "dmd2_recipe.py").read_text()
     assert "from fastgen_checkpoint import make_optimizer_partial_load_tolerant" in src
     assert "make_optimizer_partial_load_tolerant(self.checkpointer)" in src
 

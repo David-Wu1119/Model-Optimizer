@@ -59,7 +59,7 @@ def _tiny_quantized_llama(quant_cfg=None, tie=True):
 def _load_all(export_dir: Path) -> dict:
     index = export_dir / "model.safetensors.index.json"
     if index.exists():
-        weight_map = json.loads(index.read_text(encoding="utf-8"))["weight_map"]
+        weight_map = json.loads(index.read_text())["weight_map"]
         out: dict = {}
         for fname in set(weight_map.values()):
             out.update(load_file(str(export_dir / fname)))
@@ -127,7 +127,7 @@ def test_streaming_export_subsplits_by_max_shard_size(tmp_path):
     d = tmp_path
     _export_fsdp2_checkpoint_streaming(model, torch.bfloat16, export_dir=d, max_shard_size=2048)
 
-    index = json.loads((d / "model.safetensors.index.json").read_text(encoding="utf-8"))
+    index = json.loads((d / "model.safetensors.index.json").read_text())
     assert len(set(index["weight_map"].values())) > 1
     loaded = _load_all(d)
     assert set(loaded) == set(index["weight_map"])

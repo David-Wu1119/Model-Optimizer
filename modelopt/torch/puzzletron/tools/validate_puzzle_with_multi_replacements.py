@@ -277,13 +277,12 @@ def load_puzzle_solutions(
     assert solutions_path.exists(), f"{solutions_path=} does not exist"
 
     if solutions_path.is_file():
-        puzzle_solutions = json.loads(solutions_path.read_text(encoding="utf-8"))
+        puzzle_solutions = json.loads(solutions_path.read_text())
         if isinstance(puzzle_solutions, dict):
             puzzle_solutions = [puzzle_solutions]
     else:
         puzzle_solutions = [
-            json.loads(p.read_text(encoding="utf-8"))
-            for p in solutions_path.glob("*solution*.json")
+            json.loads(p.read_text()) for p in solutions_path.glob("*solution*.json")
         ]
 
     if len(puzzle_solutions) == 0:

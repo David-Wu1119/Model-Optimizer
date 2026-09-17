@@ -84,10 +84,10 @@ def save_model_as_anymodel(model, output_dir: Path, descriptor):
 
     config_path = output_dir / "config.json"
     if config_path.exists():
-        with open(config_path, encoding="utf-8") as f:
+        with open(config_path) as f:
             config_data = json.load(f)
         config_data["architectures"] = ["AnyModel"]
-        with open(config_path, "w", encoding="utf-8") as f:
+        with open(config_path, "w") as f:
             json.dump(config_data, f, indent=2)
 
 
@@ -105,7 +105,7 @@ def convert_config_to_vllm_anymodel(config_dir: Path):
     shutil.copy(config_path, backup_config_path)
 
     try:
-        with open(config_path, encoding="utf-8") as f:
+        with open(config_path) as f:
             config_data = json.load(f)
     except json.JSONDecodeError as e:
         raise ValueError(f"Error loading config file: {e}") from e
@@ -118,7 +118,7 @@ def convert_config_to_vllm_anymodel(config_dir: Path):
         mprint("Converted block configs to per-layer config")
     else:
         mprint("No block configs to convert")
-    with open(config_path, "w", encoding="utf-8") as f:
+    with open(config_path, "w") as f:
         json.dump(vars(config), f, indent=2)
 
 

@@ -44,10 +44,10 @@ def setup_mocks():
     (tmp_path / "model.engine").write_bytes(engine_bytes)
 
     (tmp_path / f"{dummy_hash}-profile.json").write_text(
-        json.dumps([{"count": 1}, {"name": "dummy_layer", "averageMs": 0.001}]), encoding="utf-8"
+        json.dumps([{"count": 1}, {"name": "dummy_layer", "averageMs": 0.001}])
     )
     (tmp_path / f"{dummy_hash}-layerInfo.json").write_text(
-        json.dumps({"Layers": [{"Name": "dummy_layer"}]}), encoding="utf-8"
+        json.dumps({"Layers": [{"Name": "dummy_layer"}]})
     )
 
     mock_onnx = mock.Mock()

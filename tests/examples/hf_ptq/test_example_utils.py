@@ -73,17 +73,13 @@ def test_copy_custom_model_files_preserves_non_weight_sidecars(tmp_path):
         "model.gguf": "source weights\n",
     }
     for file_name, contents in source_files.items():
-        (source_dir / file_name).write_text(contents, encoding="utf-8")
+        (source_dir / file_name).write_text(contents)
 
-    (export_dir / "config.json").write_text('{"export": "config"}\n', encoding="utf-8")
-    (export_dir / "generation_config.json").write_text(
-        '{"export": "generation"}\n', encoding="utf-8"
-    )
-    (export_dir / "hf_quant_config.json").write_text('{"export": "quant"}\n', encoding="utf-8")
-    (export_dir / "chat_template.jinja").write_text("{{ exported_messages }}\n", encoding="utf-8")
-    (export_dir / "tokenizer_config.json").write_text(
-        '{"chat_template": "export"}\n', encoding="utf-8"
-    )
+    (export_dir / "config.json").write_text('{"export": "config"}\n')
+    (export_dir / "generation_config.json").write_text('{"export": "generation"}\n')
+    (export_dir / "hf_quant_config.json").write_text('{"export": "quant"}\n')
+    (export_dir / "chat_template.jinja").write_text("{{ exported_messages }}\n")
+    (export_dir / "tokenizer_config.json").write_text('{"chat_template": "export"}\n')
 
     example_utils.copy_custom_model_files(str(source_dir), str(export_dir), trust_remote_code=False)
 
@@ -95,15 +91,11 @@ def test_copy_custom_model_files_preserves_non_weight_sidecars(tmp_path):
         "chat_template.jinja",
         "generation_config.json",
     ]:
-        assert (export_dir / file_name).read_text(encoding="utf-8") == source_files[file_name]
+        assert (export_dir / file_name).read_text() == source_files[file_name]
 
-    assert (export_dir / "config.json").read_text(encoding="utf-8") == '{"export": "config"}\n'
-    assert (export_dir / "hf_quant_config.json").read_text(
-        encoding="utf-8"
-    ) == '{"export": "quant"}\n'
-    assert (export_dir / "tokenizer_config.json").read_text(
-        encoding="utf-8"
-    ) == '{"chat_template": "export"}\n'
+    assert (export_dir / "config.json").read_text() == '{"export": "config"}\n'
+    assert (export_dir / "hf_quant_config.json").read_text() == '{"export": "quant"}\n'
+    assert (export_dir / "tokenizer_config.json").read_text() == '{"chat_template": "export"}\n'
     assert not (export_dir / "quant_config.json").exists()
     assert not (export_dir / "quantize_config.json").exists()
     assert not (export_dir / "recipe.yaml").exists()
@@ -111,17 +103,13 @@ def test_copy_custom_model_files_preserves_non_weight_sidecars(tmp_path):
     assert not (export_dir / "model-00001-of-00001.safetensors").exists()
     assert not (export_dir / "model.gguf").exists()
 
-    (export_dir / "generation_config.json").write_text(
-        '{"export": "generation"}\n', encoding="utf-8"
-    )
+    (export_dir / "generation_config.json").write_text('{"export": "generation"}\n')
     example_utils.copy_custom_model_files(
         str(source_dir),
         str(export_dir),
         exclude_files={"generation_config.json"},
     )
-    assert (export_dir / "generation_config.json").read_text(
-        encoding="utf-8"
-    ) == '{"export": "generation"}\n'
+    assert (export_dir / "generation_config.json").read_text() == '{"export": "generation"}\n'
 
 
 def test_resolve_model_path_snapshot_download_stays_allowlisted(monkeypatch, tmp_path):
@@ -227,8 +215,7 @@ def test_load_mtp_weights_separate_indexed_shard(tmp_path):
                     **dict.fromkeys(mtp_tensors, mtp_shard),
                 }
             }
-        ),
-        encoding="utf-8",
+        )
     )
 
     cfg = SimpleNamespace(num_hidden_layers=4, num_nextn_predict_layers=0)

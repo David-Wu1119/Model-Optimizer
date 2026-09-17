@@ -197,12 +197,6 @@ docstring-code-line-length = "dynamic"
 [tool.ruff.lint]
 # See available rules at https://docs.astral.sh/ruff/rules/
 # Flake8 is equivalent to pycodestyle + pyflakes + mccabe.
-# PLW1514 (unspecified-encoding) is still a preview rule, and plain `preview = true` would also
-# switch on preview BEHAVIOUR for the stable rules above -- 3755 findings on this tree.
-# explicit-preview-rules keeps that contained: only preview rules named exactly here are enabled.
-preview = true
-explicit-preview-rules = true
-
 select = [
     "C4",   # Flake8 comprehensions
     "D",    # pydocstyle
@@ -216,11 +210,6 @@ select = [
     "PGH",  # pygrep-hooks
     "PIE",  # flake8-pie
     "PLE",  # pylint errors
-    # Text I/O without an explicit encoding uses the locale codepage, which is cp1252 on the
-    # Windows runners -- a UTF-8 file then dies with UnicodeDecodeError on the first non-Latin-1
-    # byte, a failure no other platform sees. Covers `open` only; see the read_text/write_text
-    # pre-commit hook for the half ruff does not implement.
-    "PLW1514",  # pylint: unspecified encoding
     "PLR",  # pylint refactor
     "PT",   # flake8-pytest-style
     "RUF",  # ruff

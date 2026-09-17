@@ -63,7 +63,7 @@ def _check_provenance(run_dir: Path) -> list[str]:
     if not cfg_path.is_file():
         return list(_REQUIRED_PROVENANCE_FIELDS)
     try:
-        with open(cfg_path, encoding="utf-8") as f:
+        with open(cfg_path) as f:
             cfg = json.load(f)
     except (OSError, json.JSONDecodeError):
         return list(_REQUIRED_PROVENANCE_FIELDS)

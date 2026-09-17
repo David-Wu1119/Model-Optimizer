@@ -82,7 +82,7 @@ def _test_parallel_load_and_export(rank, size, ckpt_dir, export_dir, cpu_offload
     export_hf_checkpoint(model, export_dir=export_dir, dtype=torch.bfloat16)
 
     if rank == 0:
-        with open(os.path.join(export_dir, "config.json"), encoding="utf-8") as f:
+        with open(os.path.join(export_dir, "config.json")) as f:
             cfg = json.load(f)
         assert cfg["architectures"] == ["LlamaForCausalLM"]
 

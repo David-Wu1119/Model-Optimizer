@@ -711,7 +711,7 @@ class DistillationTrainer(LtxvTrainer):
             if not prompts_path.exists():
                 raise FileNotFoundError(f"Calibration prompts file not found: {prompts_path}")
             logger.info(f"Loading calibration prompts from {prompts_path}")
-            with open(prompts_path, encoding="utf-8") as f:
+            with open(prompts_path) as f:
                 prompts = [line.strip() for line in f if line.strip()]
         else:
             logger.info(
@@ -1153,7 +1153,7 @@ class DistillationTrainer(LtxvTrainer):
         import yaml
 
         config_path = Path(self._config.output_dir) / "training_config.yaml"
-        with open(config_path, "w", encoding="utf-8") as f:
+        with open(config_path, "w") as f:
             yaml.dump(self._config.model_dump(), f, default_flow_style=False, indent=2)
         logger.info(
             f"Training configuration saved to: {config_path.relative_to(self._config.output_dir)}"
@@ -1230,7 +1230,7 @@ class DistillationTrainer(LtxvTrainer):
                 "quant_cfg": self._distillation_config.quant_cfg,
             }
             metadata_path = tmp_dir / "distillation_metadata.json"
-            with open(metadata_path, "w", encoding="utf-8") as f:
+            with open(metadata_path, "w") as f:
                 json.dump(metadata, f, indent=2)
 
         # Barrier: ensure all ranks finished writing before rename
@@ -1376,7 +1376,7 @@ class DistillationTrainer(LtxvTrainer):
         # Load custom metadata to get global_step
         metadata_path = checkpoint_dir / "distillation_metadata.json"
         if metadata_path.exists():
-            with open(metadata_path, encoding="utf-8") as f:
+            with open(metadata_path) as f:
                 metadata = json.load(f)
             resumed_step = metadata.get("global_step", 0)
             logger.info(f"Restored global_step={resumed_step} from metadata")

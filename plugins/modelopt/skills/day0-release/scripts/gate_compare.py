@@ -201,9 +201,9 @@ def main(argv=None):
     args = p.parse_args(argv)
 
     try:
-        with open(args.baseline, encoding="utf-8") as f:
+        with open(args.baseline) as f:
             baseline = json.load(f)
-        with open(args.candidate, encoding="utf-8") as f:
+        with open(args.candidate) as f:
             candidate = json.load(f)
         scales = json.loads(args.scales) if args.scales else None
     except (OSError, json.JSONDecodeError) as e:

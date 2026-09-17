@@ -94,15 +94,15 @@ QUANTIZE_CONFIG_SCHEMA = "# modelopt-schema: modelopt.torch.quantization.config.
 
 
 def _write_quantizer_attribute(path, body: str):
-    path.write_text(QUANTIZER_ATTRIBUTE_SCHEMA + body, encoding="utf-8")
+    path.write_text(QUANTIZER_ATTRIBUTE_SCHEMA + body)
 
 
 def _write_quantizer_cfg_entry(path, body: str):
-    path.write_text(QUANTIZER_CFG_ENTRY_SCHEMA + body, encoding="utf-8")
+    path.write_text(QUANTIZER_CFG_ENTRY_SCHEMA + body)
 
 
 def _write_quantizer_cfg_list(path, body: str):
-    path.write_text(QUANTIZER_CFG_LIST_SCHEMA + body, encoding="utf-8")
+    path.write_text(QUANTIZER_CFG_LIST_SCHEMA + body)
 
 
 def _cfg_to_dict(cfg):
@@ -123,13 +123,13 @@ def _cfg_to_dict(cfg):
 
 def test_load_config_plain(tmp_path):
     """A plain config is returned as-is."""
-    (tmp_path / "cfg.yml").write_text(CFG_AB, encoding="utf-8")
+    (tmp_path / "cfg.yml").write_text(CFG_AB)
     assert load_config(tmp_path / "cfg.yml") == {"a": 1, "b": 2}
 
 
 def test_load_config_suffix_probe(tmp_path):
     """load_config finds a .yml file when suffix is omitted from a string path."""
-    (tmp_path / "mycfg.yml").write_text(CFG_KEY_VAL, encoding="utf-8")
+    (tmp_path / "mycfg.yml").write_text(CFG_KEY_VAL)
     assert load_config(str(tmp_path / "mycfg")) == {"key": "val"}
 
 
@@ -268,8 +268,7 @@ def test_load_recipe_local_tree_overrides_builtin_even_on_name_collision(tmp_pat
     local = tmp_path / old_rel
     local.parent.mkdir(parents=True)
     local.write_text(
-        "metadata:\n  recipe_type: ptq\nquantize:\n  quant_cfg: {}\n  algorithm: max\n",
-        encoding="utf-8",
+        "metadata:\n  recipe_type: ptq\nquantize:\n  quant_cfg: {}\n  algorithm: max\n"
     )
     monkeypatch.chdir(tmp_path)
 
@@ -447,7 +446,7 @@ def test_load_recipe_missing_raises(tmp_path):
 def test_load_recipe_missing_recipe_type_raises(tmp_path):
     """load_recipe raises ValueError when metadata.recipe_type is absent."""
     bad = tmp_path / "bad.yml"
-    bad.write_text(CFG_RECIPE_MISSING_TYPE, encoding="utf-8")
+    bad.write_text(CFG_RECIPE_MISSING_TYPE)
     with pytest.raises(ValueError, match="recipe_type"):
         load_recipe(bad)
 
@@ -455,7 +454,7 @@ def test_load_recipe_missing_recipe_type_raises(tmp_path):
 def test_load_recipe_missing_quantize_raises(tmp_path):
     """A PTQ recipe missing the ``quantize`` section is rejected (no silent default)."""
     bad = tmp_path / "bad.yml"
-    bad.write_text(CFG_RECIPE_MISSING_quantize, encoding="utf-8")
+    bad.write_text(CFG_RECIPE_MISSING_quantize)
     with pytest.raises(ValueError, match="quantize"):
         load_recipe(bad)
 
@@ -463,7 +462,7 @@ def test_load_recipe_missing_quantize_raises(tmp_path):
 def test_load_recipe_missing_metadata_raises(tmp_path):
     """A recipe missing the ``metadata`` section is rejected (no silent default)."""
     bad = tmp_path / "bad.yml"
-    bad.write_text(CFG_RECIPE_MISSING_METADATA, encoding="utf-8")
+    bad.write_text(CFG_RECIPE_MISSING_METADATA)
     with pytest.raises(ValueError, match="metadata"):
         load_recipe(bad)
 
@@ -471,7 +470,7 @@ def test_load_recipe_missing_metadata_raises(tmp_path):
 def test_load_recipe_unsupported_type_raises(tmp_path):
     """load_recipe raises ValueError for an unknown recipe_type."""
     bad = tmp_path / "bad.yml"
-    bad.write_text(CFG_RECIPE_UNSUPPORTED_TYPE, encoding="utf-8")
+    bad.write_text(CFG_RECIPE_UNSUPPORTED_TYPE)
     # Schema-driven validation reports the failure via the metadata schema's enum check.
     with pytest.raises(ValueError, match="recipe_type"):
         load_recipe(bad)
@@ -484,10 +483,8 @@ def test_load_recipe_unsupported_type_raises(tmp_path):
 
 def test_load_recipe_dir(tmp_path):
     """load_recipe loads a recipe from a directory with metadata.yml + quantize.yml."""
-    (tmp_path / "metadata.yml").write_text(
-        "recipe_type: ptq\ndescription: Dir test.\n", encoding="utf-8"
-    )
-    (tmp_path / "quantize.yml").write_text("algorithm: max\nquant_cfg: []\n", encoding="utf-8")
+    (tmp_path / "metadata.yml").write_text("recipe_type: ptq\ndescription: Dir test.\n")
+    (tmp_path / "quantize.yml").write_text("algorithm: max\nquant_cfg: []\n")
     recipe = load_recipe(tmp_path)
     assert recipe.recipe_type == RecipeType.PTQ
     assert recipe.description == "Dir test."
@@ -497,14 +494,14 @@ def test_load_recipe_dir(tmp_path):
 
 def test_load_recipe_dir_missing_metadata_raises(tmp_path):
     """load_recipe raises ValueError when metadata.yml is absent from the directory."""
-    (tmp_path / "quantize.yml").write_text("algorithm: max\nquant_cfg: {}\n", encoding="utf-8")
+    (tmp_path / "quantize.yml").write_text("algorithm: max\nquant_cfg: {}\n")
     with pytest.raises(ValueError, match="metadata"):
         load_recipe(tmp_path)
 
 
 def test_load_recipe_dir_missing_quantize_raises(tmp_path):
     """load_recipe raises ValueError when quantize.yml is absent from the directory."""
-    (tmp_path / "metadata.yml").write_text("recipe_type: ptq\n", encoding="utf-8")
+    (tmp_path / "metadata.yml").write_text("recipe_type: ptq\n")
     with pytest.raises(ValueError, match="quantize"):
         load_recipe(tmp_path)
 
@@ -528,7 +525,7 @@ def test_load_recipe_eagle_builtin():
 def test_load_recipe_eagle_missing_section_raises(tmp_path):
     """load_recipe raises ValueError when 'eagle' is absent for a SPECULATIVE_EAGLE recipe."""
     bad = tmp_path / "bad.yml"
-    bad.write_text("metadata:\n  recipe_type: speculative_eagle\n", encoding="utf-8")
+    bad.write_text("metadata:\n  recipe_type: speculative_eagle\n")
     with pytest.raises(ValueError, match="eagle"):
         load_recipe(bad)
 
@@ -537,8 +534,7 @@ def test_load_recipe_eagle_field_validation_raises(tmp_path):
     """Invalid EAGLE field values must fail Pydantic validation at load time."""
     bad = tmp_path / "bad.yml"
     bad.write_text(
-        "metadata:\n  recipe_type: speculative_eagle\neagle:\n  eagle_ttt_steps: not_an_int\n",
-        encoding="utf-8",
+        "metadata:\n  recipe_type: speculative_eagle\neagle:\n  eagle_ttt_steps: not_an_int\n"
     )
     with pytest.raises(Exception):  # pydantic.ValidationError
         load_recipe(bad)
@@ -563,7 +559,7 @@ def test_load_recipe_dflash_builtin():
 def test_load_recipe_dflash_missing_section_raises(tmp_path):
     """load_recipe raises ValueError when 'dflash' is absent for a SPECULATIVE_DFLASH recipe."""
     bad = tmp_path / "bad.yml"
-    bad.write_text("metadata:\n  recipe_type: speculative_dflash\n", encoding="utf-8")
+    bad.write_text("metadata:\n  recipe_type: speculative_dflash\n")
     with pytest.raises(ValueError, match="dflash"):
         load_recipe(bad)
 
@@ -576,8 +572,7 @@ def test_load_recipe_eagle_with_training_sections(tmp_path):
         "model:\n  model_name_or_path: TinyLlama/TinyLlama-1.1B-Chat-v1.0\n"
         "data:\n  data_path: train.jsonl\n"
         "training:\n  output_dir: ckpts/test\n"
-        "eagle:\n  eagle_decoder_type: llama\n  eagle_ttt_steps: 2\n",
-        encoding="utf-8",
+        "eagle:\n  eagle_decoder_type: llama\n  eagle_ttt_steps: 2\n"
     )
     recipe = load_recipe(recipe_path)
     assert isinstance(recipe, ModelOptEagleRecipe)
@@ -594,8 +589,7 @@ def test_typed_model_section_rejects_unknown_field(tmp_path):
     recipe_path.write_text(
         "metadata:\n  recipe_type: speculative_eagle\n"
         "model:\n  typo_name: oops\n"
-        "eagle:\n  eagle_decoder_type: llama\n",
-        encoding="utf-8",
+        "eagle:\n  eagle_decoder_type: llama\n"
     )
     with pytest.raises(Exception):  # pydantic.ValidationError
         load_recipe(recipe_path)
@@ -610,8 +604,7 @@ def test_typed_training_section_accepts_hf_extras(tmp_path):
         "  num_train_epochs: 3\n"  # HF field — accepted as extra
         "  learning_rate: 1.0e-4\n"  # HF field — accepted as extra
         "  training_seq_len: 4096\n"  # our extension field — validated
-        "eagle:\n  eagle_decoder_type: llama\n",
-        encoding="utf-8",
+        "eagle:\n  eagle_decoder_type: llama\n"
     )
     recipe = load_recipe(recipe_path)
     assert isinstance(recipe, ModelOptEagleRecipe)
@@ -689,8 +682,7 @@ def test_load_recipe_with_overrides(tmp_path):
     recipe_path.write_text(
         "metadata:\n  recipe_type: speculative_eagle\n"
         "model:\n  trust_remote_code: false\n"
-        "eagle:\n  eagle_ttt_steps: 3\n",
-        encoding="utf-8",
+        "eagle:\n  eagle_ttt_steps: 3\n"
     )
     recipe = load_recipe(
         recipe_path,
@@ -703,8 +695,8 @@ def test_load_recipe_with_overrides(tmp_path):
 
 def test_load_recipe_overrides_rejected_for_dir(tmp_path):
     """Overrides are not allowed for directory-format recipes."""
-    (tmp_path / "recipe.yml").write_text("metadata:\n  recipe_type: ptq\n", encoding="utf-8")
-    (tmp_path / "quantize.yml").write_text("algorithm: max\nquant_cfg: []\n", encoding="utf-8")
+    (tmp_path / "recipe.yml").write_text("metadata:\n  recipe_type: ptq\n")
+    (tmp_path / "quantize.yml").write_text("algorithm: max\nquant_cfg: []\n")
     with pytest.raises(ValueError, match="directory-format"):
         load_recipe(tmp_path, overrides=["quantize.algorithm=gptq"])
 
@@ -715,8 +707,7 @@ def test_typed_data_sample_size_validator(tmp_path):
     recipe_path.write_text(
         "metadata:\n  recipe_type: speculative_eagle\n"
         "data:\n  sample_size: 0\n"
-        "eagle:\n  eagle_decoder_type: llama\n",
-        encoding="utf-8",
+        "eagle:\n  eagle_decoder_type: llama\n"
     )
     with pytest.raises(Exception, match="sample_size"):  # pydantic.ValidationError
         load_recipe(recipe_path)
@@ -726,8 +717,7 @@ def test_load_recipe_dflash_field_validation_raises(tmp_path):
     """Invalid DFlash field values must fail Pydantic validation at load time."""
     bad = tmp_path / "bad.yml"
     bad.write_text(
-        "metadata:\n  recipe_type: speculative_dflash\ndflash:\n  dflash_block_size: not_an_int\n",
-        encoding="utf-8",
+        "metadata:\n  recipe_type: speculative_dflash\ndflash:\n  dflash_block_size: not_an_int\n"
     )
     with pytest.raises(Exception):  # pydantic.ValidationError
         load_recipe(bad)
@@ -815,8 +805,7 @@ def test_import_resolves_cfg_reference(tmp_path):
         f"  quant_cfg:\n"
         f"    - quantizer_name: '*weight_quantizer'\n"
         f"      cfg:\n"
-        f"        $import: fp8\n",
-        encoding="utf-8",
+        f"        $import: fp8\n"
     )
     recipe = load_recipe(recipe_file)
     entry = recipe.quantize["quant_cfg"][0]
@@ -840,8 +829,7 @@ def test_import_same_name_used_twice(tmp_path):
         f"        $import: fp8\n"
         f"    - quantizer_name: '*input_quantizer'\n"
         f"      cfg:\n"
-        f"        $import: fp8\n",
-        encoding="utf-8",
+        f"        $import: fp8\n"
     )
     recipe = load_recipe(recipe_file)
     assert recipe.quantize["quant_cfg"][0]["cfg"] == recipe.quantize["quant_cfg"][1]["cfg"]
@@ -866,8 +854,7 @@ def test_import_multiple_snippets(tmp_path):
         f"        $import: nvfp4\n"
         f"    - quantizer_name: '*[kv]_bmm_quantizer'\n"
         f"      cfg:\n"
-        f"        $import: fp8\n",
-        encoding="utf-8",
+        f"        $import: fp8\n"
     )
     recipe = load_recipe(recipe_file)
     assert recipe.quantize["quant_cfg"][0]["cfg"]["num_bits"] == (2, 1)
@@ -892,8 +879,7 @@ def test_import_inline_cfg_not_affected(tmp_path):
         f"    - quantizer_name: '*input_quantizer'\n"
         f"      cfg:\n"
         f"        num_bits: 8\n"
-        f"        axis: 0\n",
-        encoding="utf-8",
+        f"        axis: 0\n"
     )
     recipe = load_recipe(recipe_file)
     assert recipe.quantize["quant_cfg"][1]["cfg"].model_dump(exclude_unset=True) == {
@@ -915,8 +901,7 @@ def test_import_unknown_reference_raises(tmp_path):
         "  quant_cfg:\n"
         "    - quantizer_name: '*weight_quantizer'\n"
         "      cfg:\n"
-        "        $import: nonexistent\n",
-        encoding="utf-8",
+        "        $import: nonexistent\n"
     )
     with pytest.raises(ValueError, match=r"Unknown \$import reference"):
         load_recipe(recipe_file)
@@ -932,8 +917,7 @@ def test_import_empty_path_raises(tmp_path):
         "  recipe_type: ptq\n"
         "quantize:\n"
         "  algorithm: max\n"
-        "  quant_cfg: []\n",
-        encoding="utf-8",
+        "  quant_cfg: []\n"
     )
     with pytest.raises(ValueError, match="empty config path"):
         load_recipe(recipe_file)
@@ -941,7 +925,7 @@ def test_import_empty_path_raises(tmp_path):
 
 def test_import_snippet_without_schema_raises(tmp_path):
     """Every imported snippet must declare modelopt-schema, including dict snippets."""
-    (tmp_path / "fp8.yml").write_text("num_bits: e4m3\n", encoding="utf-8")
+    (tmp_path / "fp8.yml").write_text("num_bits: e4m3\n")
     recipe_file = tmp_path / "ptq.yml"
     recipe_file.write_text(
         f"imports:\n"
@@ -953,8 +937,7 @@ def test_import_snippet_without_schema_raises(tmp_path):
         f"  quant_cfg:\n"
         f"    - quantizer_name: '*weight_quantizer'\n"
         f"      cfg:\n"
-        f"        $import: fp8\n",
-        encoding="utf-8",
+        f"        $import: fp8\n"
     )
     with pytest.raises(ValueError, match="modelopt-schema"):
         load_recipe(recipe_file)
@@ -970,8 +953,7 @@ def test_import_not_a_dict_raises(tmp_path):
         "  recipe_type: ptq\n"
         "quantize:\n"
         "  algorithm: max\n"
-        "  quant_cfg: []\n",
-        encoding="utf-8",
+        "  quant_cfg: []\n"
     )
     with pytest.raises(ValueError, match="must be a dict"):
         load_recipe(recipe_file)
@@ -987,8 +969,7 @@ def test_import_no_imports_section(tmp_path):
         "  algorithm: max\n"
         "  quant_cfg:\n"
         "    - quantizer_name: '*'\n"
-        "      enable: false\n",
-        encoding="utf-8",
+        "      enable: false\n"
     )
     recipe = load_recipe(recipe_file)
     assert recipe.quantize["quant_cfg"][0]["enable"] is False
@@ -1016,8 +997,7 @@ def test_import_entry_single_element_list(tmp_path):
         f"quantize:\n"
         f"  algorithm: max\n"
         f"  quant_cfg:\n"
-        f"    - $import: disable_all\n",
-        encoding="utf-8",
+        f"    - $import: disable_all\n"
     )
     recipe = load_recipe(recipe_file)
     assert len(recipe.quantize["quant_cfg"]) == 1
@@ -1038,8 +1018,7 @@ def test_import_entry_element_schema_appends(tmp_path):
         f"quantize:\n"
         f"  algorithm: max\n"
         f"  quant_cfg:\n"
-        f"    - $import: disable_all\n",
-        encoding="utf-8",
+        f"    - $import: disable_all\n"
     )
     recipe = load_recipe(recipe_file)
     # Entry was loaded against the QuantizerCfgEntry pydantic schema, so it is now a
@@ -1065,8 +1044,7 @@ def test_import_entry_wrong_schema_raises(tmp_path):
         f"quantize:\n"
         f"  algorithm: max\n"
         f"  quant_cfg:\n"
-        f"    - $import: fp8\n",
-        encoding="utf-8",
+        f"    - $import: fp8\n"
     )
     with pytest.raises(ValueError, match="expected either"):
         load_recipe(recipe_file)
@@ -1090,8 +1068,7 @@ def test_import_entry_list_splice(tmp_path):
         f"  quant_cfg:\n"
         f"    - quantizer_name: '*'\n"
         f"      enable: false\n"
-        f"    - $import: disables\n",
-        encoding="utf-8",
+        f"    - $import: disables\n"
     )
     recipe = load_recipe(recipe_file)
     assert len(recipe.quantize["quant_cfg"]) == 3
@@ -1112,8 +1089,7 @@ def test_import_entry_sibling_keys_with_list_snippet_raises(tmp_path):
         f"  algorithm: max\n"
         f"  quant_cfg:\n"
         f"    - $import: disable_all\n"
-        f"      quantizer_name: '*extra*'\n",
-        encoding="utf-8",
+        f"      quantizer_name: '*extra*'\n"
     )
     with pytest.raises(ValueError, match="must resolve to a dict"):
         load_recipe(recipe_file)
@@ -1134,8 +1110,7 @@ def test_import_cfg_extend(tmp_path):
         f"    - quantizer_name: '*weight_quantizer'\n"
         f"      cfg:\n"
         f"        $import: fp8\n"
-        f"        axis: 0\n",
-        encoding="utf-8",
+        f"        axis: 0\n"
     )
     recipe = load_recipe(recipe_file)
     cfg = recipe.quantize["quant_cfg"][0]["cfg"]
@@ -1157,8 +1132,7 @@ def test_import_cfg_inline_overrides_import(tmp_path):
         f"    - quantizer_name: '*weight_quantizer'\n"
         f"      cfg:\n"
         f"        $import: fp8\n"
-        f"        num_bits: 8\n",
-        encoding="utf-8",
+        f"        num_bits: 8\n"
     )
     recipe = load_recipe(recipe_file)
     cfg = recipe.quantize["quant_cfg"][0]["cfg"]
@@ -1178,8 +1152,7 @@ def test_import_in_non_cfg_dict_value(tmp_path):
         f"quant_cfg:\n"
         f"  - quantizer_name: '*weight_quantizer'\n"
         f"    my_field:\n"
-        f"      $import: extra\n",
-        encoding="utf-8",
+        f"      $import: extra\n"
     )
     data = load_config(config_file)
     entry = data["quant_cfg"][0]
@@ -1200,8 +1173,7 @@ def test_import_in_multiple_dict_values(tmp_path):
         f"    cfg:\n"
         f"      $import: fp8\n"
         f"    my_field:\n"
-        f"      $import: extra\n",
-        encoding="utf-8",
+        f"      $import: extra\n"
     )
     data = load_config(config_file)
     entry = data["quant_cfg"][0]
@@ -1226,8 +1198,7 @@ def test_import_cfg_multi_import(tmp_path):
         f"  quant_cfg:\n"
         f"    - quantizer_name: '*weight_quantizer'\n"
         f"      cfg:\n"
-        f"        $import: [bits, axis]\n",
-        encoding="utf-8",
+        f"        $import: [bits, axis]\n"
     )
     recipe = load_recipe(recipe_file)
     cfg = recipe.quantize["quant_cfg"][0]["cfg"]
@@ -1250,8 +1221,7 @@ def test_import_cfg_multi_import_later_overrides_earlier(tmp_path):
         f"  quant_cfg:\n"
         f"    - quantizer_name: '*weight_quantizer'\n"
         f"      cfg:\n"
-        f"        $import: [a, b]\n",
-        encoding="utf-8",
+        f"        $import: [a, b]\n"
     )
     recipe = load_recipe(recipe_file)
     cfg = recipe.quantize["quant_cfg"][0]["cfg"]
@@ -1277,8 +1247,7 @@ def test_import_cfg_multi_import_with_extend(tmp_path):
         f"    - quantizer_name: '*weight_quantizer'\n"
         f"      cfg:\n"
         f"        $import: [bits, extra]\n"
-        f"        axis: 0\n",
-        encoding="utf-8",
+        f"        axis: 0\n"
     )
     recipe = load_recipe(recipe_file)
     cfg = recipe.quantize["quant_cfg"][0]["cfg"]
@@ -1292,9 +1261,7 @@ def test_import_cfg_multi_import_with_extend(tmp_path):
 def test_import_dir_format(tmp_path):
     """Imports in quantize.yml work with the directory recipe format."""
     _write_quantizer_attribute(tmp_path / "fp8.yml", "num_bits: e4m3\naxis:\n")
-    (tmp_path / "metadata.yml").write_text(
-        "recipe_type: ptq\ndescription: Dir with imports.\n", encoding="utf-8"
-    )
+    (tmp_path / "metadata.yml").write_text("recipe_type: ptq\ndescription: Dir with imports.\n")
     (tmp_path / "quantize.yml").write_text(
         f"imports:\n"
         f"  fp8: {tmp_path / 'fp8.yml'}\n"
@@ -1302,8 +1269,7 @@ def test_import_dir_format(tmp_path):
         "quant_cfg:\n"
         "  - quantizer_name: '*weight_quantizer'\n"
         "    cfg:\n"
-        "      $import: fp8\n",
-        encoding="utf-8",
+        "      $import: fp8\n"
     )
     recipe = load_recipe(tmp_path)
     assert recipe.quantize["quant_cfg"][0]["cfg"].model_dump(exclude_unset=True) == {
@@ -1316,15 +1282,14 @@ def test_import_dir_format_metadata_imports_do_not_apply_to_quantize(tmp_path):
     """metadata.yml imports are scoped to metadata.yml, not quantize.yml."""
     _write_quantizer_attribute(tmp_path / "fp8.yml", "num_bits: e4m3\n")
     (tmp_path / "metadata.yml").write_text(
-        f"imports:\n  fmt: {tmp_path / 'fp8.yml'}\nrecipe_type: ptq\n", encoding="utf-8"
+        f"imports:\n  fmt: {tmp_path / 'fp8.yml'}\nrecipe_type: ptq\n"
     )
     (tmp_path / "quantize.yml").write_text(
         "algorithm: max\n"
         "quant_cfg:\n"
         "  - quantizer_name: '*weight_quantizer'\n"
         "    cfg:\n"
-        "      $import: fmt\n",
-        encoding="utf-8",
+        "      $import: fmt\n"
     )
     with pytest.raises(ValueError, match=r"Unknown \$import reference"):
         load_recipe(tmp_path)
@@ -1339,8 +1304,7 @@ def test_import_multi_document_list_snippet(tmp_path):
     """List snippet using multi-document YAML (imports --- content) resolves $import."""
     (tmp_path / "fp8.yml").write_text(
         "# modelopt-schema: modelopt.torch.quantization.config.QuantizerAttributeConfig\n"
-        "num_bits: e4m3\n",
-        encoding="utf-8",
+        "num_bits: e4m3\n"
     )
     (tmp_path / "kv.yaml").write_text(
         f"# modelopt-schema: modelopt.torch.quantization.config.QuantizerCfgListConfig\n"
@@ -1349,8 +1313,7 @@ def test_import_multi_document_list_snippet(tmp_path):
         f"---\n"
         f"- quantizer_name: '*[kv]_bmm_quantizer'\n"
         f"  cfg:\n"
-        f"    $import: fp8\n",
-        encoding="utf-8",
+        f"    $import: fp8\n"
     )
     recipe_file = tmp_path / "ptq.yml"
     recipe_file.write_text(
@@ -1361,8 +1324,7 @@ def test_import_multi_document_list_snippet(tmp_path):
         f"quantize:\n"
         f"  algorithm: max\n"
         f"  quant_cfg:\n"
-        f"    - $import: kv\n",
-        encoding="utf-8",
+        f"    - $import: kv\n"
     )
     recipe = load_recipe(recipe_file)
     assert len(recipe.quantize["quant_cfg"]) == 1
@@ -1392,8 +1354,7 @@ def test_import_in_top_level_dict_value(tmp_path):
     _write_quantizer_attribute(tmp_path / "algo.yml", "num_bits: 8\naxis: 0\n")
     config_file = tmp_path / "config.yml"
     config_file.write_text(
-        f"imports:\n  algo: {tmp_path / 'algo.yml'}\nalgorithm:\n  $import: algo\nquant_cfg: []\n",
-        encoding="utf-8",
+        f"imports:\n  algo: {tmp_path / 'algo.yml'}\nalgorithm:\n  $import: algo\nquant_cfg: []\n"
     )
     data = load_config(config_file)
     assert data["algorithm"] == {"num_bits": 8, "axis": 0}
@@ -1409,8 +1370,7 @@ def test_import_in_nested_dict(tmp_path):
         f"training:\n"
         f"  optimizer:\n"
         f"    params:\n"
-        f"      $import: settings\n",
-        encoding="utf-8",
+        f"      $import: settings\n"
     )
     data = load_config(config_file)
     assert data["training"]["optimizer"]["params"] == {"num_bits": (4, 3)}
@@ -1430,8 +1390,7 @@ def test_import_list_splice_outside_typed_list_raises(tmp_path):
         f"tasks:\n"
         f"  - name: task_a\n"
         f"  - $import: extra\n"
-        f"  - name: task_d\n",
-        encoding="utf-8",
+        f"  - name: task_d\n"
     )
     with pytest.raises(ValueError, match="requires a typed list schema"):
         load_config(config_file)
@@ -1451,8 +1410,7 @@ def test_import_in_nested_list_of_dicts(tmp_path):
         f"      verbose: true\n"
         f"  - name: test\n"
         f"    config:\n"
-        f"      $import: defaults\n",
-        encoding="utf-8",
+        f"      $import: defaults\n"
     )
     data = load_config(config_file)
     assert data["stages"][0]["config"] == {"num_bits": 8, "verbose": True}
@@ -1463,14 +1421,12 @@ def test_import_mixed_tree(tmp_path):
     """$import resolves at multiple levels in the same config."""
     (tmp_path / "fp8.yml").write_text(
         "# modelopt-schema: modelopt.torch.quantization.config.QuantizerAttributeConfig\n"
-        "num_bits: e4m3\n",
-        encoding="utf-8",
+        "num_bits: e4m3\n"
     )
     (tmp_path / "disables.yml").write_text(
         "# modelopt-schema: modelopt.torch.quantization.config.QuantizerCfgListConfig\n"
         "- quantizer_name: '*lm_head*'\n"
-        "  enable: false\n",
-        encoding="utf-8",
+        "  enable: false\n"
     )
     config_file = tmp_path / "config.yml"
     config_file.write_text(
@@ -1483,8 +1439,7 @@ def test_import_mixed_tree(tmp_path):
         f"  - quantizer_name: '*weight_quantizer'\n"
         f"    cfg:\n"
         f"      $import: fp8\n"
-        f"  - $import: disables\n",
-        encoding="utf-8",
+        f"  - $import: disables\n"
     )
     data = load_config(config_file)
     # Dict import inside list entry
@@ -1510,8 +1465,7 @@ def test_import_recursive(tmp_path):
     # base: dict snippet with FP8 attributes
     (tmp_path / "fp8.yml").write_text(
         "# modelopt-schema: modelopt.torch.quantization.config.QuantizerAttributeConfig\n"
-        "num_bits: e4m3\n",
-        encoding="utf-8",
+        "num_bits: e4m3\n"
     )
     # mid: list snippet that imports base and uses $import in cfg
     (tmp_path / "mid.yaml").write_text(
@@ -1521,8 +1475,7 @@ def test_import_recursive(tmp_path):
         f"---\n"
         f"- quantizer_name: '*weight_quantizer'\n"
         f"  cfg:\n"
-        f"    $import: fp8\n",
-        encoding="utf-8",
+        f"    $import: fp8\n"
     )
     # recipe imports mid
     recipe_file = tmp_path / "ptq.yml"
@@ -1534,8 +1487,7 @@ def test_import_recursive(tmp_path):
         f"quantize:\n"
         f"  algorithm: max\n"
         f"  quant_cfg:\n"
-        f"    - $import: mid\n",
-        encoding="utf-8",
+        f"    - $import: mid\n"
     )
     recipe = load_recipe(recipe_file)
     cfg = recipe.quantize["quant_cfg"][0]["cfg"]
@@ -1558,8 +1510,7 @@ def test_import_circular_raises(tmp_path):
         f"  recipe_type: ptq\n"
         f"quantize:\n"
         f"  algorithm: max\n"
-        f"  quant_cfg: []\n",
-        encoding="utf-8",
+        f"  quant_cfg: []\n"
     )
     with pytest.raises(ValueError, match="Circular import"):
         load_recipe(recipe_file)
@@ -1586,8 +1537,7 @@ def test_import_circular_via_path_aliases_raises(tmp_path):
         f"  recipe_type: ptq\n"
         f"quantize:\n"
         f"  algorithm: max\n"
-        f"  quant_cfg: []\n",
-        encoding="utf-8",
+        f"  quant_cfg: []\n"
     )
     cwd = os.getcwd()
     os.chdir(tmp_path)
@@ -1635,8 +1585,7 @@ def test_import_cross_file_same_name_no_conflict(tmp_path):
         f"        $import: fmt\n"
         f"    - quantizer_name: '*input_quantizer'\n"
         f"      cfg:\n"
-        f"        $import: child\n",
-        encoding="utf-8",
+        f"        $import: child\n"
     )
     recipe = load_recipe(recipe_file)
     # Parent's "fmt" resolves to fp8 (e4m3), not child's nvfp4.
@@ -1684,8 +1633,7 @@ def test_modelopt_schema_comment_returns_instance(tmp_path):
     config_file.write_text(
         "# modelopt-schema: modelopt.torch.quantization.config.QuantizerAttributeConfig\n"
         "num_bits: e4m3\n"
-        "axis:\n",
-        encoding="utf-8",
+        "axis:\n"
     )
     data = load_config(config_file)
     assert isinstance(data, QuantizerAttributeConfig)
@@ -1698,8 +1646,7 @@ def test_modelopt_schema_comment_validation_error(tmp_path):
     config_file = tmp_path / "bad.yaml"
     config_file.write_text(
         "# modelopt-schema: modelopt.torch.quantization.config.QuantizerAttributeConfig\n"
-        "unknown_field: true\n",
-        encoding="utf-8",
+        "unknown_field: true\n"
     )
     with pytest.raises(ValueError, match="does not match modelopt-schema"):
         load_config(config_file)
@@ -1720,8 +1667,7 @@ def test_modelopt_schema_comment_validates_after_import_resolution(tmp_path):
     """Schema validation runs after nested imports have been resolved."""
     (tmp_path / "fp8.yaml").write_text(
         "# modelopt-schema: modelopt.torch.quantization.config.QuantizerAttributeConfig\n"
-        "num_bits: e4m3\n",
-        encoding="utf-8",
+        "num_bits: e4m3\n"
     )
     config_file = tmp_path / "entry.yaml"
     config_file.write_text(
@@ -1731,8 +1677,7 @@ def test_modelopt_schema_comment_validates_after_import_resolution(tmp_path):
         f"---\n"
         f"- quantizer_name: '*weight_quantizer'\n"
         f"  cfg:\n"
-        f"    $import: fp8\n",
-        encoding="utf-8",
+        f"    $import: fp8\n"
     )
     data = load_config(config_file)
     # data is a list of QuantizerCfgEntry pydantic instances, not raw dicts.  Dump with
@@ -1751,13 +1696,11 @@ def test_import_dict_snippet_imports_in_union_typed_list_field(tmp_path):
         "num_bits: 4\n"
         "block_sizes:\n"
         "  -1: 128\n"
-        "  type: static\n",
-        encoding="utf-8",
+        "  type: static\n"
     )
     (tmp_path / "fp8.yaml").write_text(
         "# modelopt-schema: modelopt.torch.quantization.config.QuantizerAttributeConfig\n"
-        "num_bits: e4m3\n",
-        encoding="utf-8",
+        "num_bits: e4m3\n"
     )
     config_file = tmp_path / "config.yaml"
     config_file.write_text(
@@ -1770,8 +1713,7 @@ def test_import_dict_snippet_imports_in_union_typed_list_field(tmp_path):
         f"  - quantizer_name: '*weight_quantizer'\n"
         f"    cfg:\n"
         f"      - $import: int4\n"
-        f"      - $import: fp8\n",
-        encoding="utf-8",
+        f"      - $import: fp8\n"
     )
 
     data = load_config(config_file)
@@ -1798,8 +1740,7 @@ def test_import_dict_snippet_in_union_typed_list_field_with_inline_item(tmp_path
         f"  - quantizer_name: '*weight_quantizer'\n"
         f"    cfg:\n"
         f"      - $import: int4\n"
-        f"      - num_bits: e4m3\n",
-        encoding="utf-8",
+        f"      - num_bits: e4m3\n"
     )
     data = load_config(config_file)
     assert _cfg_to_dict(data["quant_cfg"][0]["cfg"]) == [
@@ -1816,7 +1757,7 @@ def test_import_dict_snippet_in_union_typed_list_field_with_inline_item(tmp_path
 def test_load_config_path_object(tmp_path):
     """load_config accepts a Path object."""
     cfg_file = tmp_path / "test.yaml"
-    cfg_file.write_text("key: value\n", encoding="utf-8")
+    cfg_file.write_text("key: value\n")
     data = load_config(cfg_file)
     assert data == {"key": "value"}
 
@@ -1824,7 +1765,7 @@ def test_load_config_path_object(tmp_path):
 def test_load_config_path_without_suffix(tmp_path):
     """load_config probes .yml/.yaml suffixes for a Path without suffix."""
     cfg_file = tmp_path / "test.yaml"
-    cfg_file.write_text("key: value\n", encoding="utf-8")
+    cfg_file.write_text("key: value\n")
     data = load_config(tmp_path / "test")  # no suffix
     assert data == {"key": "value"}
 
@@ -1832,7 +1773,7 @@ def test_load_config_path_without_suffix(tmp_path):
 def test_load_config_empty_yaml(tmp_path):
     """load_config returns empty dict for empty YAML file."""
     cfg_file = tmp_path / "empty.yaml"
-    cfg_file.write_text("", encoding="utf-8")
+    cfg_file.write_text("")
     data = load_config(cfg_file)
     assert data == {}
 
@@ -1840,7 +1781,7 @@ def test_load_config_empty_yaml(tmp_path):
 def test_load_config_null_yaml(tmp_path):
     """load_config returns empty dict for YAML file containing only null."""
     cfg_file = tmp_path / "null.yaml"
-    cfg_file.write_text("---\n", encoding="utf-8")
+    cfg_file.write_text("---\n")
     data = load_config(cfg_file)
     assert data == {}
 
@@ -1848,7 +1789,7 @@ def test_load_config_null_yaml(tmp_path):
 def test_load_config_multi_doc_dict_dict(tmp_path):
     """Multi-document YAML with two dicts merges them."""
     cfg_file = tmp_path / "multi.yaml"
-    cfg_file.write_text("imports:\n  fp8: some/path\n---\nalgorithm: max\n", encoding="utf-8")
+    cfg_file.write_text("imports:\n  fp8: some/path\n---\nalgorithm: max\n")
     data = _load_raw_config(cfg_file)
     assert data["imports"] == {"fp8": "some/path"}
     assert data["algorithm"] == "max"
@@ -1857,7 +1798,7 @@ def test_load_config_multi_doc_dict_dict(tmp_path):
 def test_load_config_multi_doc_null_content(tmp_path):
     """Multi-document YAML where second doc is null treats content as empty dict."""
     cfg_file = tmp_path / "multi_null.yaml"
-    cfg_file.write_text("key: value\n---\n", encoding="utf-8")
+    cfg_file.write_text("key: value\n---\n")
     data = _load_raw_config(cfg_file)
     assert data == {"key": "value"}
 
@@ -1865,7 +1806,7 @@ def test_load_config_multi_doc_null_content(tmp_path):
 def test_load_config_multi_doc_first_not_dict_raises(tmp_path):
     """Multi-document YAML with non-dict first document raises ValueError."""
     cfg_file = tmp_path / "bad_multi.yaml"
-    cfg_file.write_text("- item1\n---\nkey: value\n", encoding="utf-8")
+    cfg_file.write_text("- item1\n---\nkey: value\n")
     with pytest.raises(ValueError, match="first YAML document must be a mapping"):
         load_config(cfg_file)
 
@@ -1873,7 +1814,7 @@ def test_load_config_multi_doc_first_not_dict_raises(tmp_path):
 def test_load_config_multi_doc_second_not_dict_or_list_raises(tmp_path):
     """Multi-document YAML with scalar second document raises ValueError."""
     cfg_file = tmp_path / "bad_multi2.yaml"
-    cfg_file.write_text("key: value\n---\njust a string\n", encoding="utf-8")
+    cfg_file.write_text("key: value\n---\njust a string\n")
     with pytest.raises(ValueError, match="second YAML document must be a mapping or list"):
         load_config(cfg_file)
 
@@ -1881,7 +1822,7 @@ def test_load_config_multi_doc_second_not_dict_or_list_raises(tmp_path):
 def test_load_config_three_docs_raises(tmp_path):
     """YAML with 3+ documents raises ValueError."""
     cfg_file = tmp_path / "three_docs.yaml"
-    cfg_file.write_text("a: 1\n---\nb: 2\n---\nc: 3\n", encoding="utf-8")
+    cfg_file.write_text("a: 1\n---\nb: 2\n---\nc: 3\n")
     with pytest.raises(ValueError, match="expected 1 or 2 YAML documents"):
         load_config(cfg_file)
 
@@ -1901,8 +1842,7 @@ def test_load_config_list_valued_yaml(tmp_path):
         "  cfg:\n"
         "    num_bits: 8\n"
         "- quantizer_name: '*input_quantizer'\n"
-        "  enable: false\n",
-        encoding="utf-8",
+        "  enable: false\n"
     )
     data = load_config(cfg_file)
     assert isinstance(data, list)
@@ -1930,8 +1870,7 @@ def test_import_dict_value_resolves_to_list_raises(tmp_path):
     )
     config_file = tmp_path / "config.yml"
     config_file.write_text(
-        f"imports:\n  entries: {tmp_path / 'entries.yml'}\nmy_field:\n  $import: entries\n",
-        encoding="utf-8",
+        f"imports:\n  entries: {tmp_path / 'entries.yml'}\nmy_field:\n  $import: entries\n"
     )
     with pytest.raises(ValueError, match="must resolve to a dict"):
         load_config(config_file)
@@ -1940,7 +1879,7 @@ def test_import_dict_value_resolves_to_list_raises(tmp_path):
 def test_import_imports_not_a_dict_raises(tmp_path):
     """imports section that is a list raises ValueError."""
     config_file = tmp_path / "config.yml"
-    config_file.write_text("imports:\n  - some/path\nkey: value\n", encoding="utf-8")
+    config_file.write_text("imports:\n  - some/path\nkey: value\n")
     with pytest.raises(ValueError, match="must be a dict"):
         load_config(config_file)
 
@@ -1966,7 +1905,7 @@ _AQ_MINIMAL_BODY = (
 def test_load_recipe_autoquantize_minimal(tmp_path):
     """Minimal AutoQuantize recipe loads with the right type and field defaults."""
     recipe_file = tmp_path / "aq.yml"
-    recipe_file.write_text(_AQ_MINIMAL_BODY, encoding="utf-8")
+    recipe_file.write_text(_AQ_MINIMAL_BODY)
     recipe = load_recipe(recipe_file)
 
     assert recipe.recipe_type == RecipeType.AUTO_QUANTIZE
@@ -2014,8 +1953,7 @@ def test_load_recipe_autoquantize_active_moe_cost_roundtrip(tmp_path):
         "    - algorithm: max\n"
         "      quant_cfg: []\n"
         "    - algorithm: max\n"
-        "      quant_cfg: []\n",
-        encoding="utf-8",
+        "      quant_cfg: []\n"
     )
     constraints = load_recipe(recipe_file).auto_quantize.constraints
     assert constraints.cost_model == "active_moe"
@@ -2030,7 +1968,7 @@ def test_load_recipe_autoquantize_active_moe_cost_roundtrip(tmp_path):
 def test_load_recipe_autoquantize_missing_section_raises(tmp_path):
     """Missing auto_quantize section gives the clean loader-level error."""
     bad = tmp_path / "bad.yml"
-    bad.write_text("metadata:\n  recipe_type: auto_quantize\n", encoding="utf-8")
+    bad.write_text("metadata:\n  recipe_type: auto_quantize\n")
     with pytest.raises(
         ValueError, match=r"AUTO_QUANTIZE recipe file .* must contain 'auto_quantize'"
     ):
@@ -2043,8 +1981,7 @@ def test_load_recipe_autoquantize_empty_candidates_raises(tmp_path):
     bad.write_text(
         "metadata:\n  recipe_type: auto_quantize\n"
         "auto_quantize:\n  constraints:\n    effective_bits: 4.8\n"
-        "  candidate_formats: []\n",
-        encoding="utf-8",
+        "  candidate_formats: []\n"
     )
     with pytest.raises(ValueError, match="candidate_formats or at least one"):
         load_recipe(bad)
@@ -2056,8 +1993,7 @@ def test_load_recipe_autoquantize_single_candidate_ok(tmp_path):
     recipe_file.write_text(
         "metadata:\n  recipe_type: auto_quantize\n"
         "auto_quantize:\n  constraints:\n    effective_bits: 6.0\n"
-        "  candidate_formats:\n    - algorithm: max\n      quant_cfg: []\n",
-        encoding="utf-8",
+        "  candidate_formats:\n    - algorithm: max\n      quant_cfg: []\n"
     )
     aq = load_recipe(recipe_file).auto_quantize
     assert len(aq.candidate_formats) == 1
@@ -2066,9 +2002,7 @@ def test_load_recipe_autoquantize_single_candidate_ok(tmp_path):
 def test_load_recipe_autoquantize_effective_bits_out_of_range_raises(tmp_path):
     """effective_bits outside (0, 16] is rejected."""
     bad = tmp_path / "bad.yml"
-    bad.write_text(
-        _AQ_MINIMAL_BODY.replace("effective_bits: 4.8", "effective_bits: 20"), encoding="utf-8"
-    )
+    bad.write_text(_AQ_MINIMAL_BODY.replace("effective_bits: 4.8", "effective_bits: 20"))
     with pytest.raises(ValueError, match="effective_bits"):
         load_recipe(bad)
 
@@ -2118,8 +2052,7 @@ def test_load_recipe_autoquantize_fixed_baseline_rejects_global_fallback(tmp_pat
         "  candidate_formats:\n    - algorithm: max\n      quant_cfg: []\n"
         "  module_search_spaces:\n"
         "    - module_name_patterns: ['*mlp*']\n"
-        "      candidate_formats:\n        - algorithm: max\n          quant_cfg: []\n",
-        encoding="utf-8",
+        "      candidate_formats:\n        - algorithm: max\n          quant_cfg: []\n"
     )
 
     with pytest.raises(ValueError, match="must omit top-level"):
@@ -2131,8 +2064,7 @@ def test_load_recipe_autoquantize_fixed_baseline_requires_explicit_search(tmp_pa
     recipe_file.write_text(
         "metadata:\n  recipe_type: auto_quantize\n"
         "quantize:\n  algorithm: max\n  quant_cfg: []\n"
-        "auto_quantize:\n  constraints:\n    effective_bits: 6.0\n",
-        encoding="utf-8",
+        "auto_quantize:\n  constraints:\n    effective_bits: 6.0\n"
     )
 
     with pytest.raises(ValueError, match="candidate_formats or at least one"):

@@ -98,7 +98,7 @@ def load_json(file_path: str):
         print("file does not exist {file_path}")
         return None
 
-    with open(encoding="utf-8", file=file_path) as f:
+    with open(file=file_path) as f:
         return json.load(f)
 
 

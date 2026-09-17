@@ -95,7 +95,7 @@ def test_export_hf_checkpoint_cpu_offloaded(tmp_path, quant_cfg):
     # 1. hf_quant_config.json must exist and declare fp8
     quant_config_path = export_dir / "hf_quant_config.json"
     assert quant_config_path.exists(), "hf_quant_config.json not written"
-    with open(quant_config_path, encoding="utf-8") as f:
+    with open(quant_config_path) as f:
         quant_config = json.load(f)
     assert quant_config["quantization"]["quant_algo"] == "FP8", (
         f"Expected FP8, got {quant_config['quantization'].get('quant_algo')}"
@@ -132,7 +132,7 @@ def _read_shards(export_dir):
 
     index_path = export_dir / "model.safetensors.index.json"
     if index_path.exists():
-        with open(index_path, encoding="utf-8") as f:
+        with open(index_path) as f:
             weight_map = json.load(f)["weight_map"]
         assert set(weight_map) == set(tensors), "index weight_map disagrees with shard contents"
         for shard_name in set(weight_map.values()):

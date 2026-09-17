@@ -212,7 +212,7 @@ def test_streaming_shard_writer_multi_shard():
         assert index_path.exists(), "model.safetensors.index.json not written"
         assert weight_map["x"] != weight_map["y"], "keys must be in different shards"
 
-        with open(index_path, encoding="utf-8") as f:
+        with open(index_path) as f:
             index = json.load(f)
         assert index["metadata"]["total_size"] > 0
 
@@ -322,9 +322,7 @@ def test_name_shards_and_write_index_merges_disjoint_writers():
 
         weight_map = name_shards_and_write_index(tmpdir, closed)
 
-        index = json.loads(
-            (Path(tmpdir) / "model.safetensors.index.json").read_text(encoding="utf-8")
-        )
+        index = json.loads((Path(tmpdir) / "model.safetensors.index.json").read_text())
         assert set(index["weight_map"]) == set(ref)
         assert weight_map == index["weight_map"]
         assert not list(Path(tmpdir).glob("__shard_part*")), "every part should be renamed"

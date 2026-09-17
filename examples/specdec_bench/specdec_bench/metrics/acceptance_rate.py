@@ -88,9 +88,7 @@ class AcceptanceRate(Metric):
         self.prompt_ar = []
 
     def _format_write_output(self, outputs):
-        with open(
-            os.path.join(self.directory, "responses.jsonl"), "w", encoding="utf-8"
-        ) as outfile:
+        with open(os.path.join(self.directory, "responses.jsonl"), "w") as outfile:
             for i, messages in enumerate(outputs):
                 q_id = i
                 out_line = {}

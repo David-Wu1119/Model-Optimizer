@@ -114,8 +114,8 @@ class BinarySearcher(IterativeSearcher):
 
         # compute and register the construction of sensitivity map
         self._build_sensitivity_map(self.config["verbose"])
-        self.max_degrade = max(max(v.values()) for v in self.sensitivity_map.values())
-        self.min_degrade = min(min(v.values()) for v in self.sensitivity_map.values())
+        self.max_degrade = max([max(v.values()) for v in self.sensitivity_map.values()])
+        self.min_degrade = min([min(v.values()) for v in self.sensitivity_map.values()])
 
         # overwrite the score function to be a fake function, returning the -max degrade
         def max_degrade(_model):
@@ -133,7 +133,7 @@ class BinarySearcher(IterativeSearcher):
 
     def _apply_fastnas_according_to_threshold(self, threshold):
         cfg = {
-            name: min(k for k, v in sensitivity.items() if v <= threshold)
+            name: min([k for k, v in sensitivity.items() if v <= threshold])
             for name, sensitivity in self.sensitivity_map.items()
         }
         select(self.model, cfg, strict=False)
@@ -208,7 +208,7 @@ class BinarySearcher(IterativeSearcher):
 
         # Getting the number of choices needed to validate
         total_choices_to_validate = sum(
-            len(hparam.choices) for hparam in binary_search_hps.values()
+            [len(hparam.choices) for hparam in binary_search_hps.values()]
         )
 
         assert total_choices_to_validate != 0, f"{type(self).__name__}: no searchable hparams found"
@@ -223,7 +223,7 @@ class BinarySearcher(IterativeSearcher):
         }
 
         remaining_choices_to_validate = sum(
-            len(hparam.choices) for hparam in binary_search_hps.values()
+            [len(hparam.choices) for hparam in binary_search_hps.values()]
         )
 
         if remaining_choices_to_validate == 0:

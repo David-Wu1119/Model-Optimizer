@@ -361,10 +361,7 @@ def test_harvest_keys_by_task_not_harness(tmp_path):
         d = tmp_path / "eval_run" / "inv123" / name / "artifacts"
         d.mkdir(parents=True)
         (d / "eval_factory_metrics.json").write_text(
-            json.dumps(
-                {"response_stats": {"avg_completion_tokens": 100.0, "successful_count": 10}}
-            ),
-            encoding="utf-8",
+            json.dumps({"response_stats": {"avg_completion_tokens": 100.0, "successful_count": 10}})
         )
     # Harness is kept: two harnesses can expose the same task name, and pooling them
     # would average different generation conditions together.
@@ -380,20 +377,17 @@ def test_harvest_reports_what_it_dropped(tmp_path):
     good = tmp_path / "eval_run" / "inv" / "h.good" / "artifacts"
     good.mkdir(parents=True)
     good.joinpath("eval_factory_metrics.json").write_text(
-        json.dumps({"response_stats": {"avg_completion_tokens": 10.0, "successful_count": 2}}),
-        encoding="utf-8",
+        json.dumps({"response_stats": {"avg_completion_tokens": 10.0, "successful_count": 2}})
     )
     bad = tmp_path / "eval_run" / "inv" / "h.notok" / "artifacts"
     bad.mkdir(parents=True)
     bad.joinpath("eval_factory_metrics.json").write_text(
-        json.dumps({"response_stats": {"successful_count": 2}}),  # no token count
-        encoding="utf-8",
+        json.dumps({"response_stats": {"successful_count": 2}})  # no token count
     )
     skipped = tmp_path / "eval_high" / "inv" / "h.excl" / "artifacts"
     skipped.mkdir(parents=True)
     skipped.joinpath("eval_factory_metrics.json").write_text(
-        json.dumps({"response_stats": {"avg_completion_tokens": 10.0, "successful_count": 2}}),
-        encoding="utf-8",
+        json.dumps({"response_stats": {"avg_completion_tokens": 10.0, "successful_count": 2}})
     )
     diag = {}
     out = harvest(str(tmp_path), exclude="_high", diagnostics=diag)
@@ -414,10 +408,7 @@ def test_ptq_waiver_requires_canonical_values():
 def _write_metrics(d, tokens=100.0, count=10):
     d.mkdir(parents=True)
     d.joinpath("eval_factory_metrics.json").write_text(
-        json.dumps(
-            {"response_stats": {"avg_completion_tokens": tokens, "successful_count": count}}
-        ),
-        encoding="utf-8",
+        json.dumps({"response_stats": {"avg_completion_tokens": tokens, "successful_count": count}})
     )
 
 
@@ -485,15 +476,11 @@ def test_every_emitted_failure_class_has_a_triage_row():
     # (ACCEPT/REGRESSION) and SLURM states (PENDING/RUNNING) are not failure classes.
     emitted = set()
     for f in scripts.glob("gate_*.py"):
-        src = f.read_text(encoding="utf-8")
+        src = f.read_text()
         emitted |= set(re.findall(r'"failure_class":\s*"([A-Z_]+)"', src))
         emitted |= set(re.findall(r'failures\.append\(\s*\(\s*\n?\s*"([A-Z_]+)"', src))
     rows = set(
-        re.findall(
-            r"^\| `([A-Z_]+)` \|",
-            (scripts.parent / "SKILL.md").read_text(encoding="utf-8"),
-            re.MULTILINE,
-        )
+        re.findall(r"^\| `([A-Z_]+)` \|", (scripts.parent / "SKILL.md").read_text(), re.MULTILINE)
     )
     # Subtract only declared exemptions: intersecting with an allowlist would filter out
     # exactly the newly-emitted class this test exists to catch.
@@ -533,12 +520,9 @@ def test_harvest_prefers_the_task_name_from_metadata(tmp_path):
     for job, name in ((0, "simple_evals.gpqa"), (1, "tau2.telecom")):
         d = tmp_path / "eval_run" / f"inv123.{job}" / "artifacts"
         d.mkdir(parents=True)
-        (d / "metadata.yaml").write_text(
-            f"evaluation:\n  tasks:\n    - name: {name}\n", encoding="utf-8"
-        )
+        (d / "metadata.yaml").write_text(f"evaluation:\n  tasks:\n    - name: {name}\n")
         (d / "eval_factory_metrics.json").write_text(
-            json.dumps({"response_stats": {"avg_completion_tokens": 10.0, "successful_count": 2}}),
-            encoding="utf-8",
+            json.dumps({"response_stats": {"avg_completion_tokens": 10.0, "successful_count": 2}})
         )
     assert set(harvest(str(tmp_path))) == {"simple_evals.gpqa", "tau2.telecom"}
 
@@ -549,8 +533,7 @@ def test_harvest_flags_collapsed_task_keys(tmp_path):
         d = tmp_path / "eval_run" / f"inv123.{job}" / "artifacts"
         d.mkdir(parents=True)
         (d / "eval_factory_metrics.json").write_text(
-            json.dumps({"response_stats": {"avg_completion_tokens": 10.0, "successful_count": 2}}),
-            encoding="utf-8",
+            json.dumps({"response_stats": {"avg_completion_tokens": 10.0, "successful_count": 2}})
         )
     diag = {}
     harvest(str(tmp_path), diagnostics=diag)
@@ -565,8 +548,7 @@ def test_dropped_tasks_covers_the_excluded_channel(tmp_path):
     d = tmp_path / "eval_high" / "inv" / "h.only_high" / "artifacts"
     d.mkdir(parents=True)
     (d / "eval_factory_metrics.json").write_text(
-        json.dumps({"response_stats": {"avg_completion_tokens": 10.0, "successful_count": 2}}),
-        encoding="utf-8",
+        json.dumps({"response_stats": {"avg_completion_tokens": 10.0, "successful_count": 2}})
     )
     diag = {}
     assert harvest(str(tmp_path), exclude="_high", diagnostics=diag) == {}
@@ -613,12 +595,11 @@ def _mk_run(root, leaf, cfg=None, meta=None):
     d = root / "eval_run" / leaf / "artifacts"
     d.mkdir(parents=True)
     if cfg:
-        (d / "config.yml").write_text(cfg, encoding="utf-8")
+        (d / "config.yml").write_text(cfg)
     if meta:
-        (d / "metadata.yaml").write_text(meta, encoding="utf-8")
+        (d / "metadata.yaml").write_text(meta)
     (d / "eval_factory_metrics.json").write_text(
-        json.dumps({"response_stats": {"avg_completion_tokens": 10.0, "successful_count": 2}}),
-        encoding="utf-8",
+        json.dumps({"response_stats": {"avg_completion_tokens": 10.0, "successful_count": 2}})
     )
     return d
 
@@ -674,7 +655,7 @@ def test_unreadable_artifact_does_not_count_toward_collapse(tmp_path):
     good = _mk_run(tmp_path, "inv1.0")
     bad = tmp_path / "eval_run" / "inv1.1" / "artifacts"
     bad.mkdir(parents=True)
-    (bad / "eval_factory_metrics.json").write_text("{truncated", encoding="utf-8")
+    (bad / "eval_factory_metrics.json").write_text("{truncated")
     assert good.exists()
     diag = {}
     out = harvest(str(tmp_path), diagnostics=diag)

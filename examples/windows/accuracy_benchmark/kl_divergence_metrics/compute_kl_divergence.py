@@ -854,7 +854,7 @@ VRAM Requirements:
         # Save results if output file specified
         if args.output:
             print(f"\n[INFO] Saving results to: {args.output}")
-        with open(args.output, "w", encoding="utf-8") as f:
+        with open(args.output, "w") as f:
             json.dump(final_results, f, indent=2)
             print("[INFO] Results saved successfully")
 

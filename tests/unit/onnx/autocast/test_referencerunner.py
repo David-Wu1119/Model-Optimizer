@@ -204,7 +204,7 @@ def test_mismatched_input_names(reference_runner):
         "wrong_name2": np.array([[4.0, 5.0, 6.0]], dtype=np.float32),
     }
 
-    with tempfile.NamedTemporaryFile(encoding="utf-8", suffix=".json", mode="w", delete=False) as f:
+    with tempfile.NamedTemporaryFile(suffix=".json", mode="w", delete=False) as f:
         from polygraphy.json import save_json
 
         input_path = f.name
@@ -221,7 +221,7 @@ def test_invalid_json(reference_runner):
     """Test error handling for non-Polygraphy JSON format."""
     inputs = {"X1": [[1.0, 2.0, 3.0]], "X2": [[4.0, 5.0, 6.0]]}
 
-    with tempfile.NamedTemporaryFile(encoding="utf-8", suffix=".json", mode="w", delete=False) as f:
+    with tempfile.NamedTemporaryFile(suffix=".json", mode="w", delete=False) as f:
         json.dump(inputs, f)
         input_path = f.name
     try:
@@ -253,7 +253,7 @@ def test_compare_outputs(reference_runner):
         "X2": np.array([[4.0, 5.0, 6.0]], dtype=np.float32),
     }
 
-    with tempfile.NamedTemporaryFile(encoding="utf-8", suffix=".json", mode="w", delete=False) as f:
+    with tempfile.NamedTemporaryFile(suffix=".json", mode="w", delete=False) as f:
         from polygraphy.json import save_json
 
         input_path = f.name
@@ -275,7 +275,7 @@ def test_compare_outputs(reference_runner):
         "X2": np.array([[1.0, 2.0, 3.0]], dtype=np.float32),
     }
 
-    with tempfile.NamedTemporaryFile(encoding="utf-8", suffix=".json", mode="w", delete=False) as f:
+    with tempfile.NamedTemporaryFile(suffix=".json", mode="w", delete=False) as f:
         from polygraphy.json import save_json
 
         input_path = f.name

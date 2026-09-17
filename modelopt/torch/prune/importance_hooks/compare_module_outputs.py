@@ -297,7 +297,7 @@ def compare_multi_layer(ref_data: dict, comp_data: dict, output_json: str | None
         results["aggregated"].pop("rmse", None)
         results["aggregated"].pop("cosine_sim_mean", None)
 
-        with open(output_json, "w", encoding="utf-8") as f:
+        with open(output_json, "w") as f:
             json.dump(results, f, indent=2)
         print(f"Saved comparison results to {output_json}")
 

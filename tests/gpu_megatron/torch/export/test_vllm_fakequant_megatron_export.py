@@ -79,7 +79,7 @@ def _test_mcore_vllm_export(tmp_path, quant_cfg, rank, size):
         "torch_dtype": "bfloat16",
     }
 
-    with open(tmp_path / "config.json", "w", encoding="utf-8") as f:
+    with open(tmp_path / "config.json", "w") as f:
         json.dump(pretrained_config, f)
 
     # Export directory

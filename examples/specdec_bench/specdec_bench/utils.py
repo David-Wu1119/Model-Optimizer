@@ -38,7 +38,7 @@ def get_tokenizer(path, trust_remote_code=False):
     extra_special_tokens = None
     tokenizer_config_path = os.path.join(path, "tokenizer_config.json")
     if os.path.exists(tokenizer_config_path):
-        with open(tokenizer_config_path, encoding="utf-8") as f:
+        with open(tokenizer_config_path) as f:
             tokenizer_config = json.load(f)
         extra_special_tokens = tokenizer_config.get("extra_special_tokens")
 
@@ -68,7 +68,7 @@ def decode_chat(tokenizer, out_tokens):
 
 def read_json(path):
     if path is not None:
-        with open(path, encoding="utf-8") as f:
+        with open(path) as f:
             data = json.load(f)
         return data
     return {}
@@ -149,7 +149,7 @@ def _git_sha(path):
 def _shard_files_from_index(index_path):
     """Return the set of shard filenames referenced by a safetensors index JSON."""
     try:
-        with open(index_path, encoding="utf-8") as f:
+        with open(index_path) as f:
             wm = json.load(f).get("weight_map", {}) or {}
         return set(wm.values())
     except Exception:
@@ -320,5 +320,5 @@ def dump_env(args, save_dir, overrides=None):
     config["huggingface_model_id"] = os.environ.get("HUGGINGFACE_MODEL_ID") or None
 
     os.makedirs(save_dir, exist_ok=True)
-    with open(os.path.join(save_dir, "configuration.json"), "w", encoding="utf-8") as f:
+    with open(os.path.join(save_dir, "configuration.json"), "w") as f:
         json.dump(config, f, indent=4, default=str)

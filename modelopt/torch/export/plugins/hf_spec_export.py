@@ -260,7 +260,7 @@ class EagleExporter(SpeculativeDecodingExporter):
             target_modules=target_modules,
             bias="none",
         )
-        with open(export_dir / "adapter_config.json", "w", encoding="utf-8") as f:
+        with open(export_dir / "adapter_config.json", "w") as f:
             json.dump(
                 lora_config.to_dict(),
                 f,
@@ -294,12 +294,12 @@ class EagleExporter(SpeculativeDecodingExporter):
         drafter_config = self._export_config()
         if hf_quant_config is not None:
             drafter_config["quantization_config"] = hf_quant_config
-        with open(f"{export_dir}/config.json", "w", encoding="utf-8") as file:
+        with open(f"{export_dir}/config.json", "w") as file:
             json.dump(drafter_config, file, indent=4)
 
         # Export hf_quant_config for backward compatibility
         if hf_quant_config is not None:
-            with open(f"{export_dir}/hf_quant_config.json", "w", encoding="utf-8") as file:
+            with open(f"{export_dir}/hf_quant_config.json", "w") as file:
                 json.dump(hf_quant_config, file, indent=4)
 
         # Export LoRA adapter weights separately
@@ -483,11 +483,11 @@ class DFlashExporter(SpeculativeDecodingExporter):
             drafter_config["torch_dtype"] = str(dtype).replace("torch.", "")
         if hf_quant_config is not None:
             drafter_config["quantization_config"] = hf_quant_config
-        with open(f"{export_dir}/config.json", "w", encoding="utf-8") as f:
+        with open(f"{export_dir}/config.json", "w") as f:
             json.dump(drafter_config, f, indent=2)
 
         if hf_quant_config is not None:
-            with open(f"{export_dir}/hf_quant_config.json", "w", encoding="utf-8") as f:
+            with open(f"{export_dir}/hf_quant_config.json", "w") as f:
                 json.dump(hf_quant_config, f, indent=2)
 
         print(

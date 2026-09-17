@@ -55,8 +55,8 @@ def _verify_model_quant_config(
     export_dir: Path, quant_config: str | None = None, kv_cache_quant_cfg: str | None = None
 ):
     """Verify config.json and hf_quant_config.json"""
-    config_dict = json.load(open(export_dir / "config.json", encoding="utf-8"))
-    hf_quant_config_dict = json.load(open(export_dir / "hf_quant_config.json", encoding="utf-8"))
+    config_dict = json.load(open(export_dir / "config.json"))
+    hf_quant_config_dict = json.load(open(export_dir / "hf_quant_config.json"))
     # Make sure config.json and hf_quant_config.json are consistent
     assert (
         config_dict["quantization_config"]["quant_algo"]
@@ -430,7 +430,7 @@ def _test_qkv_slicing_gqa_tp2(tmp_path, rank, size):
         "num_key_value_heads": num_query_groups,
         "torch_dtype": "bfloat16",
     }
-    with open(tmp_path / "config.json", "w", encoding="utf-8") as f:
+    with open(tmp_path / "config.json", "w") as f:
         json.dump(pretrained_config, f)
 
     export_dir = tmp_path / "export"
@@ -507,7 +507,7 @@ def _test_export_pp2_mtp_metadata_matches_shards(tmp_path, model_dir, rank, size
         shard_keys_cache = {}
         all_weight_map_keys = set()
         for shard_json_file in shard_json_files:
-            with open(shard_json_file, encoding="utf-8") as f:
+            with open(shard_json_file) as f:
                 shard_meta = json.load(f)
             for key, shard_file in shard_meta["weight_map"].items():
                 all_weight_map_keys.add(key)
@@ -679,7 +679,7 @@ def test_mtp_state_dict_index_file(tmp_path):
             "mtp.0.hnorm.weight": "model-00002-of-00002.safetensors",
         }
     }
-    with open(model_dir / "model.safetensors.index.json", "w", encoding="utf-8") as f:
+    with open(model_dir / "model.safetensors.index.json", "w") as f:
         json.dump(index, f)
 
     exporter = _make_exporter_for_mtp(model_dir)
@@ -908,7 +908,7 @@ def _make_exporter_for_key_check(num_layers: int) -> GPTModelExporter:
 def _write_index(dir_path: Path, keys) -> None:
     dir_path.mkdir(parents=True, exist_ok=True)
     (dir_path / "model.safetensors.index.json").write_text(
-        json.dumps({"weight_map": dict.fromkeys(keys, "model-00001.safetensors")}), encoding="utf-8"
+        json.dumps({"weight_map": dict.fromkeys(keys, "model-00001.safetensors")})
     )
 
 

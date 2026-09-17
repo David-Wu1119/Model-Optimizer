@@ -39,7 +39,7 @@ def tiny_conversations_path(tmp_path_factory):
         }
         for i in range(5)
     ]
-    with open(output_file, "w", encoding="utf-8") as f:
+    with open(output_file, "w") as f:
         f.writelines(json.dumps(conv) + "\n" for conv in conversations)
     return output_file
 

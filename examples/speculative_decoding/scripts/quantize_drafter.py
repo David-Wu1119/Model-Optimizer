@@ -304,7 +304,7 @@ def main():
     export_dir.mkdir(parents=True, exist_ok=True)
     save_file(export_sd, export_dir / "model.safetensors", metadata={"format": "pt"})
 
-    config = json.loads((source_dir / "config.json").read_text(encoding="utf-8"))
+    config = json.loads((source_dir / "config.json").read_text())
     hf_quant_config = get_quant_config(root)
     # ``get_quant_config`` only knows the linear view, so tensors it never saw (norms, 1-D
     # weights) are missing and a loader walking the checkpoint expects a scale for them.
@@ -351,10 +351,8 @@ def main():
     # ``ignore``, not ``exclude_modules``.
     config["quantization_config"]["ignore"] = list(exclude_modules)
     config["torch_dtype"] = args.dtype
-    (export_dir / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
-    (export_dir / "hf_quant_config.json").write_text(
-        json.dumps(hf_quant_config, indent=2), encoding="utf-8"
-    )
+    (export_dir / "config.json").write_text(json.dumps(config, indent=2))
+    (export_dir / "hf_quant_config.json").write_text(json.dumps(hf_quant_config, indent=2))
 
     for extra in SIDECAR_FILES:
         if (source_dir / extra).is_file():

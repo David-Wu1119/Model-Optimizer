@@ -58,10 +58,10 @@ args = parser.parse_args()
 
 
 if args.data_path.endswith("jsonl"):
-    with open(args.data_path, encoding="utf-8") as f:
+    with open(args.data_path) as f:
         data = [json.loads(line) for line in f]
 else:
-    data = json.load(open(args.data_path, encoding="utf-8"))
+    data = json.load(open(args.data_path))
 
 client = OpenAI(
     base_url=args.url,
@@ -129,7 +129,7 @@ def generate_data(messages, idx, system_prompt):
                 to_write = {"conversation_id": idx, "conversations": output_messages}
             if truncated:
                 to_write["truncated"] = True
-            with open(args.output_path, "a", encoding="utf-8") as f:
+            with open(args.output_path, "a") as f:
                 # write in share gpt format
                 f.write(json.dumps(to_write) + "\n")
         else:
@@ -150,7 +150,7 @@ def generate_data(messages, idx, system_prompt):
                 spaces_between_special_tokens=False,
             )
             response = response.choices[0].text.strip()
-            with open(args.output_path, "a", encoding="utf-8") as f:
+            with open(args.output_path, "a") as f:
                 # write in share gpt format
                 if args.log_empty_conversations:
                     to_write = {"conversation_id": idx, "text": prompt + response}
@@ -167,7 +167,7 @@ def generate_data(messages, idx, system_prompt):
 finished_ids = []
 done = False
 if os.path.exists(args.output_path):
-    with open(args.output_path, encoding="utf-8") as f:
+    with open(args.output_path) as f:
         for line in f:
             outdata = json.loads(line)
             finished_ids.append(outdata.get("conversation_id", -1))
@@ -199,5 +199,5 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=args.num_threads) as exec
         future.result()
 
 if args.log_empty_conversations:
-    with open(args.output_path, "a", encoding="utf-8") as f:
+    with open(args.output_path, "a") as f:
         f.write(json.dumps({"finished": True}) + "\n")

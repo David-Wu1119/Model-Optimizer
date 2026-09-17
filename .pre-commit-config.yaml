@@ -1,18 +1,5 @@
 # NOTE: Make sure to update version in dev requirements (pyproject.toml) as well!
 repos:
-  - repo: local
-    hooks:
-      - id: explicit-text-encoding
-        name: read_text/write_text must pass encoding
-        description: >
-          ruff PLW1514 only covers `open`, so Path.read_text/write_text can silently use the
-          locale codepage -- cp1252 on Windows -- and fail on UTF-8 content. AST-based, because a
-          line-oriented regex reports a false positive when `encoding=` sits on a later line of a
-          multi-line call.
-        language: python
-        types: [python]
-        entry: python tools/check_text_encoding.py
-
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:

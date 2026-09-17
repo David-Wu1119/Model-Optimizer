@@ -104,7 +104,7 @@ def _create_test_model_trt():
 
 def test_trt_plugin_quantization(tmp_path):
     model = _create_test_model_trt()
-    with open(os.path.join(tmp_path, "model_with_trt_plugin.onnx"), "w", encoding="utf-8") as f:
+    with open(os.path.join(tmp_path, "model_with_trt_plugin.onnx"), "w") as f:
         onnx.save_model(model, f.name)
 
         # Check that the model contains TRT custom op
@@ -130,9 +130,7 @@ def test_trt_plugin_quantization(tmp_path):
 
 def test_trt_plugin_quantization_int4_awq(tmp_path):
     model = _create_test_model_trt()
-    with open(
-        os.path.join(tmp_path, "model_with_trt_plugin_int4.onnx"), "w", encoding="utf-8"
-    ) as f:
+    with open(os.path.join(tmp_path, "model_with_trt_plugin_int4.onnx"), "w") as f:
         onnx.save_model(model, f.name)
 
         # Quantize at int4 with awq_clip (the path that forces opset >= 21).
@@ -188,9 +186,7 @@ def test_get_custom_layers_file_backed_matches_in_memory(tmp_path, monkeypatch):
 
 def test_trt_plugin_autocast(tmp_path):
     model = _create_test_model_trt()
-    with open(
-        os.path.join(tmp_path, "model_with_trt_plugin_autocast.onnx"), "w", encoding="utf-8"
-    ) as f:
+    with open(os.path.join(tmp_path, "model_with_trt_plugin_autocast.onnx"), "w") as f:
         onnx.save_model(model, f.name)
 
         # Check that the model contains TRT custom op

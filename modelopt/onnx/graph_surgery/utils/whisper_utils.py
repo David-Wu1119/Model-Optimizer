@@ -129,7 +129,7 @@ def save_audio_processor_config(
 
     # Save to file
     os.makedirs(output_dir, exist_ok=True)
-    with open(output_path, "w", encoding="utf-8") as f:
+    with open(output_path, "w") as f:
         json.dump(audio_processor_cfg, f, indent=4)
 
     logger.info(f"Saved audio_processor_config.json to {output_dir}")
@@ -379,7 +379,7 @@ def save_genai_config(
 
     # Save to file
     os.makedirs(output_dir, exist_ok=True)
-    with open(output_path, "w", encoding="utf-8") as f:
+    with open(output_path, "w") as f:
         json.dump(genai_cfg, f, indent=4)
 
     logger.info(f"Saved genai_config.json to {output_dir}")
@@ -406,7 +406,7 @@ def update_genai_config_encoder(
     Returns:
         Updated configuration dictionary.
     """
-    with open(config_path, encoding="utf-8") as f:
+    with open(config_path) as f:
         config = json.load(f)
 
     # Update encoder section
@@ -420,7 +420,7 @@ def update_genai_config_encoder(
         )
 
     # Save updated config
-    with open(config_path, "w", encoding="utf-8") as f:
+    with open(config_path, "w") as f:
         json.dump(config, f, indent=4)
 
     logger.info(f"Updated encoder section in {config_path}")
@@ -451,7 +451,7 @@ def update_genai_config_decoder(
     Returns:
         Updated configuration dictionary.
     """
-    with open(config_path, encoding="utf-8") as f:
+    with open(config_path) as f:
         config = json.load(f)
 
     # Update decoder section
@@ -463,7 +463,7 @@ def update_genai_config_decoder(
         config["model"]["decoder"]["outputs"]["present_value_names"] = decoder_present_value_pattern
 
     # Save updated config
-    with open(config_path, "w", encoding="utf-8") as f:
+    with open(config_path, "w") as f:
         json.dump(config, f, indent=4)
 
     logger.info(f"Updated decoder section in {config_path}")

@@ -242,7 +242,7 @@ class FakeBaseModel(PreTrainedModel):
                 return None
 
         if (index_path := _try_fetch(_SAFETENSORS_INDEX_FILENAME)) is not None:
-            with open(index_path, encoding="utf-8") as f:
+            with open(index_path) as f:
                 return json.load(f).get("weight_map", {})
         for single_name in _SAFETENSORS_SINGLE_FILENAMES:
             if (single_path := _try_fetch(single_name)) is not None:

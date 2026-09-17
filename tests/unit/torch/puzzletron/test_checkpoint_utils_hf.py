@@ -54,8 +54,8 @@ def test_copy_auto_map_code_files_copies_valid_local_code_references(tmp_path, m
     checkpoint_dir = tmp_path / "checkpoint"
     source_dir.mkdir()
     checkpoint_dir.mkdir()
-    (source_dir / "modeling_custom.py").write_text("# modeling\n", encoding="utf-8")
-    (source_dir / "tokenization_custom.py").write_text("# tokenizer\n", encoding="utf-8")
+    (source_dir / "modeling_custom.py").write_text("# modeling\n")
+    (source_dir / "tokenization_custom.py").write_text("# tokenizer\n")
 
     monkeypatch.setattr(cuhf.inspect, "getfile", lambda _cls: source_dir / "configuration.py")
 

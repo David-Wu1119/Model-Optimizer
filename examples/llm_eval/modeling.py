@@ -48,6 +48,7 @@ import time
 from pathlib import Path
 
 import openai
+import rwkv
 import rwkv.utils
 import tiktoken
 import torch
@@ -104,7 +105,7 @@ class OpenAIModel(EvalModel):
         if self.tokenizer is None:
             self.tokenizer = tiktoken.get_encoding("cl100k_base")  # chatgpt/gpt-4
 
-        with open(self.model_path, encoding="utf-8") as f:
+        with open(self.model_path) as f:
             info = json.load(f)
             openai.api_key = info["key"]
             self.engine = info["engine"]

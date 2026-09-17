@@ -19,7 +19,7 @@ import os
 
 
 def get_metrics_from_csv(file_path):
-    with open(file_path, encoding="utf-8") as csv_file:
+    with open(file_path) as csv_file:
         csv_reader = csv.reader(csv_file)
         next(csv_reader)
         top1_accuracy, top5_accuracy, latency = None, None, None
@@ -171,7 +171,7 @@ def main():
     output_file_path = os.path.join(build_folder_path, "aggregated_results.csv")
 
     # Write aggregated data to a new CSV file
-    with open(output_file_path, encoding="utf-8", mode="w", newline="") as output_file:
+    with open(output_file_path, mode="w", newline="") as output_file:
         csv_writer = csv.writer(output_file)
         # Write header
         csv_writer.writerow(

@@ -40,7 +40,7 @@ class TestDockerLaunch:
         script_dir = tmp_path / "scripts"
         script_dir.mkdir()
         script = script_dir / "hello.sh"
-        script.write_text("#!/bin/bash\necho 'HELLO_FROM_DOCKER'\n", encoding="utf-8")
+        script.write_text("#!/bin/bash\necho 'HELLO_FROM_DOCKER'\n")
         script.chmod(0o755)
 
         # Create a YAML config
@@ -54,7 +54,7 @@ pipeline:
       container: python:3.12-slim
 """
         yaml_path = tmp_path / "test.yaml"
-        yaml_path.write_text(yaml_content, encoding="utf-8")
+        yaml_path.write_text(yaml_content)
 
         # Run launch.py as a subprocess (avoids pytest stdin capture issues)
         launcher_dir = os.path.join(os.path.dirname(__file__), "..")
@@ -85,7 +85,7 @@ pipeline:
         script_dir = tmp_path / "scripts"
         script_dir.mkdir()
         script = script_dir / "fail.sh"
-        script.write_text("#!/bin/bash\necho 'FAILING'\nexit 1\n", encoding="utf-8")
+        script.write_text("#!/bin/bash\necho 'FAILING'\nexit 1\n")
         script.chmod(0o755)
 
         yaml_content = """
@@ -98,7 +98,7 @@ pipeline:
       container: python:3.12-slim
 """
         yaml_path = tmp_path / "fail_test.yaml"
-        yaml_path.write_text(yaml_content, encoding="utf-8")
+        yaml_path.write_text(yaml_content)
 
         launcher_dir = os.path.join(os.path.dirname(__file__), "..")
         launcher_dir = os.path.abspath(launcher_dir)

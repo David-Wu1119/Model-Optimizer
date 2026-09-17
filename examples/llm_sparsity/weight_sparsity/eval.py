@@ -81,7 +81,7 @@ def prepare_tokenizer(accelerator, checkpoint_path, model_max_length, padding_si
 
 def preprocess_cnndailymail(accelerator, data_path, calib=False):
     # Load from CNN dailymail
-    with open(data_path, encoding="utf-8") as fh:
+    with open(data_path) as fh:
         list_data_dict = json.load(fh)
 
     sources = [G_PROMPT_INPUT.format_map(example) for example in list_data_dict]

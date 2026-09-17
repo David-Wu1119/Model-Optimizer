@@ -219,9 +219,9 @@ def test_unavailable_fp8_quantization_is_written_as_an_error(monkeypatch, capsys
 
     assert case.quant_result == benchmark._FP8_QUANT_UNAVAILABLE
     assert "[WARN] vLLM is unavailable for FP8 activation quantization" in capsys.readouterr().out
-    assert "32x64,1,32,64,fp8_cutlass,False,1.000\n" in output.read_text(encoding="utf-8")
+    assert "32x64,1,32,64,fp8_cutlass,False,1.000\n" in output.read_text()
     assert f"32x64,1,32,64,fp8_cutlass,True,{benchmark._FP8_QUANT_UNAVAILABLE}\n" in (
-        output.read_text(encoding="utf-8")
+        output.read_text()
     )
 
 
@@ -248,12 +248,8 @@ def test_driver_errors_are_added_to_kernel_and_with_quant_rows(tmp_path):
     benchmark._write_results(csv_path, [case], {(1280, 2880): ["1280x2880"]})
 
     expected = "ERROR: K must be divisible by 128; got 2880"
-    assert f"1280x2880,8,1280,2880,fp8_trtllm,False,{expected}\n" in csv_path.read_text(
-        encoding="utf-8"
-    )
-    assert f"1280x2880,8,1280,2880,fp8_trtllm,True,{expected}\n" in csv_path.read_text(
-        encoding="utf-8"
-    )
+    assert f"1280x2880,8,1280,2880,fp8_trtllm,False,{expected}\n" in csv_path.read_text()
+    assert f"1280x2880,8,1280,2880,fp8_trtllm,True,{expected}\n" in csv_path.read_text()
 
 
 def test_empty_driver_error_has_no_synthetic_reason():
@@ -307,7 +303,7 @@ def test_write_results_emits_long_form_rows(tmp_path):
         moe_shape=benchmark._MoeShape(32, 50, 4, 2, "Relu2", "model.layers.*.mlp.experts"),
     )
 
-    assert output.read_text(encoding="utf-8") == (
+    assert output.read_text() == (
         "flashinfer test-header\n"
         "GEMM\n"
         "module_name,M,N,K,backend,with_quant,runtime\n"
@@ -360,7 +356,7 @@ def test_missing_builtin_results_still_writes_combined_errors(
 ):
     benchmarks_dir = tmp_path / "flashinfer" / "benchmarks"
     benchmarks_dir.mkdir(parents=True)
-    (benchmarks_dir / "flashinfer_benchmark.py").write_text("", encoding="utf-8")
+    (benchmarks_dir / "flashinfer_benchmark.py").write_text("")
     workdir = tmp_path / "results"
     monkeypatch.setattr(benchmark, "_run_case", lambda *_: (returncode, []))
     monkeypatch.setattr(
@@ -383,23 +379,23 @@ def test_missing_builtin_results_still_writes_combined_errors(
         benchmark.main()
 
     assert not (workdir / "builtin_results.csv").exists()
-    combined = (workdir / "combined_results.csv").read_text(encoding="utf-8")
+    combined = (workdir / "combined_results.csv").read_text()
     assert f"2x3,1,2,3,bf16,False,ERROR: {expected_reason}" in combined
     assert "driver.log" in combined
     # The reproducibility header leads both the combined CSV and driver.log.
     assert combined.splitlines()[0].startswith("flashinfer ")
-    assert (workdir / "driver.log").read_text(encoding="utf-8").startswith("flashinfer ")
+    assert (workdir / "driver.log").read_text().startswith("flashinfer ")
 
 
 def test_case_rows_with_foreign_tags_are_treated_as_failures(monkeypatch, tmp_path):
     benchmarks_dir = tmp_path / "flashinfer" / "benchmarks"
     benchmarks_dir.mkdir(parents=True)
-    (benchmarks_dir / "flashinfer_benchmark.py").write_text("", encoding="utf-8")
+    (benchmarks_dir / "flashinfer_benchmark.py").write_text("")
     workdir = tmp_path / "results"
 
     def fake_run_case(benchmarks_dir, argv, log):
         output = Path(argv[argv.index("--output_path") + 1])
-        output.write_text("case_tag,median_time\nsomeone_else,0.001\n", encoding="utf-8")
+        output.write_text("case_tag,median_time\nsomeone_else,0.001\n")
         return 0, []
 
     monkeypatch.setattr(benchmark, "_run_case", fake_run_case)
@@ -422,7 +418,7 @@ def test_case_rows_with_foreign_tags_are_treated_as_failures(monkeypatch, tmp_pa
     with pytest.raises(RuntimeError, match="FlashInfer failed benchmark cases"):
         benchmark.main()
 
-    combined = (workdir / "combined_results.csv").read_text(encoding="utf-8")
+    combined = (workdir / "combined_results.csv").read_text()
     assert "no result row" in combined
 
 
@@ -430,7 +426,7 @@ def test_run_case_streams_and_appends_to_the_driver_log(tmp_path, capsys):
     benchmarks_dir = tmp_path / "benchmarks"
     benchmarks_dir.mkdir()
     (benchmarks_dir / "flashinfer_benchmark.py").write_text(
-        "print('line one')\nprint('line two')\n", encoding="utf-8"
+        "print('line one')\nprint('line two')\n"
     )
     driver_log = tmp_path / "driver.log"
 
@@ -439,7 +435,7 @@ def test_run_case_streams_and_appends_to_the_driver_log(tmp_path, capsys):
 
     assert returncode == 0
     assert lines == ["line one\n", "line two\n"]
-    assert driver_log.read_text(encoding="utf-8") == "line one\nline two\n"
+    assert driver_log.read_text() == "line one\nline two\n"
     assert "line one" in capsys.readouterr().out
 
 
@@ -454,6 +450,6 @@ def test_write_builtin_merges_heterogeneous_row_columns(tmp_path):
         ],
     )
 
-    assert path.read_text(encoding="utf-8") == (
+    assert path.read_text() == (
         "routine,median_time,case_tag,num_experts\nmm_bf16,0.004,a,\ncutlass_fused_moe,,b,8\n"
     )

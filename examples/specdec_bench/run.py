@@ -405,7 +405,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.runtime_params is not None:
-        with open(args.runtime_params, encoding="utf-8") as f:
+        with open(args.runtime_params) as f:
             args.runtime_params = yaml.safe_load(f)
     else:
         args.runtime_params = {}

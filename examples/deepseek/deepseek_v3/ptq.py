@@ -326,7 +326,7 @@ def load_deepseek_model(
     torch.set_default_dtype(torch.bfloat16)
 
     # get config and build model
-    with open(model_config, encoding="utf-8") as f:
+    with open(model_config) as f:
         model_args = deekseep_model.ModelArgs(**json.load(f))
         model_args.max_batch_size = max(batch_size, model_args.max_batch_size)
     with torch.device("cuda"):
@@ -536,7 +536,7 @@ def save_amax_and_quant_config(model, output_path: str, enable_fp8_kvcache: bool
         if quantized_layers:
             quant_config["quantization"]["quantized_layers"] = quantized_layers
 
-        with open(os.path.join(output_path, "hf_quant_config.json"), "w", encoding="utf-8") as f:
+        with open(os.path.join(output_path, "hf_quant_config.json"), "w") as f:
             json.dump(quant_config, f, indent=4)
 
 

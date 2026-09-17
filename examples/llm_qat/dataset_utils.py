@@ -151,7 +151,7 @@ class ParallelConfig:
 
 def load_blend_config(config_path: str) -> BlendConfig:
     """Parse a dataset blend YAML file into a :class:`BlendConfig`."""
-    with open(config_path, encoding="utf-8") as f:
+    with open(config_path) as f:
         raw = yaml.safe_load(f)
 
     sources = [DatasetSourceConfig(**s) for s in raw.get("sources", [])]

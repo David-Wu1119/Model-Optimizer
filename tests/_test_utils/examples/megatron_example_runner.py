@@ -31,6 +31,7 @@ would hold a context on device 0 for the whole session even when every step runs
 
 import contextlib
 import gc
+import importlib
 import importlib.util
 import logging
 import os

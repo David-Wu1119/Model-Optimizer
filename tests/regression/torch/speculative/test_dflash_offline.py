@@ -132,7 +132,7 @@ def test_dflash_offline_training(
 
     trainer_state = os.path.join(output_dir, "trainer_state.json")
     assert os.path.exists(trainer_state), "trainer_state.json not found"
-    with open(trainer_state, encoding="utf-8") as f:
+    with open(trainer_state) as f:
         state = json.load(f)
     logs = [h for h in state.get("log_history", []) if "loss" in h]
     assert len(logs) >= 2, f"Expected at least 2 log entries, got {len(logs)}"

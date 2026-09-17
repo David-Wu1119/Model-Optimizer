@@ -25,7 +25,7 @@ class SpecBench(Dataset):
         self._preprocess(path)
 
     def _preprocess(self, path):
-        with open(path, encoding="utf-8") as f:
+        with open(path) as f:
             for json_line in f:
                 line = json.loads(json_line)
                 self.data.append(

@@ -86,7 +86,7 @@ def supports_inflight_batching(engine_dir):
 
 
 def read_decoder_start_token_id(engine_dir):
-    with open(Path(engine_dir) / "config.json", encoding="utf-8") as f:
+    with open(Path(engine_dir) / "config.json") as f:
         config = json.load(f)
     return config["pretrained_config"]["decoder_start_token_id"]
 
@@ -94,7 +94,7 @@ def read_decoder_start_token_id(engine_dir):
 def read_model_name(engine_dir: str):
     engine_version = get_engine_version(engine_dir)
 
-    with open(Path(engine_dir) / "config.json", encoding="utf-8") as f:
+    with open(Path(engine_dir) / "config.json") as f:
         config = json.load(f)
 
     if engine_version is None:
@@ -163,7 +163,7 @@ def load_tokenizer(
     if "qwen" in model_name.lower() and model_version == "qwen":
         if tokenizer_dir is None:
             raise ValueError("tokenizer_dir must be provided for QWEN models")
-        with open(Path(tokenizer_dir) / "generation_config.json", encoding="utf-8") as f:
+        with open(Path(tokenizer_dir) / "generation_config.json") as f:
             gen_config = json.load(f)
         pad_id = gen_config["pad_token_id"]
         end_id = gen_config["eos_token_id"]

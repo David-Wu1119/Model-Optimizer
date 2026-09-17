@@ -188,7 +188,7 @@ def test_qwen3_lora_qat_nvfp4(tiny_qwen3_path, tmp_path):
     _run_export(str(lora_qat_output_dir), str(export_dir))
 
     base_model_dir = export_dir / "base_model"
-    with open(base_model_dir / "hf_quant_config.json", encoding="utf-8") as f:
+    with open(base_model_dir / "hf_quant_config.json") as f:
         assert json.load(f)["quantization"]["quant_algo"] == "NVFP4"
 
     base_weights = load_file(base_model_dir / "model.safetensors")
@@ -283,7 +283,7 @@ def test_qwen3_qlora_nvfp4(tiny_qwen3_path, tmp_path):
     assert (export_dir / "adapter_model.safetensors").is_file()
     assert (base_model_dir / "hf_quant_config.json").is_file()
 
-    with open(base_model_dir / "hf_quant_config.json", encoding="utf-8") as f:
+    with open(base_model_dir / "hf_quant_config.json") as f:
         assert json.load(f)["quantization"]["quant_algo"] == "NVFP4"
 
     # NVFP4 needs the packed weight and *both* scales to be dequantizable downstream.

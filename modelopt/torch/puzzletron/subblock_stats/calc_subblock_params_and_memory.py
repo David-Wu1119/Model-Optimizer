@@ -252,7 +252,7 @@ def load_moe_stats(stats_file: str) -> dict:
         distribution over experts for the corresponding block. If a block's expert list is empty,
         its entry is 0.
     """
-    with open(stats_file, encoding="utf-8") as f:
+    with open(stats_file) as f:
         stats = json.load(f)
     return [
         np.array(expert_probs) / np.sum(expert_probs) if len(expert_probs) > 0 else 0

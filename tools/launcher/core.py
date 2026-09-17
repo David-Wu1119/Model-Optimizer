@@ -163,7 +163,7 @@ def create_task_from_yaml(yaml_file, factory_lookup):
         yaml_file: Path to the YAML config.
         factory_lookup: Dict mapping factory names to callable factory functions.
     """
-    with open(yaml_file, encoding="utf-8") as file:
+    with open(yaml_file) as file:
         config_from_yaml = yaml.safe_load(file)
 
     script = config_from_yaml["script"]
@@ -191,7 +191,7 @@ def _explicit_slurm_fields_from_yaml(yaml_path: str | None, task_name: str) -> s
     if not yaml_path:
         return None
     try:
-        with open(yaml_path, encoding="utf-8") as file:
+        with open(yaml_path) as file:
             config = yaml.safe_load(file) or {}
     except (OSError, yaml.YAMLError):
         return None
@@ -895,5 +895,5 @@ def run_jobs(
         }
         metadata_path = os.path.join("experiments", experiment_title, exp._id, "metadata.json")
         os.makedirs(os.path.dirname(metadata_path), exist_ok=True)
-        with open(metadata_path, "w", encoding="utf-8") as f:
+        with open(metadata_path, "w") as f:
             json.dump(metadata, f)

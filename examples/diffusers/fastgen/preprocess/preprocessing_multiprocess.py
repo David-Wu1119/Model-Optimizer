@@ -122,7 +122,7 @@ def _save_metadata_shards(
         chunk_data = all_metadata[chunk_start : chunk_start + shard_size]
         chunk_idx = chunk_start // shard_size
         shard_file = output_dir / f"metadata_shard_{shard_prefix}s{chunk_idx:04d}.json"
-        with open(shard_file, "w", encoding="utf-8") as f:
+        with open(shard_file, "w") as f:
             json.dump(chunk_data, f, indent=2)
         shard_files.append(shard_file.name)
 
@@ -140,7 +140,7 @@ def _save_metadata_shards(
         metadata["shard_rank"] = shard_rank
         metadata["shard_world"] = shard_world
 
-    with open(output_dir / index_filename, "w", encoding="utf-8") as f:
+    with open(output_dir / index_filename, "w") as f:
         json.dump(metadata, f, indent=2)
 
 

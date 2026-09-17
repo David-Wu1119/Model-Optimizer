@@ -328,7 +328,7 @@ def run_single_puzzle_config(
         solution_repr_0 = solutions[0]["solution_repr"]
         mprint(f"\n{solution_repr_0}")
         mprint(f"Total costs: {solutions[0]['total_costs']}")
-        (output_folder / "solution_repr_0.txt").write_text(solution_repr_0, encoding="utf-8")
+        (output_folder / "solution_repr_0.txt").write_text(solution_repr_0)
 
     solutions_file = output_folder / "solutions.json"
     json_dump(solutions, solutions_file)
@@ -439,7 +439,7 @@ def _get_minimal_unique_names(dicts: list[dict]) -> list[str]:
 def run_puzzle(args: DictConfig) -> list[str]:
     # Loads config from args/puzzle_profile
     if args.puzzle_profile is not None:
-        with open(args.puzzle_profile, encoding="utf-8") as f:
+        with open(args.puzzle_profile) as f:
             puzzle_profile = yaml.safe_load(f)
         _override_args_from_profile(args, puzzle_profile)
         mprint(f"Loaded Puzzle profile from {args.puzzle_profile}")
@@ -449,7 +449,7 @@ def run_puzzle(args: DictConfig) -> list[str]:
 
     # Read Metrics and Stats
     if args.gathered_metrics_path is not None:
-        gathered_metrics = json.loads(args.gathered_metrics_path.read_text(encoding="utf-8"))
+        gathered_metrics = json.loads(args.gathered_metrics_path.read_text())
     else:
         gathered_metrics = gather_multi_layer_puzzle_metrics(
             args.single_block_replacement_validation_dir
@@ -458,7 +458,7 @@ def run_puzzle(args: DictConfig) -> list[str]:
     if args.metric_overrides is not None:
         gathered_metrics = {**gathered_metrics, **args.metric_overrides}
 
-    subblock_stats = json.loads(args.subblock_stats_path.read_text(encoding="utf-8"))
+    subblock_stats = json.loads(args.subblock_stats_path.read_text())
 
     all_subblock_args = _load_all_subblock_stats_args(args, puzzle_profile)
     all_subblock_output_folders = [
@@ -533,7 +533,7 @@ def gather_multi_layer_puzzle_metrics(
 
 
 def _parse_single_block_replacement_metrics(metrics_path: Path) -> dict:
-    raw_metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+    raw_metrics = json.loads(metrics_path.read_text())
     single_block_replacement = raw_metrics["puzzle_solution"]["single_block_replacement"]
     variant_metrics = {
         "block_config": BlockConfig(**single_block_replacement["block_config"]),
@@ -544,7 +544,7 @@ def _parse_single_block_replacement_metrics(metrics_path: Path) -> dict:
 
 
 def _parse_single_sequence_replacement_metrics(metrics_path: Path) -> dict:
-    raw_metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+    raw_metrics = json.loads(metrics_path.read_text())
     single_sequence_replacement = raw_metrics["puzzle_solution"]["single_sequence_replacement"]
     if len(single_sequence_replacement["child_block_configs"]) > 1:
         raise NotImplementedError(
@@ -565,9 +565,7 @@ def _parse_teacher_block_metrics(
     single_block_replacement_validation_dir: Path,
     all_metric_names: Iterable[str] = ("kl_div_loss",),
 ) -> list[dict]:
-    raw_metrics = json.loads(
-        (single_block_replacement_validation_dir / "teacher.json").read_text(encoding="utf-8")
-    )
+    raw_metrics = json.loads((single_block_replacement_validation_dir / "teacher.json").read_text())
     teacher_checkpoint_dir = Path(raw_metrics["args"]["teacher_dir"]).resolve()
     descriptor_name = raw_metrics["args"]["descriptor"]
     descriptor = ModelDescriptorFactory.get(descriptor_name)
@@ -580,9 +578,7 @@ def _parse_teacher_block_metrics(
     replacement_library_path = raw_metrics["args"].get("replacement_library_path")
     if replacement_library_path is not None:
         teacher_replacements = dict()
-        all_layer_replacements = json.loads(
-            Path(replacement_library_path).read_text(encoding="utf-8")
-        )
+        all_layer_replacements = json.loads(Path(replacement_library_path).read_text())
         for layer_replacement in all_layer_replacements:
             layer_replacement = parse_layer_replacement(layer_replacement)
             if replacement_is_teacher(

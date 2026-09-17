@@ -61,7 +61,7 @@ def assert_safetensors_index_consistent(export_dir: Path | str) -> None:
     index_file = export_dir / "model.safetensors.index.json"
     if not index_file.exists():  # single unsharded file: nothing to cross-check
         return
-    weight_map = json.loads(index_file.read_text(encoding="utf-8"))["weight_map"]
+    weight_map = json.loads(index_file.read_text())["weight_map"]
     missing_files = {f for f in set(weight_map.values()) if not (export_dir / f).exists()}
     assert not missing_files, f"index.json references missing shards: {sorted(missing_files)}"
     exported = set(load_safetensors_dir(export_dir))

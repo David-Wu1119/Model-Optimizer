@@ -38,8 +38,6 @@ Changelog
 
 **Bug Fixes**
 
-- Text I/O across ModelOpt now passes an explicit ``encoding``. Without it Python uses the locale codepage, which on Windows is cp1252: reading a UTF-8 file raised ``UnicodeDecodeError`` on the first non-Latin-1 byte and writing non-ASCII raised ``UnicodeEncodeError``, on platforms where no such failure appears elsewhere. This affected library code a user reaches directly -- ``modelopt.recipe.loader`` read recipe YAML through the locale codec -- so it was not only a CI concern. Ruff's ``PLW1514`` now guards ``open`` calls, and a pre-commit hook guards ``Path.read_text``/``write_text``, which that rule does not implement.
-
 - Fix ``examples/megatron_bridge/export_quantized_megatron_to_hf.py`` storing the MoE router at Megatron's ``moe_router_dtype``, which is a routing *compute* dtype, not a storage one. The router now exports at the export ``dtype`` like every other unquantized weight, matching what ``hf_ptq.py`` and the released NVFP4 checkpoints contain; pass ``moe_router_dtype`` to ``export_mcore_gpt_to_hf`` explicitly if you want the old fp32 storage.
 - Fix unified Megatron export writing a second, unreferenced copy of the vocab embedding when a model with MTP layers is exported with pipeline parallelism. The duplicate was never loaded but inflated the checkpoint by the size of the embedding (about 1 GB for Qwen3.6-35B-A3B); re-export to reclaim the space.
 - Fail fast on non-finite AutoQuantize output gradients with an actionable error before accumulating sensitivity scores, without changing attention backend settings.

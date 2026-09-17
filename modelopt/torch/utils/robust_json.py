@@ -75,11 +75,11 @@ def json_dump(obj: Any, path: Path | str) -> None:
     path = Path(path)
     path.parent.mkdir(exist_ok=True, parents=True)
     json_text = json_dumps(obj)
-    path.write_text(json_text, encoding="utf-8")
+    path.write_text(json_text)
 
 
 def json_load(path: Path | str) -> dict:
     """Load JSON from file and return as dictionary."""
     path = Path(path)
-    text = path.read_text(encoding="utf-8")
+    text = path.read_text()
     return json.loads(text)

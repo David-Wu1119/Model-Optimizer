@@ -74,7 +74,7 @@ def make_speculative_data_module(
     chat_template = None
     if getattr(data_args, "chat_template", None):
         template_path = data_args.chat_template
-        with open(template_path, encoding="utf-8") as f:
+        with open(template_path) as f:
             chat_template = f.read()
         print_rank_0(f"Loaded chat template from {template_path}")
 
@@ -347,7 +347,7 @@ class DFlashFSDP2ShardedSDExportCallback(TrainerCallback):
                 save_file(drafter_sd, os.path.join(export_dir, "model.safetensors"))
 
                 config = exporter._export_config()
-                with open(os.path.join(export_dir, "config.json"), "w", encoding="utf-8") as f:
+                with open(os.path.join(export_dir, "config.json"), "w") as f:
                     json.dump(config, f, indent=2)
 
                 total_mb = sum(v.nbytes for v in drafter_sd.values()) / 1024 / 1024

@@ -51,8 +51,8 @@ class TestParseS3Path:
 def _make_run_dir(path: Path) -> Path:
     """Create a directory shaped like a specdec_bench run output."""
     path.mkdir(parents=True, exist_ok=True)
-    (path / "configuration.json").write_text("{}", encoding="utf-8")
-    (path / "timing.json").write_text("{}", encoding="utf-8")
+    (path / "configuration.json").write_text("{}")
+    (path / "timing.json").write_text("{}")
     return path
 
 
@@ -65,7 +65,7 @@ class TestIsRunDir:
         assert upload_to_s3._is_run_dir(tmp_path) is False
 
     def test_non_sentinel_files(self, tmp_path):
-        (tmp_path / "results.txt").write_text("", encoding="utf-8")
+        (tmp_path / "results.txt").write_text("")
         assert upload_to_s3._is_run_dir(tmp_path) is False
 
 
@@ -116,7 +116,7 @@ class TestDiscoverRuns:
     def test_ignores_non_run_files(self, tmp_path):
         root = tmp_path / "mixed"
         _make_run_dir(root / "a")
-        (root / "notes.txt").write_text("ignore me", encoding="utf-8")
+        (root / "notes.txt").write_text("ignore me")
         queue = upload_to_s3._discover_runs(root, "results")
         assert len(queue) == 1
         assert queue[0][0].name == "a"
@@ -126,15 +126,13 @@ class TestCheckProvenance:
     def test_complete(self, tmp_path):
         run = tmp_path / "r"
         run.mkdir()
-        (run / "configuration.json").write_text(
-            '{"container_image": "vllm/vllm-openai:nightly"}', encoding="utf-8"
-        )
+        (run / "configuration.json").write_text('{"container_image": "vllm/vllm-openai:nightly"}')
         assert upload_to_s3._check_provenance(run) == []
 
     def test_missing_container_image(self, tmp_path):
         run = tmp_path / "r"
         run.mkdir()
-        (run / "configuration.json").write_text('{"container_image": null}', encoding="utf-8")
+        (run / "configuration.json").write_text('{"container_image": null}')
         assert upload_to_s3._check_provenance(run) == ["container_image"]
 
     def test_no_configuration_json(self, tmp_path):
@@ -145,11 +143,11 @@ class TestCheckProvenance:
     def test_malformed_configuration_json(self, tmp_path):
         run = tmp_path / "r"
         run.mkdir()
-        (run / "configuration.json").write_text("{ not valid json", encoding="utf-8")
+        (run / "configuration.json").write_text("{ not valid json")
         assert upload_to_s3._check_provenance(run) == list(upload_to_s3._REQUIRED_PROVENANCE_FIELDS)
 
     def test_empty_string_is_missing(self, tmp_path):
         run = tmp_path / "r"
         run.mkdir()
-        (run / "configuration.json").write_text('{"container_image": ""}', encoding="utf-8")
+        (run / "configuration.json").write_text('{"container_image": ""}')
         assert upload_to_s3._check_provenance(run) == ["container_image"]

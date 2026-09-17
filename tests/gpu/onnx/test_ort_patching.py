@@ -334,7 +334,7 @@ class TestInferenceSession:
     def test_create_inference_session_with_ep_config(self, mock_calibrator, tmp_path):
         """Test inference session creation with EP configuration."""
         model_path = tmp_path / "test_model.onnx"
-        model_path.write_text("dummy", encoding="utf-8")
+        model_path.write_text("dummy")
 
         with patch("onnxruntime.InferenceSession") as mock_session:
             mock_inference_session = Mock()

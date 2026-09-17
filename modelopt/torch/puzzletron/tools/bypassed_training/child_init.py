@@ -918,9 +918,7 @@ def _parse_model_config_overrides(
         if os.path.exists(
             model_config_overrides_json
         ):  # using os.path.exists, because Path.exists throws an exception on long strings
-            model_config_overrides_json = Path(model_config_overrides_json).read_text(
-                encoding="utf-8"
-            )
+            model_config_overrides_json = Path(model_config_overrides_json).read_text()
         print(f"I'm json loadsing over here. {model_config_overrides_json=}")
         model_config_overrides_dict = json.loads(model_config_overrides_json)
 
@@ -977,7 +975,7 @@ def _apply_hidden_size_pruning(
     channel_ranking = None
     if hidden_size_init_mode == HiddenSizeInitMode.PruneByChannelRanking:
         if channel_importance_path is not None:
-            with open(channel_importance_path, "r", encoding="utf-8") as f:
+            with open(channel_importance_path, "r") as f:
                 channel_ranking = json.load(f)["channel_importance_ranking"]
         else:
             raise ValueError(

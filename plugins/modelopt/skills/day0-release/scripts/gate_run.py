@@ -144,7 +144,7 @@ def main(argv=None):
     args = p.parse_args(argv)
 
     try:
-        with open(args.run, encoding="utf-8") as f:
+        with open(args.run) as f:
             summary = json.load(f)
     except (OSError, json.JSONDecodeError) as e:
         print(json.dumps({"pass": False, "failure_class": "USER_CONFIG_ERROR", "detail": str(e)}))

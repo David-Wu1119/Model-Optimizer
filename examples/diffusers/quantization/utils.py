@@ -143,7 +143,7 @@ def load_calib_prompts(
 ) -> list[list[str]]:
     prompt_list: list[str] = []
     if isinstance(calib_data_path, Path):
-        with open(calib_data_path, encoding="utf-8") as f:
+        with open(calib_data_path) as f:
             prompt_list = f.readlines()
     else:
         dataset = load_dataset(calib_data_path)

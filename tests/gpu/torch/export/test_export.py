@@ -533,7 +533,7 @@ def test_qwen3_moe_nvfp4_experts_only_export_exclude_modules(tmp_path):
     # Load the generated hf_quant_config.json
     hf_quant_config_path = export_dir / "hf_quant_config.json"
     assert hf_quant_config_path.exists(), "hf_quant_config.json should be generated"
-    with open(hf_quant_config_path, encoding="utf-8") as f:
+    with open(hf_quant_config_path) as f:
         hf_quant_config = json.load(f)
 
     quant_section = hf_quant_config["quantization"]

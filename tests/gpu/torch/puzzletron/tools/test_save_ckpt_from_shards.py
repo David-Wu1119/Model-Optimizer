@@ -45,7 +45,7 @@ class TestSaveCheckpointFromShardsSingleProcess:
         # test safetensors index file exists and contains weight map
         index_path = tmp_path / SAFE_WEIGHTS_INDEX_NAME
         assert index_path.exists(), "safetensors index file was not written"
-        index = json.loads(index_path.read_text(encoding="utf-8"))
+        index = json.loads(index_path.read_text())
         assert "weight_map" in index
         assert set(index["weight_map"].keys()) == expected_keys
 
@@ -59,7 +59,7 @@ class TestSaveCheckpointFromShardsSingleProcess:
         # test config.json saved
         config_path = tmp_path / "config.json"
         assert config_path.exists(), "config.json was not saved"
-        cfg = json.loads(config_path.read_text(encoding="utf-8"))
+        cfg = json.loads(config_path.read_text())
         assert cfg["num_hidden_layers"] == get_tiny_llama().config.num_hidden_layers
 
         # test subblock filenames follow descriptor groups
@@ -72,7 +72,7 @@ class TestSaveCheckpointFromShardsSingleProcess:
         model = get_tiny_llama(tie_word_embeddings=True)
         save_checkpoint_from_shards(model, tmp_path, LlamaModelDescriptor)
 
-        index = json.loads((tmp_path / SAFE_WEIGHTS_INDEX_NAME).read_text(encoding="utf-8"))
+        index = json.loads((tmp_path / SAFE_WEIGHTS_INDEX_NAME).read_text())
         assert "lm_head.weight" not in index["weight_map"]
 
         reloaded_sd = {}
@@ -122,7 +122,7 @@ class TestSaveCheckpointFromShardsMultiProcess:
 
         index_path = tmp_path / SAFE_WEIGHTS_INDEX_NAME
         assert index_path.exists()
-        index = json.loads(index_path.read_text(encoding="utf-8"))
+        index = json.loads(index_path.read_text())
 
         model = get_tiny_llama()
         expected_keys = set(model.state_dict().keys())

@@ -59,7 +59,7 @@ def read_bytes(file_path: str | Path) -> bytes:
 
 def read_string(file_path: str | Path) -> str:
     path = Path(file_path)
-    return path.read_text(encoding="utf-8")
+    return path.read_text()
 
 
 def write_bytes(data: bytes, file_path: str | Path) -> None:
@@ -69,4 +69,4 @@ def write_bytes(data: bytes, file_path: str | Path) -> None:
 
 def write_string(data: str, file_path: str | Path) -> None:
     path = Path(file_path)
-    path.write_text(data, encoding="utf-8")
+    path.write_text(data)

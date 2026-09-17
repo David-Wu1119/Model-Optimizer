@@ -66,7 +66,7 @@ logger = get_logger("Train")
 
 def load_config(path: str) -> dict:
     """Load a YAML configuration file."""
-    with open(path, encoding="utf-8") as f:
+    with open(path) as f:
         return yaml.safe_load(f)
 
 
@@ -74,7 +74,7 @@ def save_config(cfg: dict, output_dir: str) -> None:
     """Save the configuration to the output directory for reproducibility."""
     os.makedirs(output_dir, exist_ok=True)
     config_path = os.path.join(output_dir, "config.yaml")
-    with open(config_path, "w", encoding="utf-8") as f:
+    with open(config_path, "w") as f:
         yaml.dump(cfg, f, default_flow_style=False, sort_keys=False)
     logger.info(f"Saved config to {config_path}")
 
@@ -238,11 +238,11 @@ def extract_student_model(
 
     # Update config.json with auto_map
     config_path = Path(save_path) / "config.json"
-    with open(config_path, encoding="utf-8") as f:
+    with open(config_path) as f:
         config = json.load(f)
     config.pop("architectures", None)
     config["auto_map"] = AUTO_MAP_CONFIG
-    with open(config_path, "w", encoding="utf-8") as f:
+    with open(config_path, "w") as f:
         json.dump(config, f, indent=2)
 
     # Copy model implementation files for trust_remote_code

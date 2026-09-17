@@ -652,7 +652,7 @@ def _load_expert_scores(
     assert mlp_init_config is not None
     if "expert_scores_file" in mlp_init_config:
         expert_scores_file = mlp_init_config["expert_scores_file"]
-        with open(expert_scores_file, "r", encoding="utf-8") as f:
+        with open(expert_scores_file, "r") as f:
             expert_scores = json.load(f)
     elif "activations_log_dir" in mlp_init_config:
         _cache_activations_log(mlp_init_config)

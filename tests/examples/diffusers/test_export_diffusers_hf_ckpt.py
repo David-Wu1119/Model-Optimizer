@@ -234,7 +234,7 @@ def test_qwen_image_hf_ckpt_export(
     transformer_dir = hf_ckpt_dir / "transformer"
     config_path = transformer_dir / "config.json"
     assert config_path.exists(), f"no transformer/config.json in {hf_ckpt_dir}"
-    quant_config = json.loads(config_path.read_text(encoding="utf-8")).get("quantization_config")
+    quant_config = json.loads(config_path.read_text()).get("quantization_config")
     assert quant_config is not None, "missing quantization_config"
     assert quant_config.get("quant_method") == "modelopt"
 

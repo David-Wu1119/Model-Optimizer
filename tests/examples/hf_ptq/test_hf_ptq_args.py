@@ -682,7 +682,7 @@ def test_experiment_json_lands_in_the_checkpoint_and_on_the_server(
     with example_utils.mlflow_run(args):
         _exported(args)
 
-    written = json.loads((tmp_path / ".experiment.json").read_text(encoding="utf-8"))
+    written = json.loads((tmp_path / ".experiment.json").read_text())
     assert written["experiment_name"] == "tester/hf_ptq/Qwen3-0.6B-fp8"
     assert written["run_id"] == "deadbeef"
     assert written["run_url"] == "https://mlflow.example.com/#/experiments/7/runs/deadbeef"
@@ -702,10 +702,7 @@ def test_experiment_json_is_written_when_a_run_fails_after_exporting(
         _exported(args)
         raise RuntimeError("crashed while cleaning up")
 
-    assert (
-        json.loads((tmp_path / ".experiment.json").read_text(encoding="utf-8"))["run_id"]
-        == "deadbeef"
-    )
+    assert json.loads((tmp_path / ".experiment.json").read_text())["run_id"] == "deadbeef"
     assert fake_mlflow.status == "FAILED"
 
 
@@ -716,19 +713,14 @@ def test_no_local_pointer_when_the_export_never_completed(
     already hold a valid checkpoint from an earlier attempt. Neither is evidence that this
     run wrote the weights, so a run that fails before export must not claim them."""
     args = _tracked_run(monkeypatch, tmp_path)
-    (tmp_path / ".quant_summary.txt").write_text(
-        "706 TensorQuantizers found in model\n", encoding="utf-8"
-    )
+    (tmp_path / ".quant_summary.txt").write_text("706 TensorQuantizers found in model\n")
     previous = tmp_path / ".experiment.json"
-    previous.write_text('{"run_id": "the-run-that-really-wrote-this"}\n', encoding="utf-8")
+    previous.write_text('{"run_id": "the-run-that-really-wrote-this"}\n')
 
     with pytest.raises(RuntimeError), example_utils.mlflow_run(args):
         raise RuntimeError("OOM during calibration")
 
-    assert (
-        json.loads(previous.read_text(encoding="utf-8"))["run_id"]
-        == "the-run-that-really-wrote-this"
-    )
+    assert json.loads(previous.read_text())["run_id"] == "the-run-that-really-wrote-this"
     # Still traceable from the server side: the run opened, it just produced no checkpoint.
     assert json.loads(fake_mlflow.texts["experiment.json"])["run_id"] == "deadbeef"
     assert fake_mlflow.status == "FAILED"
@@ -752,13 +744,13 @@ def test_no_experiment_json_when_optional_tracking_fails(
     )
     args.dist_state = SimpleNamespace(is_main=True, world_size=1)
     previous = tmp_path / ".experiment.json"
-    previous.write_text('{"run_id": "from-an-earlier-run"}\n', encoding="utf-8")
+    previous.write_text('{"run_id": "from-an-earlier-run"}\n')
 
     with example_utils.mlflow_run(args):
         _exported(args)
 
     assert args.mlflow_required is False
-    assert json.loads(previous.read_text(encoding="utf-8"))["run_id"] == "from-an-earlier-run"
+    assert json.loads(previous.read_text())["run_id"] == "from-an-earlier-run"
 
 
 def test_untracked_export_drops_a_pointer_it_would_otherwise_inherit(
@@ -771,7 +763,7 @@ def test_untracked_export_drops_a_pointer_it_would_otherwise_inherit(
     )
     args.dist_state = SimpleNamespace(is_main=True, world_size=1)
     inherited = tmp_path / ".experiment.json"
-    inherited.write_text('{"run_id": "a-run-that-quantized-something-else"}\n', encoding="utf-8")
+    inherited.write_text('{"run_id": "a-run-that-quantized-something-else"}\n')
 
     with example_utils.mlflow_run(args):
         _exported(args)
@@ -786,12 +778,12 @@ def test_untracked_failure_leaves_an_existing_pointer_alone(monkeypatch, example
     )
     args.dist_state = SimpleNamespace(is_main=True, world_size=1)
     previous = tmp_path / ".experiment.json"
-    previous.write_text('{"run_id": "still-valid"}\n', encoding="utf-8")
+    previous.write_text('{"run_id": "still-valid"}\n')
 
     with pytest.raises(RuntimeError), example_utils.mlflow_run(args):
         raise RuntimeError("died before export")
 
-    assert json.loads(previous.read_text(encoding="utf-8"))["run_id"] == "still-valid"
+    assert json.loads(previous.read_text())["run_id"] == "still-valid"
 
 
 def test_only_the_main_rank_clears_an_inherited_pointer(monkeypatch, example_utils, tmp_path):
@@ -802,7 +794,7 @@ def test_only_the_main_rank_clears_an_inherited_pointer(monkeypatch, example_uti
     )
     args.dist_state = SimpleNamespace(is_main=False, world_size=8)
     inherited = tmp_path / ".experiment.json"
-    inherited.write_text('{"run_id": "a-run-that-quantized-something-else"}\n', encoding="utf-8")
+    inherited.write_text('{"run_id": "a-run-that-quantized-something-else"}\n')
 
     with example_utils.mlflow_run(args):
         _exported(args)

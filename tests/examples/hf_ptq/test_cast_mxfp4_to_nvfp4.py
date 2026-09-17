@@ -77,7 +77,7 @@ def _write_synthetic_mxfp4_checkpoint(
         "metadata": {"total_size": sum(t.numel() * t.element_size() for t in state.values())},
         "weight_map": dict.fromkeys(state, shard_name),
     }
-    (ckpt_dir / "model.safetensors.index.json").write_text(json.dumps(index), encoding="utf-8")
+    (ckpt_dir / "model.safetensors.index.json").write_text(json.dumps(index))
     return ckpt_dir
 
 
@@ -135,8 +135,7 @@ def test_build_amax_map_no_scales_raises(tmp_path):
                 "metadata": {},
                 "weight_map": {"model.layers.0.weight": "model-00001-of-00001.safetensors"},
             }
-        ),
-        encoding="utf-8",
+        )
     )
     with pytest.raises(SystemExit, match="No '\\*_scales'"):
         cast.build_amax_map(empty)
@@ -230,8 +229,7 @@ def test_apply_to_model_raises_on_missing_blocks_pair(tmp_path):
                 "metadata": {},
                 "weight_map": {"experts.gate_up_proj_scales": "model-00001-of-00001.safetensors"},
             }
-        ),
-        encoding="utf-8",
+        )
     )
     model = _FakeModel(num_blocks=4)
     with pytest.raises(AssertionError, match=r"no paired '.*_blocks' tensor"):

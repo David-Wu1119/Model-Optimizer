@@ -121,19 +121,19 @@ def main():
             file_stem = f"{eval_name}_{model_name}"
             report_filename = f"/tmp/{file_stem}{debug_suffix}.html"
             print(f"Writing report to {report_filename}")
-            with open(report_filename, "w", encoding="utf-8") as fh:
+            with open(report_filename, "w") as fh:
                 fh.write(common.make_report(result))
             metrics = result.metrics | {"score": result.score}
             print(metrics)
             result_filename = f"/tmp/{file_stem}{debug_suffix}.json"
-            with open(result_filename, "w", encoding="utf-8") as f:
+            with open(result_filename, "w") as f:
                 f.write(json.dumps(metrics, indent=2))
             print(f"Writing results to {result_filename}")
             mergekey2resultpath[f"{file_stem}"] = result_filename
     merge_metrics = []
     for eval_model_name, result_filename in mergekey2resultpath.items():
         try:
-            result = json.load(open(result_filename, "r+", encoding="utf-8"))
+            result = json.load(open(result_filename, "r+"))
         except Exception as e:
             print(e, result_filename)
             continue

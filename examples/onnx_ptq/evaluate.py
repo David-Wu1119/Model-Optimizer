@@ -125,7 +125,7 @@ def main():
             ["Top 5", top5_accuracy],
             ["Latency", latency],
         ]
-        with open(args.results_path, "w", encoding="utf-8", newline="") as csvfile:
+        with open(args.results_path, "w", newline="") as csvfile:
             writer = csv.writer(csvfile)
             writer.writerows(results)
 

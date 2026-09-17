@@ -57,7 +57,7 @@ def test_qad(tmp_path: Path, num_gpus, create_student):
     export is covered more cheaply by test_quantize_export.py, so keep this to one LLM and one VLM.
     """
     hf_model_path = create_student(tmp_path)
-    is_vlm = "vision_config" in (hf_model_path / "config.json").read_text(encoding="utf-8")
+    is_vlm = "vision_config" in (hf_model_path / "config.json").read_text()
     quantized_megatron_path = tmp_path / "quantized_megatron"
     distill_output_dir = tmp_path / "qad_output"
     train_iters = 3
@@ -131,7 +131,7 @@ def test_qad(tmp_path: Path, num_gpus, create_student):
     assert (hf_export_path / "hf_quant_config.json").exists()
     # A quantized export writes routed experts one per expert while the BF16 reference packs
     # them, so both sides of that expansion differ from the reference.
-    text_config = json.loads((hf_model_path / "config.json").read_text(encoding="utf-8"))
+    text_config = json.loads((hf_model_path / "config.json").read_text())
     is_moe = bool(text_config.get("text_config", text_config).get("num_experts"))
     # QAD trains the student, so language-model weights drift from the reference; the vision
     # tower is never trained and must still come through byte for byte.

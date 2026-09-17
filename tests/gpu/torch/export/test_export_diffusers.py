@@ -25,7 +25,7 @@ from modelopt.torch.export.unified_export_hf import export_hf_checkpoint
 
 
 def _load_config(config_path):
-    with open(config_path, encoding="utf-8") as file:
+    with open(config_path) as file:
         return json.load(file)
 
 

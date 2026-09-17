@@ -778,7 +778,7 @@ class LayerNormContributionHook(ForwardHook):
         # Save the output
         output_path = activations_log_dir / "channel_importance_results.json"
         print(f"Saving channel importance data to {output_path}")
-        with open(output_path, "w", encoding="utf-8") as f:
+        with open(output_path, "w") as f:
             json.dump(output_data, f, indent=2)
 
         # Print summary statistics

@@ -254,9 +254,7 @@ class TestQDQAutotuner:
         # Submit some results
         autotuner.submit(10.5)  # baseline
 
-        with tempfile.NamedTemporaryFile(
-            encoding="utf-8", mode="w", suffix=".yaml", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             state_path = f.name
 
         try:

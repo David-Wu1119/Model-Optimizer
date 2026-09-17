@@ -70,7 +70,7 @@ def test_examples_present():
 )
 def test_example_yaml_valid(path):
     """Each example parses and every task has a valid script/factory/args shape."""
-    with open(path, encoding="utf-8") as f:
+    with open(path) as f:
         cfg = yaml.safe_load(f)
     assert isinstance(cfg, (dict, list)), f"{path}: top-level YAML is not a mapping/list"
 

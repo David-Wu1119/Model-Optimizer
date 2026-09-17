@@ -359,7 +359,7 @@ class LPS:
         objective_value = 0
         for layer_id, layer_vars in enumerate(selection_vars):
             objective_value += sum(
-                z * a for z, a in zip(layer_vars, self.candidate_scores[layer_id])
+                [z * a for z, a in zip(layer_vars, self.candidate_scores[layer_id])]
             )
         problem += (objective_value, "L")
         return problem
@@ -375,7 +375,7 @@ class LPS:
         ) in self.constraints_to_candidate_costs.items():
             cost = 0
             for layer_vars, candidate_costs in zip(selection_vars, candidate_costs_list):
-                cost += sum(z * b for z, b in zip(layer_vars, candidate_costs))
+                cost += sum([z * b for z, b in zip(layer_vars, candidate_costs)])
             if isinstance(self.constraints[constraint_name], tuple):
                 lower_bound, upper_bound = self.constraints[constraint_name]  # type: ignore[misc]
             else:

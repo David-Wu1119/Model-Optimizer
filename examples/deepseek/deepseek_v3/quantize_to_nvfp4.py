@@ -88,10 +88,10 @@ def remove_quantization_config_from_original_config(export_dir: str) -> None:
     Assumes the exported checkpoint directory has a `config.json` containing `quantization_config`.
     """
     config_path = os.path.join(export_dir, "config.json")
-    with open(config_path, encoding="utf-8") as f:
+    with open(config_path) as f:
         cfg = json.load(f)
     del cfg["quantization_config"]
-    with open(config_path, "w", encoding="utf-8") as f:
+    with open(config_path, "w") as f:
         json.dump(cfg, f, indent=2, sort_keys=True)
         f.write("\n")
 
@@ -129,7 +129,7 @@ def load_and_preprocess_state_dict(modelopt_state_root, world_size=8):
 
 
 def process_quant_config(quant_config_path: str, save_path: str) -> dict[str, Any]:
-    with open(quant_config_path, encoding="utf-8") as f:
+    with open(quant_config_path) as f:
         quant_config = json.load(f)
 
     if "exclude_modules" in quant_config["quantization"]:
@@ -142,7 +142,7 @@ def process_quant_config(quant_config_path: str, save_path: str) -> dict[str, An
         _remap_key(quant_config["quantization"]["quantized_layers"])
         per_layer_quant_config = quant_config["quantization"]["quantized_layers"]
 
-    with open(save_path, "w", encoding="utf-8") as f:
+    with open(save_path, "w") as f:
         json.dump(quant_config, f, indent=4)
 
     return per_layer_quant_config
@@ -173,7 +173,7 @@ def convert_fp8_ckpt_to_nvfp4(
     torch.set_default_dtype(torch.bfloat16)
     model_index_file = os.path.join(fp8_root, "model.safetensors.index.json")
     os.makedirs(save_root, exist_ok=True)
-    with open(model_index_file, encoding="utf-8") as f:
+    with open(model_index_file) as f:
         model_index = json.load(f)
     weight_map = model_index["weight_map"]
 
@@ -286,7 +286,7 @@ def convert_fp8_ckpt_to_nvfp4(
         scale_inv_name = f"{weight_name}_scale_inv"
         if scale_inv_name in weight_map:
             weight_map.pop(scale_inv_name)
-    with open(new_model_index_file, "w", encoding="utf-8") as f:
+    with open(new_model_index_file, "w") as f:
         json.dump({"metadata": {}, "weight_map": weight_map}, f, indent=2)
 
 

@@ -669,7 +669,7 @@ class DMD2DiffusionRecipe(TrainDiffusionRecipe):
             "checkpoint": os.path.basename(os.path.realpath(path)),
             "dmd_iteration": int(self._dmd_pipeline._iteration),
         }
-        with open(marker_path, "w", encoding="utf-8") as f:
+        with open(marker_path, "w") as f:
             json.dump(payload, f)
             f.write("\n")
         logging.info("[DMD2] marked checkpoint complete -> %s", marker_path)
@@ -833,7 +833,7 @@ class DMD2DiffusionRecipe(TrainDiffusionRecipe):
                 return None
         elif os.path.isfile(pointer + ".txt"):
             try:
-                with open(pointer + ".txt", encoding="utf-8") as f:
+                with open(pointer + ".txt") as f:
                     resolved = f.read().strip()
             except OSError:
                 return None

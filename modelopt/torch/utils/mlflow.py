@@ -168,10 +168,10 @@ def _git_sha() -> str:
     try:
         git_path = Path(__file__).resolve().parents[3] / ".git"
         if git_path.is_file():
-            git_dir = Path(git_path.read_text(encoding="utf-8").split("gitdir:", 1)[1].strip())
+            git_dir = Path(git_path.read_text().split("gitdir:", 1)[1].strip())
         else:
             git_dir = git_path
-        head = (git_dir / "HEAD").read_text(encoding="utf-8").strip()
+        head = (git_dir / "HEAD").read_text().strip()
         if not head.startswith("ref: "):
             return head[:9]  # detached HEAD
         ref = head.removeprefix("ref: ")
@@ -179,13 +179,13 @@ def _git_sha() -> str:
         bases = [git_dir]
         commondir = git_dir / "commondir"
         if commondir.is_file():
-            bases.append((git_dir / commondir.read_text(encoding="utf-8").strip()).resolve())
+            bases.append((git_dir / commondir.read_text().strip()).resolve())
         for base in bases:
             if (base / ref).is_file():
-                return (base / ref).read_text(encoding="utf-8").strip()[:9]
+                return (base / ref).read_text().strip()[:9]
             packed = base / "packed-refs"
             if packed.is_file():
-                for line in packed.read_text(encoding="utf-8").splitlines():
+                for line in packed.read_text().splitlines():
                     sha, _, name = line.partition(" ")
                     if name.strip() == ref:
                         return sha[:9]
