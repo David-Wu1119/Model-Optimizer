@@ -353,7 +353,7 @@ def test_topk_logits_kl_loss_numerics_full_vocab_matches_dense():
     student, teacher = _make_loss_inputs()
     dense = LogitsKLLoss(cfg)(student, teacher)[0]
     topk = TopKLogitsKLLoss(cfg, top_k=student.size(-1), add_ghost_token=True)(student, teacher)[0]
-    assert torch.allclose(dense, topk, atol=1e-5)
+    assert torch.allclose(dense, topk, atol=1e-6)
     # Without ghost token, the unnormalized Top-K KL over the full vocab is also the dense KL.
     topk_no_ghost = TopKLogitsKLLoss(cfg, top_k=student.size(-1), add_ghost_token=False)(
         student, teacher
@@ -377,7 +377,7 @@ def test_topk_logits_kl_loss_numerics_ghost_token_reference():
     q = torch.cat([q_k, q_rest], -1)
     p = torch.cat([p_k, p_rest], -1)
     ref = (q.exp() * (q - p)).sum(-1).transpose(0, 1)
-    assert torch.allclose(loss, ref, atol=1e-5)
+    assert torch.allclose(loss, ref, atol=1e-6)
     # Sanity: total mass within the K+1 buckets is 1 for both distributions.
     assert torch.allclose(q.exp().sum(-1), torch.ones_like(q[..., 0]), atol=1e-5)
     assert torch.allclose(p.exp().sum(-1), torch.ones_like(p[..., 0]), atol=1e-5)
@@ -406,7 +406,7 @@ def test_logits_kl_losses_temperature_scaling(temperature):
     qq = torch.cat([q_k, q_rest], -1)
     pp = torch.cat([p_k, p_rest], -1)
     ref_topk = (qq.exp() * (qq - pp)).sum(-1).transpose(0, 1)
-    assert torch.allclose(topk, ref_topk, atol=1e-5)
+    assert torch.allclose(topk, ref_topk, atol=1e-6)
 
 
 def test_topk_logits_kl_loss_top_p_masks_tail():
@@ -441,7 +441,7 @@ def test_topk_logits_kl_loss_top_p_masks_tail():
     q_rest = torch.log1p(-(probs * keep).sum(-1, keepdim=True))
     p_rest = torch.log1p(-(p_k.exp() * keep).sum(-1, keepdim=True))
     ref_ghost = ref + (q_rest.exp() * (q_rest - p_rest)).sum(-1).transpose(0, 1)
-    assert torch.allclose(loss_ghost, ref_ghost, atol=1e-5)
+    assert torch.allclose(loss_ghost, ref_ghost, atol=1e-6)
     assert loss_ghost.shape == (student.size(1), student.size(0))
     loss_ghost.sum().backward()
     assert student.grad is not None and torch.isfinite(student.grad).all()
@@ -510,6 +510,13 @@ def test_loss_balancer_convex_combination():
     assert torch.allclose(out["kd_loss"], torch.tensor(0.75 * 2.0 + 0.25 * (0.5 + 0.5)))
     assert torch.allclose(out["logits_loss"], logits)
 
+    # A negative logits loss (possible for Top-K KL without ghost token) must not flip the sign of
+    # the intermediate-loss contribution.
+    out = LogitsAndIntermediatesLossBalancer(kd_loss_alpha=1.0)(
+        {key: lm, "LogitsKLLoss_0": -logits, "HiddenStateCosineLoss_0": inter}
+    )
+    assert torch.allclose(out["kd_loss"], -logits + logits)  # -0.5 + abs(-0.5) * (4.0 / 4.0) = 0
+
     # alpha=1 ignores the LM loss entirely; skip_original_loss does the same regardless of alpha.
     out = LogitsAndIntermediatesLossBalancer(kd_loss_alpha=1.0)({key: lm, "LogitsKLLoss_0": logits})
     assert torch.allclose(out["kd_loss"], logits)
@@ -525,14 +532,25 @@ def test_loss_balancer_convex_combination():
 
 
 def test_distillation_config_deprecations():
-    """skip_lm_loss is derived from kd_loss_alpha; legacy fields warn."""
+    """skip_lm_loss is derived from kd_loss_alpha; legacy fields warn with FutureWarning."""
     assert DistillationConfig(kd_loss_alpha=1.0).skip_lm_loss is True
     assert DistillationConfig(kd_loss_alpha=0.9).skip_lm_loss is False
 
-    with pytest.warns(DeprecationWarning, match="skip_lm_loss is deprecated"):
+    # Explicit skip_lm_loss=True is translated to kd_loss_alpha=1.0 rather than overridden.
+    with pytest.warns(FutureWarning, match="translating skip_lm_loss=True"):
         cfg = DistillationConfig(kd_loss_alpha=0.9, skip_lm_loss=True)
-    assert cfg.skip_lm_loss is False  # user value overridden
+    assert cfg.kd_loss_alpha == 1.0 and cfg.skip_lm_loss is True
 
-    with pytest.warns(DeprecationWarning, match="kd_loss_scale is deprecated"):
+    # skip_lm_loss=False with alpha=1.0 is a conflict; alpha wins.
+    with pytest.warns(FutureWarning, match="conflicts with kd_loss_alpha=1.0"):
+        cfg = DistillationConfig(kd_loss_alpha=1.0, skip_lm_loss=False)
+    assert cfg.skip_lm_loss is True
+
+    # Consistent but deprecated usage still warns.
+    with pytest.warns(FutureWarning, match="skip_lm_loss is deprecated"):
+        cfg = DistillationConfig(kd_loss_alpha=0.9, skip_lm_loss=False)
+    assert cfg.skip_lm_loss is False
+
+    with pytest.warns(FutureWarning, match="kd_loss_scale is deprecated"):
         cfg = DistillationConfig(kd_loss_scale=2.0)
     assert cfg.kd_loss_alpha == 0.9

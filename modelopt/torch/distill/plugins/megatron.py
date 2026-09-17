@@ -60,8 +60,8 @@ class DistillationConfig:
         kd_loss_alpha: Weight of the distillation loss in the convex combination
             ``(1 - alpha) * lm_loss + alpha * kd_loss``. Must be in [0, 1]. When ``1.0``, the standard
             language model loss is skipped entirely (``skip_lm_loss`` is derived from this value).
-        skip_lm_loss: DEPRECATED. Derived from ``kd_loss_alpha`` (``True`` iff ``kd_loss_alpha == 1.0``);
-            any user-provided value is overridden with a warning.
+        skip_lm_loss: DEPRECATED. Derived from ``kd_loss_alpha`` (``True`` iff ``kd_loss_alpha == 1.0``).
+            An explicit ``True`` is translated to ``kd_loss_alpha = 1.0`` with a warning.
         kd_loss_scale: DEPRECATED and ignored. Use ``kd_loss_alpha`` instead.
         logit_kl_temperature: Temperature for the logit KL-divergence loss.
         logit_kl_topk: If not None, use TopKLogitsKLLoss instead of LogitsKLLoss with this top-k value.
@@ -97,19 +97,33 @@ class DistillationConfig:
                 "DistillationConfig.kd_loss_scale is deprecated and ignored. The distillation loss "
                 "is no longer rescaled to the LM loss magnitude; the total loss is now "
                 "(1 - kd_loss_alpha) * lm_loss + kd_loss_alpha * kd_loss. Set `kd_loss_alpha` instead.",
-                DeprecationWarning,
+                FutureWarning,
                 stacklevel=2,
             )
-        derived_skip_lm_loss = self.kd_loss_alpha == 1.0
         if self.skip_lm_loss is not None:
-            warnings.warn(
-                "DistillationConfig.skip_lm_loss is deprecated and is now derived from `kd_loss_alpha` "
-                f"(skip iff kd_loss_alpha == 1.0). Overriding skip_lm_loss={self.skip_lm_loss} with "
-                f"{derived_skip_lm_loss} (kd_loss_alpha={self.kd_loss_alpha}).",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-        self.skip_lm_loss = derived_skip_lm_loss
+            if self.skip_lm_loss and self.kd_loss_alpha != 1.0:
+                warnings.warn(
+                    "DistillationConfig.skip_lm_loss is deprecated; translating skip_lm_loss=True to "
+                    "kd_loss_alpha=1.0. Set `kd_loss_alpha` directly instead.",
+                    FutureWarning,
+                    stacklevel=2,
+                )
+                self.kd_loss_alpha = 1.0
+            elif not self.skip_lm_loss and self.kd_loss_alpha == 1.0:
+                warnings.warn(
+                    "DistillationConfig.skip_lm_loss is deprecated, and skip_lm_loss=False conflicts "
+                    "with kd_loss_alpha=1.0, which skips the LM loss. Set `kd_loss_alpha` < 1.0 instead.",
+                    FutureWarning,
+                    stacklevel=2,
+                )
+            else:
+                warnings.warn(
+                    "DistillationConfig.skip_lm_loss is deprecated and is now derived from "
+                    "`kd_loss_alpha` (skipped iff kd_loss_alpha == 1.0). Stop passing it.",
+                    FutureWarning,
+                    stacklevel=2,
+                )
+        self.skip_lm_loss = self.kd_loss_alpha == 1.0
         assert self.logit_kl_temperature > 0, f"{self.logit_kl_temperature=}"
         if self.logit_kl_top_p is not None:
             assert self.logit_kl_topk is not None, "logit_kl_top_p requires logit_kl_topk"
@@ -362,9 +376,13 @@ class LogitsKLLoss(BaseLoss):
         """
         predictions, targets = self.pre_forward(predictions, targets)
 
-        # Temperature-scaled log probabilities (log softmax), globally normalized across TP vocab shards.
-        p = predictions.float() / self._temperature - self._tp_logsumexp(predictions)
-        q = targets.float() / self._temperature - self._tp_logsumexp(targets)
+        # Division by temp should happen prior to finding max for both student and teacher.
+        output_teacher = targets.float() / self._temperature
+        output_student = predictions.float() / self._temperature
+
+        # Log probabilities (log softmax), globally normalized across TP vocab shards.
+        p = output_student - self._tp_logsumexp(output_student)
+        q = output_teacher - self._tp_logsumexp(output_teacher)
 
         # KL divergence
         if self._reverse:
@@ -373,36 +391,28 @@ class LogitsKLLoss(BaseLoss):
 
         return self.post_forward(loss, tp_reduce=True)
 
-    def _tp_logsumexp(self, logits: Tensor, num_chunks: int = 4) -> Tensor:
-        """Log-sum-exp of ``logits / self._temperature`` over the vocab dim across all TP shards.
+    def _tp_logsumexp(self, logits: Tensor) -> Tensor:
+        """Log-sum-exp over the vocab dim across all TP shards (shape ``[..., 1]``).
 
-        Accumulates in fp32 over ``num_chunks`` vocab chunks so the transient fp32 working set is a
-        fraction of the (possibly bf16) full-vocab input. NOTE: for inputs requiring grad, autograd
-        still retains each chunk's ``exp`` output for backward, so the total saved activation
-        equals a full-vocab fp32 tensor. Returns shape ``[..., 1]``.
+        ``logits`` are expected to be fp32 and already temperature-scaled.
         """
-        # Max is exact under the monotonic temperature scaling, so take it in the native dtype
-        # and defer the temperature division to the centered values: lse(x/T) = max/T + log(sum(exp((x-max)/T))).
-        logits_max = logits.amax(dim=-1, keepdim=True).float()
-        if self._config.tensor_model_parallel_size > 1:
-            tp_group = parallel_state.get_tensor_model_parallel_group()
-            torch.distributed.all_reduce(
-                logits_max, op=torch.distributed.ReduceOp.MAX, group=tp_group
-            )
+        if self._config.tensor_model_parallel_size == 1:
+            return torch.logsumexp(logits, dim=-1, keepdim=True)
+
+        tp_group = parallel_state.get_tensor_model_parallel_group()
+
+        # Subtract maximum value along vocab dimension across all GPUs (for stability)
+        logits_max = logits.amax(dim=-1, keepdim=True)
+        torch.distributed.all_reduce(logits_max, op=torch.distributed.ReduceOp.MAX, group=tp_group)
         logits_max = logits_max.detach()
 
-        denom = None
-        chunk_size = -(-logits.size(-1) // num_chunks)  # ceil division
-        for chunk in logits.split(chunk_size, dim=-1):
-            centered = (chunk.float() - logits_max) / self._temperature
-            partial = torch.exp(centered).sum(dim=-1, keepdim=True)
-            denom = partial if denom is None else denom + partial
-        if self._config.tensor_model_parallel_size > 1:
-            # We can't use standard all_reduce function here since the computation
-            # that follows it isn't identical across TP ranks.
-            denom = dist_nn.functional.all_reduce(denom, group=tp_group)
+        # Compute global softmax denominator.
+        # We can't use standard all_reduce function here since the computation
+        # that follows it isn't identical across TP ranks.
+        denom = torch.exp(logits - logits_max).sum(dim=-1, keepdim=True)
+        denom = dist_nn.functional.all_reduce(denom, group=tp_group)
 
-        return logits_max / self._temperature + torch.log(denom)
+        return logits_max + torch.log(denom)
 
 
 class TopKLogitsKLLoss(LogitsKLLoss):
@@ -471,14 +481,15 @@ class TopKLogitsKLLoss(LogitsKLLoss):
             f"top_k ({self.top_k}) is larger than total vocab size ({targets.size(-1) * tp_size})"
         )
 
-        # Take K from each rank, then the global Top-K of those. Reduce before the fp32 cast:
-        # casting the full vocab first defeats the point. Selection is unchanged (widening is
-        # exact, temperature scaling monotonic).
+        # Divide by temperature first
+        output_teacher = targets.float() / self._temperature
+        output_student = predictions.float() / self._temperature
+
+        # Extract local Top-K
+        # We take K from each rank and then find the global Top-K of all those.
         local_top_k = min(self.top_k, targets.size(-1))
-        top_teacher_vals, top_idx = torch.topk(targets, local_top_k, dim=-1)
-        top_student_vals = torch.gather(predictions, dim=-1, index=top_idx)
-        top_teacher_vals = top_teacher_vals.float() / self._temperature
-        top_student_vals = top_student_vals.float() / self._temperature
+        top_teacher_vals, top_idx = torch.topk(output_teacher, local_top_k, dim=-1)
+        top_student_vals = torch.gather(output_student, dim=-1, index=top_idx)
 
         if tp_size > 1:
             tp_group = parallel_state.get_tensor_model_parallel_group()
@@ -506,8 +517,8 @@ class TopKLogitsKLLoss(LogitsKLLoss):
         # Log-probs of the Top-K entries under the full-vocab distributions, using global
         # (full-vocab) log-normalizers so the entries carry true probabilities.
         # NOTE: ``torch.topk`` returns entries sorted descending by teacher value.
-        teacher_logp = final_teacher_logits - self._tp_logsumexp(targets)
-        student_logp = final_student_logits - self._tp_logsumexp(predictions)
+        teacher_logp = final_teacher_logits - self._tp_logsumexp(output_teacher)
+        student_logp = final_student_logits - self._tp_logsumexp(output_student)
 
         # Top-P (nucleus) mask over the sorted Top-K: keep entry i iff cumulative mass *before* it
         # is < p. This always keeps the entry that crosses the threshold (and thus top-1).
@@ -520,12 +531,18 @@ class TopKLogitsKLLoss(LogitsKLLoss):
             mask = torch.ones_like(teacher_logp, dtype=torch.bool)
 
         # Ghost token: residual probability mass outside the kept entries, for both distributions.
+        # Computed in log space as log(1 - exp(log_kept)) = log(-expm1(log_kept)), which stays
+        # accurate and differentiable when the kept mass is close to 1.
         if self.add_ghost_token:
-            eps = 1e-8
-            student_kept_mass = (student_logp.exp() * mask).sum(dim=-1, keepdim=True)
-            teacher_kept_mass = (teacher_logp.exp() * mask).sum(dim=-1, keepdim=True)
-            student_residual = torch.log((1.0 - student_kept_mass).clamp(min=eps))
-            teacher_residual = torch.log((1.0 - teacher_kept_mass).clamp(min=eps))
+            neg_tiny = -1e-7  # keep log(kept_mass) strictly below 0 so expm1 stays negative
+            student_log_kept = torch.logsumexp(
+                student_logp.masked_fill(~mask, float("-inf")), dim=-1, keepdim=True
+            ).clamp(max=neg_tiny)
+            teacher_log_kept = torch.logsumexp(
+                teacher_logp.masked_fill(~mask, float("-inf")), dim=-1, keepdim=True
+            ).clamp(max=neg_tiny)
+            student_residual = torch.log(-torch.expm1(student_log_kept))
+            teacher_residual = torch.log(-torch.expm1(teacher_log_kept))
             student_logp = torch.cat([student_logp, student_residual], dim=-1)
             teacher_logp = torch.cat([teacher_logp, teacher_residual], dim=-1)
             mask = torch.cat([mask, mask.new_ones((*mask.shape[:-1], 1))], dim=-1)
@@ -580,7 +597,8 @@ class LogitsAndIntermediatesLossBalancer(mtd.DistillationLossBalancer):
         intermediate_loss = sum(loss_dict.values()) / max(len(loss_dict), 1)
 
         if intermediate_loss > 0:
-            dynamic_scale = logits_loss.detach() / intermediate_loss.detach()
+            # abs(): the Top-K partial KL without a ghost token is not a true KL and can be negative.
+            dynamic_scale = logits_loss.detach().abs() / intermediate_loss.detach()
             intermediate_loss_scaled = intermediate_loss * dynamic_scale
         else:
             intermediate_loss = logits_loss.new_tensor(intermediate_loss)

@@ -23,6 +23,7 @@ See `README.md` in this directory for example usage and data preparation instruc
 import argparse
 import contextlib
 import os
+import warnings
 
 import torch
 from export_distilled_megatron_to_hf import export_llm_to_hf, save_vlm_to_hf
@@ -461,6 +462,17 @@ def main(args: argparse.Namespace):
             f"sizes differ ({padded['student']} vs {padded['teacher']})."
         )
 
+    if args.kd_loss_scale is not None:
+        warnings.warn(
+            "--kd_loss_scale is deprecated and ignored; use --kd_loss_alpha instead.",
+            FutureWarning,
+        )
+    if args.no_skip_lm_loss:
+        warnings.warn(
+            "--no_skip_lm_loss is deprecated and ignored; whether the LM loss is skipped is derived "
+            "from --kd_loss_alpha (skipped iff 1.0).",
+            FutureWarning,
+        )
     kd_config = ModelOptDistillConfig(
         kd_loss_alpha=args.kd_loss_alpha,
         logit_kl_topk=args.logit_kl_topk,
