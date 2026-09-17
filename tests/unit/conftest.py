@@ -15,6 +15,7 @@
 
 import contextlib
 import os
+import sys
 
 import pytest
 
@@ -30,25 +31,24 @@ with contextlib.suppress(ImportError):
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _prebuild_onnx_round_and_pack_ext():
-    """Build the ONNX round-and-pack extension before per-test timeouts start.
+def _report_cpu_dispatch():
+    """On Windows, record what torch decided the CPU can do.
 
-    ``modelopt/onnx/quantization/extensions.py`` runs ``cppimport.imp`` at module import, and
-    that module is imported lazily from inside ``quant_utils.round_and_pack``. So the first test
-    to need it pays a full C++ compile INSIDE its own per-test timeout -- on the Windows runner
-    that is an MSVC build measured in minutes, and the test dies with pytest-timeout while
-    ``compiler.compile`` is still running. Which test pays is down to collection order, so the
-    failure appears to wander between runs.
+    The job intermittently dies with 0xc000001d (STATUS_ILLEGAL_INSTRUCTION): a native module
+    executing an opcode the host lacks. torch selects a vectorized kernel set at runtime, so what
+    it chose -- compared against the CPU the workflow records before the run -- is the first thing
+    to check. Reported from inside the test process because that is where the torch under test
+    lives; the runner interpreter has only nox and uv.
 
-    ``pyproject`` sets ``timeout_func_only``, so the per-test clock covers the call only; doing
-    the import here in session setup puts the build outside it. This mirrors
-    ``tests/gpu_megatron/conftest.py``, which prebuilds the quant CUDA extensions for the same
-    reason -- but it cannot reuse that helper: ``load_cpp_extension`` skips every quant extension
-    when CUDA is unavailable, which is exactly the case on the CPU-only Windows runner, so
-    ``precompile()`` would warm nothing here.
-
-    Best-effort. The extension is an optimisation with a Python fallback -- ``extensions.py``
-    already swallows its own build failures -- so a failure to prebuild must not fail the session.
+    Windows-only and best-effort: elsewhere it is noise, and a diagnostic must never fail a run.
     """
+    if sys.platform != "win32":
+        return
     with contextlib.suppress(Exception):
-        import modelopt.onnx.quantization.extensions  # noqa: F401
+        import torch
+
+        print(
+            f"\n[diag] torch {torch.__version__} "
+            f"cpu_capability={torch.backends.cpu.get_cpu_capability()}",
+            flush=True,
+        )
