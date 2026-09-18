@@ -70,6 +70,18 @@ class _NVFP4LinearWithExplicitBias(torch.nn.Module):
         return self.linear(inputs) + self.bias
 
 
+class _NVFP4MixedPrecisionLinear(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fp32_linear = torch.nn.Linear(16, 16, dtype=torch.float32)
+        self.bf16_linear = torch.nn.Linear(16, 16, dtype=torch.bfloat16)
+
+    def forward(self, inputs):
+        fp32_output = self.fp32_linear(inputs)
+        bf16_output = self.bf16_linear(inputs.to(torch.bfloat16)).float()
+        return fp32_output + bf16_output
+
+
 def _make_cpu_nvfp4_model(monkeypatch, model, sample_input, disable_input_quantizers=False):
     def forward_loop(model):
         model(sample_input)
@@ -186,6 +198,40 @@ def test_nvfp4_deploy_export_has_consistent_elementwise_types(
     assert [tensor_types[input_name] for input_name in add_node.input] == [
         expected_dtype,
         expected_dtype,
+    ]
+
+
+def test_nvfp4_deploy_export_preserves_mixed_precision_boundaries(monkeypatch):
+    model = _NVFP4MixedPrecisionLinear().eval()
+    sample_input = torch.ones(1, 16)
+    model = _make_cpu_nvfp4_model(monkeypatch, model, sample_input)
+
+    onnx_bytes, _ = get_onnx_bytes_and_metadata(
+        model,
+        (sample_input,),
+        weights_dtype="fp32",
+    )
+    exported_model = onnx.load_model_from_string(
+        OnnxBytes.from_bytes(onnx_bytes).get_onnx_model_file_bytes()
+    )
+
+    onnx.checker.check_model(exported_model, full_check=True)
+    inferred_model = onnx.shape_inference.infer_shapes(exported_model, strict_mode=True)
+    tensor_types = {
+        initializer.name: initializer.data_type for initializer in inferred_model.graph.initializer
+    }
+    for value in [
+        *inferred_model.graph.input,
+        *inferred_model.graph.value_info,
+        *inferred_model.graph.output,
+    ]:
+        if value.type.HasField("tensor_type"):
+            tensor_types[value.name] = value.type.tensor_type.elem_type
+
+    add_node = next(node for node in inferred_model.graph.node if node.op_type == "Add")
+    assert [tensor_types[input_name] for input_name in add_node.input] == [
+        TensorProto.FLOAT,
+        TensorProto.FLOAT,
     ]
 
 

@@ -335,14 +335,10 @@ class NVFP4QuantExporter(ONNXQuantExporter):
         graph_inputs = {inp.name for inp in graph.input}
         cast_output_cache: dict[tuple[str, str], str] = {}
 
-        def _get_precision_dtype() -> str:
-            # Check initializers to determine the precision of the weights
-            precision_dtype = "Half"
-            for initializer in graph.initializer:
-                if initializer.data_type == 16:
-                    precision_dtype = "BFloat16"
-                    break  # Assuming all weights are of the same precision
-            return precision_dtype
+        def _get_precision_dtype(weight_initializer: onnx.TensorProto) -> str:
+            return (
+                "BFloat16" if weight_initializer.data_type == onnx.TensorProto.BFLOAT16 else "Half"
+            )
 
         def _cast_input_dtypes(node: onnx.NodeProto, precision_dtype: str):
             # Change the input types to match weight precision (precision_dtype)
@@ -383,6 +379,8 @@ class NVFP4QuantExporter(ONNXQuantExporter):
                     continue
 
                 output_dtype = output_value_info.type.tensor_type.elem_type
+                # TRT_FP4QDQ leaves native-BF16 outputs annotated FLOAT; real FP32 boundaries are
+                # explicit Casts. FP16 can convert FP32 graphs, so it restores implicit boundaries.
                 if precision_dtype == "BFloat16" or output_dtype == precision_onnx_dtype:
                     output_value_info.type.tensor_type.elem_type = precision_onnx_dtype
                     continue
@@ -406,9 +404,6 @@ class NVFP4QuantExporter(ONNXQuantExporter):
                     ]
                 )
 
-        precision_dtype = _get_precision_dtype()
-        logger.debug(f"Using precision dtype: {precision_dtype}")
-
         fp4_qdq_nodes = [node for node in graph.node if node.op_type == "TRT_FP4QDQ"]
         logger.debug(f"Found {len(fp4_qdq_nodes)} FP4QDQ nodes to convert")
 
@@ -416,6 +411,8 @@ class NVFP4QuantExporter(ONNXQuantExporter):
             idx = initializer_indices.get(node.input[0])
             assert idx is not None, f"Initializer for weight '{node.input[0]}' not found."
             initializers_to_delete.append(graph.initializer[idx].name)
+            precision_dtype = _get_precision_dtype(graph.initializer[idx])
+            logger.debug(f"Using precision dtype {precision_dtype} for {node.input[0]}")
 
             # Retrieve compressed data from node attributes
             block_size = node.attribute[0].i
