@@ -43,9 +43,8 @@ E4M3_MAX_46 = 256.0  # 4 Over 6 max FP8 scale
 E4M3_KMAX = 8
 E4M3_KMIN = -9  # E4M3 represents 2^k exactly for k in [-9, 8]
 
-# Four-Over-Six (4/6): per block, calibration picks between treating the E2M1 max as 6
-# (keep amax) or as 4 (scale amax by 6/4). Multiplying amax by 6/4 is arithmetically
-# identical to reducing the dynamic range to M=4, and the choice is folded into amax.
+# Four-Over-Six (4/6) picks, per block, the full E2M1 range (M=6) or a reduced one (M=4);
+# choosing M=4 is the same as scaling that block's amax by 6/4.
 FOUR_OVER_SIX_MULTIPLIER = E2M1_MAX / 4.0  # 1.5
 # E2M1 magnitude grid indexed by the low 3 bits of an FP4 nibble.
 _E2M1_MAGNITUDE = [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0]

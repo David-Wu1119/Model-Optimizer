@@ -54,15 +54,10 @@ RealQuantModuleRegistry = _DMRegistryCls("RealQuant")
 def _reject_unsupported_real_quant_formats(model: nn.Module) -> None:
     """Refuse formats real quantization cannot represent, before any weight is packed.
 
-    ``TensorQuantizer._real_quantize`` asserts the same predicate, but only once
-    :func:`pack_real_quantize_weight` is already walking layers, so the run dies partway
-    through naming one layer. Checking here reports every offender up front.
-
-    Screens exactly what :func:`pack_real_quantize_weight` would pack -- same
-    ``convert_to_single_quantizer`` view so ``SequentialQuantizer`` weight quantizers are
-    seen, and the same weight/enable/fake_quant gate -- so it neither misses an offender
-    nor rejects a layer that would have been skipped anyway (including ones excluded via
-    the ``compress`` patterns).
+    ``_real_quantize`` asserts the same predicate, but only once
+    :func:`pack_real_quantize_weight` is already walking layers. Screening under the same
+    view and gate reports every offender up front without rejecting layers that would have
+    been skipped anyway.
     """
     offenders = []
     with SequentialQuantizer.convert_to_single_quantizer(model):

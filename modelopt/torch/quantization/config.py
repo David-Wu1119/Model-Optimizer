@@ -322,10 +322,8 @@ class RotateConfig(ModeloptBaseConfig):
 def _as_exmy(value: Any) -> tuple[int, int] | None:
     """Normalize a ``num_bits`` / ``scale_bits`` value to an ``(E, M)`` tuple, else None.
 
-    Both spellings reach the config: YAML goes through ``_parse_exmy_num_bits`` in the
-    config loader and arrives as a tuple, while the Python API keeps whatever the caller
-    wrote (commonly the ``"e2m1"`` string). Defers to the loader's parser so the two paths
-    cannot disagree about the ExMy grammar.
+    YAML arrives already parsed into a tuple; the Python API keeps whatever the caller
+    wrote, commonly the ``"e2m1"`` string.
     """
     if isinstance(value, str):
         parsed = _parse_exmy(value)
@@ -336,20 +334,16 @@ def _as_exmy(value: Any) -> tuple[int, int] | None:
 
 
 def _validate_four_over_six_numerics(block_sizes: dict, num_bits: Any) -> None:
-    """Reject the ``four_over_six`` flag on numerics where it does nothing.
+    """Reject the ``four_over_six`` flag on numerics where it is silently inert.
 
-    4/6 only means something for static NVFP4 with FP8 E4M3 per-block scales: the flag's
-    whole effect is normalizing those scales by 256 instead of 448, which is read only on
-    the static NVFP4 fake-quant and export paths. On any other format the flag is silently
-    inert, so the user gets none of 4/6 and no indication of why.
+    Its whole effect -- normalizing the per-block FP8 scales by 256 instead of 448 -- is
+    read only on the static NVFP4 fake-quant and export paths.
     """
     if not block_sizes.get("four_over_six"):
         return
-    # The config-level spelling of TensorQuantizer.is_nvfp4_static. TODO: once block_sizes
-    # is a typed per-format model rather than a free dict, four_over_six becomes a field of
-    # the static-NVFP4 variant and this check goes away.
+    # The config-level spelling of TensorQuantizer.is_nvfp4_static; an absent `type` is
+    # static there too, since is_static_block_quant tests != "dynamic".
     scale_bits, block_type = block_sizes.get("scale_bits"), block_sizes.get("type")
-    # An absent `type` is static: TensorQuantizer.is_static_block_quant tests != "dynamic".
     is_static = block_type in (None, "static")
     if (_as_exmy(num_bits), is_static, _as_exmy(scale_bits)) != ((2, 1), True, (4, 3)):
         raise ValueError(
@@ -1045,23 +1039,19 @@ class FourOverSixCalibConfig(_SharedStatesConfig, QuantizeAlgorithmConfig):
     """Configuration for NVFP4 Four-Over-Six (4/6) weight calibration.
 
     4/6 lets each weight block use either the full E2M1 dynamic range (M=6) or a reduced
-    one (M=4), whichever quantizes that block better. Choosing M=4 is arithmetically the
-    same as multiplying the block's amax by 6/4, so the choice is an MSE amax search over
-    exactly two candidates and is folded into the quantizer amax.
+    one (M=4), whichever quantizes that block better. Choosing M=4 is the same as
+    multiplying the block's amax by 6/4, so the choice is an MSE amax search over exactly
+    two candidates, folded into the quantizer amax. The grid is derived from the format
+    rather than configured, so it cannot drift from the numerics.
 
-    The search grid is derived from the format rather than configured, which is the
-    difference between this algorithm and writing the equivalent
-    :class:`MseCalibConfig` by hand -- it cannot drift.
-
-    This algorithm pairs with the ``four_over_six: true`` flag in a weight quantizer's
-    ``block_sizes``, which normalizes the per-block FP8 scales by 256 instead of 448 to
-    leave headroom for the M=4 blocks. Neither half is useful alone, so
-    :class:`QuantizeConfig` rejects a config that has one without the other.
+    Pairs with the ``four_over_six: true`` flag in a weight quantizer's ``block_sizes``,
+    which normalizes the per-block FP8 scales by 256 instead of 448 to leave headroom for
+    the M=4 blocks. :class:`QuantizeConfig` rejects a config that has one half without the
+    other.
 
     .. note::
-        4/6 is supported via ``mtq.quantize`` plus HF / Megatron export only. It is not
-        supported by ``mtq.compress``, which does not preserve the per-block M=4/M=6
-        choice.
+        Supported via ``mtq.quantize`` plus HF / Megatron export only, not
+        ``mtq.compress``, which does not preserve the per-block M=4/M=6 choice.
     """
 
     _mutates_weights: ClassVar[bool] = False
@@ -1517,18 +1507,13 @@ _QuantizeAlgoCfgType = str | dict | QuantizeAlgorithmConfig | None
 QuantizeAlgoCfgType = _QuantizeAlgoCfgType | list[_QuantizeAlgoCfgType] | None
 
 
-# Algorithms that search weight amax and can therefore make the per-block M=6/M=4 choice
-# 4/6 depends on. ``four_over_six`` is the named form with the grid fixed to {1.0, 1.5};
-# ``mse`` and ``local_hessian`` search a configurable grid, which is how 4/6 was written
-# before it had a name and remains valid.
+# Algorithms that search weight amax, and so can make the per-block M=6/M=4 choice. `mse`
+# and `local_hessian` search a configurable grid; `four_over_six` fixes it to {1.0, 1.5}.
 _FOUR_OVER_SIX_CAPABLE_ALGORITHMS = frozenset({"four_over_six", "mse", "local_hessian"})
 
 
-# Algorithms that bundle a weight-scale algorithm rather than running one themselves, so the
-# method that actually searches weight amax sits one level down: {method: (field, fallback
-# when the field is unset)}. The fallbacks mirror the call sites -- ``lsq`` lets
-# ``_run_weight_scale_calibration`` substitute mse for None, ``nvfp4_act_headroom`` passes
-# ``weight_scale_algorithm or {"method": "max"}``.
+# Algorithms whose weight-scale search sits one level down:
+# {method: (field, what the call site substitutes when the field is unset)}.
 _BUNDLED_SCALE_ALGORITHMS = {
     "lsq": ("scale_algorithm", "mse"),
     "nvfp4_act_headroom": ("weight_scale_algorithm", "max"),
@@ -1536,16 +1521,11 @@ _BUNDLED_SCALE_ALGORITHMS = {
 
 
 def _algorithm_methods(algorithm: QuantizeAlgoCfgType) -> list[str | None]:
-    """Return the calibration method name of every algorithm an ``algorithm`` value runs.
+    """Return the method name of every algorithm an ``algorithm`` value runs.
 
-    ``algorithm`` is deliberately loosely typed (``str``, ``dict``, a
-    :class:`QuantizeAlgorithmConfig`, or a list of those run in sequence), so anything that
-    wants to reason about which algorithms will run has to destructure all four shapes.
-
-    Descends into the bundled weight-scale algorithms of ``nvfp4_act_headroom`` and ``lsq``
-    too, including the method each falls back to when its field is unset: those run a full
-    weight-scale search, so for any question about what will actually be searched the nested
-    method counts as much as the outer one.
+    Handles all four shapes ``algorithm`` accepts (``str``, ``dict``,
+    :class:`QuantizeAlgorithmConfig`, or a list run in sequence), and descends into
+    bundled weight-scale algorithms, which search just as much as the outer one.
     """
     if isinstance(algorithm, list):
         return [method for stage in algorithm for method in _algorithm_methods(stage)]
@@ -1747,16 +1727,13 @@ class QuantizeConfig(ModeloptBaseConfig):
     def _validate_four_over_six_coordination(self):
         """Require the two halves of NVFP4 4/6 to agree.
 
-        4/6 is a numerics flag in ``quant_cfg`` (``block_sizes['four_over_six']``, which
-        normalizes the per-block FP8 scales by 256 instead of 448) plus a calibration search
-        that picks, per block, between the M=6 and M=4 dynamic ranges. Either half alone is
-        silently wrong: the flag without a search pays for headroom nothing uses, and the
-        search without the flag encodes the M=4 blocks against the wrong normalization.
+        Either alone is silently wrong: the flag without a search pays for headroom nothing
+        uses, and the search without the flag encodes the M=4 blocks against the wrong
+        normalization.
 
         ``quant_cfg`` is last-wins layered, so without a model we cannot tell which entry
-        actually owns a given quantizer. Both checks are therefore presence-based over
-        entries that are not explicitly disabled -- conservative, but enough to catch the
-        two ways of writing half of 4/6.
+        owns a given quantizer; both checks are presence-based over entries that are not
+        explicitly disabled.
         """
         flagged = []
         for entry in self.quant_cfg:
@@ -1764,8 +1741,7 @@ class QuantizeConfig(ModeloptBaseConfig):
                 continue
             # A SequentialQuantizer entry carries one attribute config per level.
             levels = entry.cfg if isinstance(entry.cfg, list) else [entry.cfg]
-            # The isinstance is redundant at runtime -- pydantic has already coerced every
-            # level -- but the pre-commit mypy env has no pydantic stubs and widens `cfg`.
+            # isinstance is redundant at runtime; the mypy hook has no pydantic stubs.
             if any(
                 isinstance(level, QuantizerAttributeConfig)
                 and (level.block_sizes or {}).get("four_over_six")

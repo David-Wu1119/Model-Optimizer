@@ -437,10 +437,8 @@ class TestNVFP4MSECalibrator:
 class TestFourOverSixIsTheLegacyStanzaOnCUDA:
     """`algorithm: four_over_six` calibrates bit-identically to the stanza it replaced.
 
-    The CPU twin (``TestFourOverSixIsTheLegacyStanzaOnCPU`` in
-    ``tests/unit/torch/quantization/test_nvfp4_four_over_six.py``) stubs the Triton
-    static-NVFP4 kernel, so it cannot show the real kernel agrees. This one runs against
-    it. Renaming the shipped 4/6 recipes is only safe if this holds.
+    The CPU twin (``TestFourOverSixIsTheLegacyStanzaOnCPU``) stubs the Triton kernel, so
+    only this one shows the real kernel agrees.
     """
 
     # What modelopt_recipes spelled out by hand before `four_over_six` existed.
@@ -502,8 +500,7 @@ class TestFourOverSixIsTheLegacyStanzaOnCUDA:
 
     def test_the_search_actually_picks_both_ranges(self, toy_model):
         """Guard against a vacuous pass: the M=4 candidate has to win somewhere."""
-        # A one-candidate grid pinned at M=6. Deliberately not `algorithm="max"`: the 4/6
-        # flag requires a weight-scale search, so `max` is rejected at config time.
+        # Not `algorithm="max"`: the flag requires a search, so `max` is rejected at config time.
         m6_only = self.LEGACY_STANZA | {"stop_multiplier": 1.0, "step_size": 1.0}
 
         named = self._calibrated_weight_amax(toy_model, "four_over_six")

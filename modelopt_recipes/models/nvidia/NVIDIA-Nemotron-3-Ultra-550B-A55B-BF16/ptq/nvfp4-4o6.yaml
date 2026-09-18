@@ -21,7 +21,6 @@ metadata:
   description: Ultra NVFP4 with Four-Over-Six (4/6) MSE-selected weights on routed experts (W4A4, block 16); dynamic NVFP4 activations (not MSE); shared
     experts + mamba in/out_proj + KV cache FP8; everything else BF16.
 quantize:
-  # 4/6 searches each weight block for the better of the M=6 and M=4 dynamic ranges.
   # Weight-only: the dynamic NVFP4 activation quantizers are max-calibrated.
   algorithm: four_over_six
   quant_cfg:

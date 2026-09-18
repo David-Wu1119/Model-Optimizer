@@ -13,8 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# QuantizeConfig preset for NVFP4 W4A4 with Four-Over-Six (4/6) adaptive scaling on the weights.
-# Weights are static NVFP4 (4/6 needs a calibrated per-block amax); activations are dynamic NVFP4.
+# QuantizeConfig preset for NVFP4 W4A4 with Four-Over-Six (4/6) scaling on the weights.
+# Weights are static NVFP4 (4/6 needs a calibrated per-block amax); activations are dynamic.
 
 # modelopt-schema: modelopt.torch.quantization.config.QuantizeConfig
 imports:
@@ -22,8 +22,7 @@ imports:
   w4a4_nvfp4_nvfp4_four_over_six: configs/ptq/units/w4a4_nvfp4_nvfp4_four_over_six
   default_disabled_quantizers: configs/ptq/units/default_disabled_quantizers
 
-# The four_over_six algorithm searches each weight block's amax for the better of the
-# M=6 and M=4 dynamic ranges. Weight-only: activation quantizers are max-calibrated.
+# Weight-only: the activation quantizers are max-calibrated.
 algorithm: four_over_six
 quant_cfg:
   - $import: base_disable_all

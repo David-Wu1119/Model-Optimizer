@@ -458,11 +458,8 @@ checkpoint's** quant config verbatim:
   component map (routed experts NVFP4 W4A4 block-16; shared experts + Mamba
   `in/out_proj` + KV cache FP8; everything else BF16), but the routed-expert
   weights use **Four-over-Six (4/6)** NVFP4: the `four_over_six` calibration
-  algorithm picks, per weight block, between the M=6 and M=4 dynamic ranges, and
-  the `four_over_six: true` flag on those quantizers normalizes the per-block FP8
-  scales by 256 instead of 448 to leave room for the M=4 blocks. Both halves are
-  required -- a config with only one is rejected. Activations stay dynamic NVFP4
-  (weight-only calibration).
+  algorithm picks, per weight block, between the M=6 and M=4 dynamic ranges.
+  Activations stay dynamic NVFP4 (weight-only calibration).
 - **`models/nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16/ptq/w4a16_nvfp4_4o6`** applies
   Four-over-Six NVFP4 W4A16 to routed experts, shared experts, and the language
   model head; Mamba `in/out_proj` weights and inputs plus the KV cache use FP8,

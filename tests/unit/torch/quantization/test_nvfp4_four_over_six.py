@@ -143,12 +143,7 @@ class TestCompressUnsupported:
             q._real_quantize(torch.randn(1, 4 * BLOCK_SIZE))
 
 
-# --------------------------------------------------------------------------------------
-# The `four_over_six` calibration algorithm
-# --------------------------------------------------------------------------------------
-
 # How 4/6 was written before it had a name, copy-pasted across five shipped recipes.
-# Every assertion below that `four_over_six` reproduces 4/6 is an assertion about *this*.
 LEGACY_FOUR_OVER_SIX_STANZA = {
     "method": "mse",
     "fp8_scale_sweep": False,
@@ -197,11 +192,7 @@ class TestFourOverSixAlgorithm:
         )
 
     def test_delegates_to_mse_with_the_two_46_candidates(self, monkeypatch):
-        """The grid handed to MSE is the legacy stanza, and it yields exactly {M=6, M=4}.
-
-        Driven by what ``four_over_six_calibrate`` actually passes, not by literals, so it
-        fails if the derived grid ever stops being the two 4/6 candidates.
-        """
+        """The grid handed to MSE is the legacy stanza, and it yields exactly {M=6, M=4}."""
         import modelopt.torch.quantization.model_calib as mc
         from modelopt.torch.quantization.calib import MseCalibrator
 
@@ -220,10 +211,8 @@ class TestFourOverSixAlgorithm:
 def _reference_static_fp4(inputs, amax, global_amax, quantize_block_scales, fp8_max, dtype, ptb):
     """Deterministic pure-torch stand-in for the Triton static-NVFP4 kernel.
 
-    Not an E2M1 emulation -- only the Triton kernel is stubbed, and both arms of the
-    comparison below use this same stand-in. What matters is that the error it produces
-    depends on ``amax``, so the MSE search has something to discriminate between the
-    M=6 and M=4 candidates.
+    Not an E2M1 emulation. Both arms of the comparison use it; what matters is that its
+    error depends on ``amax``, so the MSE search can discriminate the two candidates.
     """
     flat = inputs.reshape(amax.numel(), -1)
     scale = (amax.reshape(-1, 1).to(flat.dtype) / E2M1_MAX).clamp(min=1e-12)
@@ -233,10 +222,8 @@ def _reference_static_fp4(inputs, amax, global_amax, quantize_block_scales, fp8_
 class TestFourOverSixIsTheLegacyStanzaOnCPU:
     """`algorithm: four_over_six` calibrates bit-identically to the stanza it replaces.
 
-    This is the acceptance gate for renaming the three shipped 4/6 recipes: the name has
-    to be a name, not a behaviour change. Runs on CPU by stubbing the Triton-only static
-    NVFP4 kernel; ``TestFourOverSixIsTheLegacyStanzaOnCUDA`` in ``tests/gpu`` runs the same
-    comparison against the real kernel.
+    The acceptance gate for renaming the three shipped 4/6 recipes. Stubs the Triton-only
+    static NVFP4 kernel; ``TestFourOverSixIsTheLegacyStanzaOnCUDA`` runs it for real.
     """
 
     @staticmethod
@@ -439,7 +426,6 @@ class TestAutoQuantizeConfigStaysValid:
         assert not _has_four_over_six(
             [{"quantizer_name": "*weight_quantizer", "cfg": NVFP4_STATIC_ATTRS}]
         )
-        # ...and the algorithm it then picks yields a config that validates.
         QuantizeConfig(quant_cfg=flagged, algorithm="four_over_six")
 
 
@@ -468,8 +454,7 @@ class TestCompressRejectsFourOverSixUpFront:
             NotImplementedError, match="does not support the quantization format"
         ) as excinfo:
             mtq.compress(model)
-        # Up front and complete: both quantizers are named, so the user sees the whole
-        # problem rather than whichever layer compression happened to reach first.
+        # Both named, not just whichever layer packing would have reached first.
         assert "0.weight_quantizer" in str(excinfo.value)
         assert "1.weight_quantizer" in str(excinfo.value)
 

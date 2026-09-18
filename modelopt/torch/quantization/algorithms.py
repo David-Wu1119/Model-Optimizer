@@ -2169,10 +2169,8 @@ def get_auto_quantize_config(search_state, constraints=None, verbose=False):
     # modules override default disables such as ``*lm_head*``.
     quant_cfg.extend(global_entries.values())
     quant_cfg.extend(per_module_entries)
-    # NVFP4 4/6 is the one format where "max" is not merely a downgrade but wrong: the flag
-    # normalizes the per-block FP8 scales by 256 on the assumption that a search will pick
-    # M=4 for some blocks, and max never does. Emit the algorithm that makes those entries
-    # mean what they say (QuantizeConfig rejects the "max" pairing outright).
+    # For 4/6, "max" is not a downgrade but wrong -- the flag normalizes the FP8 scales by
+    # 256 on the assumption something picks M=4 -- and QuantizeConfig rejects the pairing.
     algorithm = "four_over_six" if _has_four_over_six(quant_cfg) else "max"
     warnings.warn(
         f"get_auto_quantize_config: returned config uses algorithm={algorithm!r}. "

@@ -793,8 +793,7 @@ class TensorQuantizer(nn.Module):
     def _is_real_quantize_support(self):
         """Check if real quantization is supported for this quant config."""
         if self.is_four_over_six:
-            # The per-block M=4/M=6 choice lives in amax and is not preserved by real
-            # quantization, so 4/6 is mtq.quantize + export only.
+            # The per-block M=4/M=6 choice lives in amax and does not survive packing.
             return False
         return (
             (self._num_bits == 4 and self._block_sizes)
@@ -803,9 +802,7 @@ class TensorQuantizer(nn.Module):
         )
 
     def _real_quantize(self, inputs):
-        # Checked before the generic precondition so 4/6 keeps its specific explanation;
-        # _is_real_quantize_support() also returns False here, and is what mtq.compress
-        # screens the whole model with up front.
+        # Before the generic precondition, which also rejects 4/6 but less helpfully.
         if self.is_four_over_six:
             raise NotImplementedError(
                 "NVFP4 Four-Over-Six (4/6) is not supported via mtq.compress: the per-block "

@@ -429,9 +429,7 @@ PTQ recipes contain a ``quantize`` mapping with:
      - The calibration algorithm: ``"max"`` (default), ``"mse"``, ``"four_over_six"``,
        ``"local_hessian"``, ``"nvfp4_act_headroom"``, ``"smoothquant"``, ``"awq_lite"``,
        ``"awq_full"``, ``"awq_clip"``, ``"gptq"``, ``"svdquant"``, ``"lsq"``, or ``null``
-       for formats that need no calibration (e.g. MX formats). A list runs several in
-       sequence. A mapping passes parameters, e.g.
-       ``{method: mse, fp8_scale_sweep: true}``.
+       for formats that need no calibration (e.g. MX formats).
 
 
 ExMy floating-point notation

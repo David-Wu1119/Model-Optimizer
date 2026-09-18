@@ -792,10 +792,9 @@ def four_over_six_calibrate(
 ):
     """Calibrate NVFP4 Four-Over-Six (4/6) weight quantizers.
 
-    An MSE amax search over exactly two candidates, ``[1.0, FOUR_OVER_SIX_MULTIPLIER]``,
-    whose winner is folded into the quantizer amax. See :class:`FourOverSixCalibConfig
-    <modelopt.torch.quantization.config.FourOverSixCalibConfig>` for what 4/6 is and why
-    it needs the matching ``block_sizes`` flag.
+    An MSE amax search over the two candidates ``[1.0, FOUR_OVER_SIX_MULTIPLIER]``. See
+    :class:`FourOverSixCalibConfig
+    <modelopt.torch.quantization.config.FourOverSixCalibConfig>`.
 
     Args:
         model: Model to be calibrated.
@@ -807,8 +806,7 @@ def four_over_six_calibrate(
     <modelopt.torch.quantization.config.FourOverSixCalibConfig>` for details on the
     remaining arguments.
     """
-    # The search grid is derived from the format, not configurable: linspace over
-    # [1.0, 6/4] with a single step yields exactly the two candidates {M=6, M=4}.
+    # A single step over [1.0, 6/4] yields exactly the two candidates {M=6, M=4}.
     mse_calibrate(
         model,
         forward_loop,
