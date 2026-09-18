@@ -107,7 +107,6 @@ repos:
               modelopt/onnx/quantization/operators.py|
               modelopt/onnx/quantization/ort_calibration.py|
               modelopt/onnx/quantization/ort_calibration_per_node.py|
-              modelopt/onnx/quantization/ort_patches.py|
               modelopt/onnx/quantization/ort_quantization.py|
               modelopt/onnx/quantization/ort_session.py|
               modelopt/torch/_deploy/utils/onnx_utils.py|
