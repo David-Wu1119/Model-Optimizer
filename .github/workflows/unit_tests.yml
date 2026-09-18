@@ -162,8 +162,17 @@ jobs:
           Remove-Item Env:\ONEDNN_MAX_CPU_ISA -ErrorAction SilentlyContinue
           Remove-Item Env:\DNNL_MAX_CPU_ISA -ErrorAction SilentlyContinue
           $env:ONEDNN_VERBOSE = "1"
-          & $py -c "import torch; a=torch.randn(256,256,dtype=torch.bfloat16); b=torch.randn(256,256,dtype=torch.bfloat16); print('bf16 gemm ok', float((a@b).sum()))" 2>&1 |
-            Select-String -Pattern "onednn_verbose.*info|bf16 gemm ok" | ForEach-Object { $_.Line }
+          # A bare tensor @ tensor did not reach oneDNN on the first attempt -- no verbose line
+          # appeared -- so this runs what the crash sites actually run: an nn.Linear forward in
+          # bf16, under eval/no_grad, at the 128-wide shape from the crashing test and a larger
+          # one, since oneDNN picks its kernel by shape as well as by ISA.
+          & $py -c "import torch
+torch.set_grad_enabled(False)
+for n in (128, 512):
+    m = torch.nn.Linear(n, n, bias=False).eval().to(torch.bfloat16)
+    x = torch.ones(8, n, dtype=torch.bfloat16)
+    print('bf16 linear', n, 'ok', float(m(x).sum()))" 2>&1 |
+            Select-String -Pattern "onednn_verbose.*info|bf16 linear" | ForEach-Object { $_.Line }
           $code = $LASTEXITCODE
           Write-Host "uncapped-bf16-gemm exit=$code"
           if ($code -eq 3221225501) { Write-Host "=> this host faults uncapped; the ISA cap is load-bearing here" }
