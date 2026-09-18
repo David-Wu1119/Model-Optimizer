@@ -24,4 +24,6 @@ Then wait for explicit parent authorization before another submission, including
 
 On authorized cancellation or budget exhaustion, stop and verify the actual local/remote submission process and submit-capable descendants, not merely its wrapper. Discover and cancel affected queued/running jobs, including resume dependencies and jobs created during cancellation; verify submitter exit and terminal job states. Record evidence or unresolved cleanup in the ledger. Do not cancel merely to free GPUs.
 
+Apply `evaluation/references/mlflow-verification.md` independently of evaluation acceptance. Recover export from existing results only; never submit another evaluation to repair delivery. In `MLflow`, report each task's export outcome and verified run URL (or none verified), mapped to its invocation ID. Keep evaluation and export outcomes separate; report blockers and preserved evidence paths when delivery fails.
+
 Return only a concise handoff with these headings: `Status`, `Evaluation role`, `Checkpoint`, `Configuration`, `Validation`, `Results`, `MLflow`, `Artifacts`, and `Blockers`. Include invocation IDs, task-to-score mappings, score fields, sample accounting, and absolute paths. Do not return raw logs.
