@@ -60,7 +60,9 @@ from modelopt.onnx.quantization.ort_calibration import (
     _collect_data_minmax_calibrator,
     _collect_value,
     _compute_data_minmax_calibrator,
+    _init_calibrater_base,
     _merge_range_minmax_calibrator,
+    _select_tensors_to_calibrate,
 )
 from modelopt.onnx.quantization.ort_calibration_per_node import (
     _augment_graph_histogram_calibrater_single_node_calibration,
@@ -78,11 +80,7 @@ from modelopt.onnx.quantization.ort_quantization import (
     _compute_scale_zp,
     _create_calibrator_with_extra_options,
 )
-from modelopt.onnx.quantization.ort_session import (
-    _create_inference_session_with_ep_config,
-    _init_calibrater_base,
-    _select_tensors_to_calibrate,
-)
+from modelopt.onnx.quantization.ort_session import _create_inference_session_with_ep_config
 
 
 def patch_ort_modules(calibrate_per_node: bool = False):

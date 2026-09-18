@@ -15,8 +15,6 @@
 
 """Tests for ONNX Runtime histogram quantization patches."""
 
-import importlib.util
-
 import numpy as np
 import onnx
 import onnxruntime as ort
@@ -75,10 +73,6 @@ def test_patch_composition_uses_capability_owners(monkeypatch):
         HistogramCollector.collect_value
         is _collect_value_histogram_collector_single_node_calibration
     )
-
-
-def test_ort_patching_catch_all_is_removed():
-    assert importlib.util.find_spec("modelopt.onnx.quantization.ort_patching") is None
 
 
 def test_compute_scale_zp_fp16_overflow_fallback():

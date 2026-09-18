@@ -39,16 +39,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""ONNX Runtime model loading and calibration session setup."""
+"""ONNX Runtime model loading and inference-session setup."""
 
 __all__ = []
 
-from collections.abc import Sequence
 from pathlib import Path
 
 import onnx
 import onnxruntime as ort
-from onnx import onnx_pb
 from onnxruntime.quantization.quant_utils import add_infer_metadata
 
 import modelopt.onnx.utils as onnx_utils
@@ -64,44 +62,6 @@ def load_model_with_shape_infer(model_path: Path) -> onnx.ModelProto:
     except Exception as e:
         logger.info(f"Failed to infer shapes for model {model_path}: {e}")
     return model
-
-
-def _select_tensors_to_calibrate(calibrator, model: onnx.ModelProto):
-    """Select input/output tensors of candidate nodes to calibrate.
-
-    Returns:
-        tensors (set): set of tensor name.
-        value_infos (dict): tensor name to value info.
-    """
-    value_infos = {vi.name: vi for vi in model.graph.value_info}
-    value_infos.update({ot.name: ot for ot in model.graph.output})
-    value_infos.update({it.name: it for it in model.graph.input})
-    initializer = {init.name for init in model.graph.initializer}
-
-    tensors_to_calibrate = set()
-    tensor_type_to_calibrate = {onnx_pb.TensorProto.FLOAT, onnx_pb.TensorProto.FLOAT16}
-
-    for node in model.graph.node:
-        # Hack: in calibrator.op_types_to_calibrate we pass nodes_to_quantize
-        if node.name in calibrator.op_types_to_calibrate:
-            for tensor_name in node.input:
-                if tensor_name in value_infos:
-                    vi = value_infos[tensor_name]
-                    if (
-                        vi.type.HasField("tensor_type")
-                        and (vi.type.tensor_type.elem_type in tensor_type_to_calibrate)
-                        and (tensor_name not in initializer)
-                    ):
-                        tensors_to_calibrate.add(tensor_name)
-            for tensor_name in node.output:
-                if tensor_name in value_infos:
-                    vi = value_infos[tensor_name]
-                    if vi.type.HasField("tensor_type") and (
-                        vi.type.tensor_type.elem_type in tensor_type_to_calibrate
-                    ):
-                        tensors_to_calibrate.add(tensor_name)
-
-    return tensors_to_calibrate, value_infos
 
 
 def _configure_session_providers(
@@ -204,45 +164,3 @@ def _create_inference_session_with_ep_config(calibrator, **kwargs):
     calibrator.group_qdq_tensors = kwargs.get("group_qdq_tensors")
     if calibrator.group_qdq_tensors:
         logger.debug(f"Group QDQ tensors: {calibrator.group_qdq_tensors}")
-
-
-def _init_calibrater_base(
-    calibrater,
-    model_path: str | Path,
-    op_types_to_calibrate: Sequence[str] | None = None,
-    augmented_model_path="augmented_model.onnx",
-    symmetric=False,
-    use_external_data_format=False,
-    per_channel=False,
-):
-    """Initialize calibrater base class.
-
-    :param model_path: ONNX model to calibrate. It should be a model file path
-    :param op_types_to_calibrate: operator types to calibrate. By default, calibrate all the float32/float16 tensors.
-    :param augmented_model_path: save augmented model to this path.
-    :param symmetric: make range of tensor symmetric (central point is 0).
-    :param use_external_data_format: use external data format to store model which size is >= 2Gb
-
-    Modification: Additional members including single_node_model_path_map, providers, and trt_extra_plugin_lib_paths
-        were added and initialized to support calibration per node feature.
-    """
-    if isinstance(model_path, str):
-        calibrater.model = load_model_with_shape_infer(Path(model_path))
-    elif isinstance(model_path, Path):
-        calibrater.model = load_model_with_shape_infer(model_path)
-    else:
-        raise ValueError("model_path should be model path.")
-
-    calibrater.op_types_to_calibrate = op_types_to_calibrate
-    calibrater.augmented_model_path = augmented_model_path
-    calibrater.symmetric = symmetric
-    calibrater.use_external_data_format = use_external_data_format
-    calibrater.per_channel = per_channel
-    calibrater.augment_model = None
-    calibrater.infer_session = None
-    calibrater.execution_providers = []
-
-    # Add single node calibration members
-    calibrater.single_node_model_path_map = {}  # {path: ([inputs], [outputs])}
-    calibrater.providers = []
-    calibrater.trt_extra_plugin_lib_paths = None

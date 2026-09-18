@@ -43,7 +43,9 @@ from modelopt.onnx.quantization.ort_calibration import (
     _collect_data_minmax_calibrator,
     _collect_value,
     _compute_data_minmax_calibrator,
+    _init_calibrater_base,
     _merge_range_minmax_calibrator,
+    _select_tensors_to_calibrate,
 )
 from modelopt.onnx.quantization.ort_calibration_per_node import (
     _augment_graph_min_max_calibrater_single_node_calibration,
@@ -61,8 +63,6 @@ from modelopt.onnx.quantization.ort_quantization import (
 )
 from modelopt.onnx.quantization.ort_session import (
     _create_inference_session_with_ep_config,
-    _init_calibrater_base,
-    _select_tensors_to_calibrate,
     load_model_with_shape_infer,
 )
 
@@ -536,7 +536,7 @@ class TestInitialization:
         mock_calibrater = Mock()
 
         with patch(
-            "modelopt.onnx.quantization.ort_session.load_model_with_shape_infer"
+            "modelopt.onnx.quantization.ort_calibration.load_model_with_shape_infer"
         ) as mock_load:
             mock_load.return_value = simple_onnx_model
 
