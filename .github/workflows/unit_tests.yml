@@ -83,10 +83,7 @@ jobs:
     if: needs.check-file-changes.outputs.any_changed == 'true'
     needs: [linux, check-file-changes]
     runs-on: windows-latest
-    # 15 while this job only ran the suite once. The 0xc000001d diagnosis reruns it at a capped
-    # oneDNN ISA when it crashes, which needs room for a second pass. Revert to 15 once the
-    # crash is understood and the diagnostic steps come out.
-    timeout-minutes: 30
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
@@ -132,26 +129,27 @@ jobs:
           # the main thread's frames, which is what made the last dump unreadable.
           PYTHONUNBUFFERED: "1"
           PYTHONFAULTHANDLER: "1"
+          # Cap oneDNN's instruction set. bf16 linear/matmul on CPU dispatch through oneDNN,
+          # which by default picks the highest ISA the host advertises -- Intel AMX on the
+          # Emerald Rapids runners in the Actions fleet. On those hosts that path executes an
+          # instruction that faults with #UD, which surfaces as 0xc000001d and kills the whole
+          # pytest process. AMD EPYC runners have neither AMX nor AVX-512, take the AVX2 path,
+          # and have never shown the crash -- so AVX2 is the ceiling with evidence behind it.
+          # This is a CI mitigation for a torch/oneDNN Windows issue, not a ModelOpt bug: it
+          # changes which kernel runs, not what is being tested. The canary below keeps proving
+          # it is still load-bearing. See the commit that added this for the full evidence.
+          ONEDNN_MAX_CPU_ISA: "AVX2"
+          DNNL_MAX_CPU_ISA: "AVX2"
         run: pip install nox uv && nox -s "unit-3.12(torch_214, tf_latest)"
-      # --- 0xc000001d diagnosis -------------------------------------------------------------
-      # Corrected picture, after sampling runs back to July. The crash is NOT deterministic and
-      # NOT specific to one test: it has landed on test_peft_save_restore (four times, Jul-Aug),
-      # test_unet_save_restore, and now test_fp8_export_rejects[mixed-format]. It appeared on
-      # five unrelated branches, so it is neither new nor anything a PR introduced. Within a
-      # single job it reproduces every time -- which is what made it look deterministic -- but
-      # that is because all attempts share one VM.
+      # --- 0xc000001d canary ----------------------------------------------------------------
+      # The cap above makes the suite stable, which also means a regression in the cap would be
+      # invisible. This step runs the offending operation -- a bf16 GEMM -- with the cap removed,
+      # in a throwaway process, and reports whether this host faults. It is the evidence that the
+      # cap is doing something, gathered per run and per CPU without flaking the job.
       #
-      # What it tracks is the CPU. The run that crashed drew an Intel Xeon 8573C (Emerald
-      # Rapids: AVX-512 and AMX). The very next run drew an AMD EPYC 7763 (Zen 3: neither) and
-      # the whole suite passed, including the test that had just crashed three times in a row.
-      # So the suspect is native code dispatching to an AVX-512 or AMX path on Intel hosts, most
-      # likely AMX -- its tile instructions fault with #UD, which is exactly 0xc000001d, unless
-      # the hypervisor enabled XSAVE tile state, and that enablement varies across the fleet.
-      #
-      # ATEN_CPU_CAPABILITY was tried and did not help. It would not: it governs ATen's own
-      # kernels, while oneDNN JIT-generates its own from runtime detection. ONEDNN_MAX_CPU_ISA
-      # is the knob for that, and it is what the rerun below tests.
-      - name: What ISA did oneDNN actually select
+      # exit 3221225501 is 0xc000001d: this host would have crashed the suite uncapped. exit 0
+      # means this host is unaffected (every AMD runner so far). Either way the job is unharmed.
+      - name: Canary -- does this host fault on an uncapped bf16 GEMM
         if: always()
         continue-on-error: true
         shell: pwsh
@@ -159,32 +157,16 @@ jobs:
           $venv = Get-ChildItem -Path "D:/tmp/.nox","C:/tmp/.nox","/tmp/.nox","$env:GITHUB_WORKSPACE/.nox" `
                     -Directory -ErrorAction SilentlyContinue |
                   Where-Object { $_.Name -like "unit-3-12*" } | Select-Object -First 1
-          if (-not $venv) { Write-Host "no nox venv -- nothing to report"; exit 0 }
+          if (-not $venv) { Write-Host "no nox venv -- nothing to probe"; exit 0 }
           $py = Join-Path $venv.FullName "Scripts\python.exe"
+          Remove-Item Env:\ONEDNN_MAX_CPU_ISA -ErrorAction SilentlyContinue
+          Remove-Item Env:\DNNL_MAX_CPU_ISA -ErrorAction SilentlyContinue
           $env:ONEDNN_VERBOSE = "1"
-          # oneDNN prints its selected ISA once, when the first primitive is created. A bf16
-          # matmul is the cheapest way to force that and is the shape of op both crash sites run.
-          & $py -c "import torch; a=torch.randn(256,256,dtype=torch.bfloat16); b=torch.randn(256,256,dtype=torch.bfloat16); print('result', float((a@b).sum()))" 2>&1 |
-            Select-String -Pattern "onednn_verbose.*info|result" | ForEach-Object { $_.Line }
-          Remove-Item Env:\ONEDNN_VERBOSE -ErrorAction SilentlyContinue
-      - name: Does lowering the oneDNN ISA stop the crash
-        # Only worth the five minutes when the suite actually crashed -- and only the full suite
-        # is a proven reproducer. Running the single test in isolation passed on the AMD host,
-        # so a green single-test result would prove nothing either way.
-        if: always() && steps.unit.outcome == 'failure'
-        continue-on-error: true
-        shell: pwsh
-        env:
-          PYTHONUTF8: "1"
-          PYTHONUNBUFFERED: "1"
-          ONEDNN_MAX_CPU_ISA: "AVX2"
-          DNNL_MAX_CPU_ISA: "AVX2"
-        run: |
-          nox -s "unit-3.12(torch_214, tf_latest)"
-          # 3221225501 is 0xc000001d. 0 means capping the ISA fixed it, and the fix is this env
-          # var; 1 means ordinary test failures and the crash did not recur; 3221225501 means the
-          # ISA ceiling is not the mechanism and the dump below is the remaining lead.
-          Write-Host "full-suite-at-AVX2 exit=$LASTEXITCODE"
+          & $py -c "import torch; a=torch.randn(256,256,dtype=torch.bfloat16); b=torch.randn(256,256,dtype=torch.bfloat16); print('bf16 gemm ok', float((a@b).sum()))" 2>&1 |
+            Select-String -Pattern "onednn_verbose.*info|bf16 gemm ok" | ForEach-Object { $_.Line }
+          $code = $LASTEXITCODE
+          Write-Host "uncapped-bf16-gemm exit=$code"
+          if ($code -eq 3221225501) { Write-Host "=> this host faults uncapped; the ISA cap is load-bearing here" }
       - name: Name the faulting module from the dump
         if: always()
         continue-on-error: true
