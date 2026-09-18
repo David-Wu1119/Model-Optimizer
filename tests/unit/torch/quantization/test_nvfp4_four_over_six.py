@@ -25,14 +25,21 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+import modelopt.torch.opt as mto
 import modelopt.torch.quantization as mtq
+import modelopt.torch.quantization.model_calib as mc
+import modelopt.torch.quantization.nn.modules.tensor_quantizer as tqm
+from modelopt.torch.quantization.algorithms import _has_four_over_six
+from modelopt.torch.quantization.calib import MseCalibrator
 from modelopt.torch.quantization.config import (
+    FourOverSixCalibConfig,
     QuantizeConfig,
     QuantizerAttributeConfig,
     choices,
     four_over_six_config_problems,
     normalize_quant_cfg_list,
 )
+from modelopt.torch.quantization.mode import BaseCalibrateModeDescriptor, CalibrateModeRegistry
 from modelopt.torch.quantization.nn import NVFP4StaticQuantizer
 from modelopt.torch.quantization.qtensor.nvfp4_tensor import NVFP4QTensor
 from modelopt.torch.quantization.utils.numeric_utils import E2M1_MAX, E4M3_MAX, E4M3_MAX_46
@@ -112,8 +119,6 @@ class TestStaticQuantizerFourOverSixThreading:
         return q
 
     def _captured_fp8_max(self, monkeypatch, four_over_six: bool) -> float:
-        import modelopt.torch.quantization.nn.modules.tensor_quantizer as tqm
-
         captured = {}
 
         def spy(*args, **kwargs):
@@ -178,19 +183,12 @@ class TestFourOverSixAlgorithm:
     """`four_over_six` is a registered calibrate mode whose search grid is derived."""
 
     def test_mode_is_registered(self):
-        from modelopt.torch.quantization.mode import (
-            BaseCalibrateModeDescriptor,
-            CalibrateModeRegistry,
-        )
-
         name = BaseCalibrateModeDescriptor._get_mode_name("four_over_six")
         assert name == "four_over_six_calibrate"
         assert name in CalibrateModeRegistry
 
     def test_config_does_not_expose_the_search_grid(self):
         """The whole point of the name: the multipliers cannot be retyped, so they cannot drift."""
-        from modelopt.torch.quantization.config import FourOverSixCalibConfig
-
         fields = FourOverSixCalibConfig.model_fields
         assert not {"start_multiplier", "stop_multiplier", "step_size", "fp8_scale_sweep"} & set(
             fields
@@ -198,9 +196,6 @@ class TestFourOverSixAlgorithm:
 
     def test_delegates_to_mse_with_the_two_46_candidates(self, monkeypatch):
         """The grid handed to MSE is the legacy stanza, and it yields exactly {M=6, M=4}."""
-        import modelopt.torch.quantization.model_calib as mc
-        from modelopt.torch.quantization.calib import MseCalibrator
-
         captured = {}
         monkeypatch.setattr(mc, "mse_calibrate", lambda *a, **kw: captured.update(kw))
         mc.four_over_six_calibrate(torch.nn.Linear(4, 4))
@@ -233,8 +228,6 @@ class TestFourOverSixIsTheLegacyStanzaOnCPU:
 
     @staticmethod
     def _calibrated_weight_amax(monkeypatch, algorithm):
-        import modelopt.torch.quantization.nn.modules.tensor_quantizer as tqm
-
         monkeypatch.setattr(tqm, "static_blockwise_fp4_fake_quant", _reference_static_fp4)
 
         torch.manual_seed(0)
@@ -409,9 +402,6 @@ class TestFourOverSixIsEnforcedAtQuantizeTime:
 
     @staticmethod
     def _quantized_46_state(monkeypatch):
-        import modelopt.torch.opt as mto
-        import modelopt.torch.quantization.nn.modules.tensor_quantizer as tqm
-
         monkeypatch.setattr(tqm, "static_blockwise_fp4_fake_quant", _reference_static_fp4)
         torch.manual_seed(0)
         model = torch.nn.Sequential(torch.nn.Linear(4 * BLOCK_SIZE, 4 * BLOCK_SIZE))
@@ -426,8 +416,6 @@ class TestFourOverSixIsEnforcedAtQuantizeTime:
         return mto.modelopt_state(model)
 
     def test_quantize_raises_on_a_half_configured_model(self, monkeypatch):
-        import modelopt.torch.quantization.nn.modules.tensor_quantizer as tqm
-
         monkeypatch.setattr(tqm, "static_blockwise_fp4_fake_quant", _reference_static_fp4)
         torch.manual_seed(0)
         model = torch.nn.Sequential(torch.nn.Linear(4 * BLOCK_SIZE, 4 * BLOCK_SIZE))
@@ -446,8 +434,6 @@ class TestFourOverSixIsEnforcedAtQuantizeTime:
 
         Restore has no calibration to fix, so raising there would strand the checkpoint.
         """
-        import modelopt.torch.opt as mto
-
         state = self._quantized_46_state(monkeypatch)
         for mode_name, mode_state in state["modelopt_state_dict"]:
             if mode_name == "quantize":
@@ -459,8 +445,6 @@ class TestFourOverSixIsEnforcedAtQuantizeTime:
             mto.restore_from_modelopt_state(fresh, state)
 
     def test_a_four_over_six_checkpoint_round_trips(self, monkeypatch):
-        import modelopt.torch.opt as mto
-
         state = self._quantized_46_state(monkeypatch)
         torch.manual_seed(0)
         fresh = torch.nn.Sequential(torch.nn.Linear(4 * BLOCK_SIZE, 4 * BLOCK_SIZE))
@@ -472,8 +456,6 @@ class TestAutoQuantizeConfigStaysValid:
     """`get_auto_quantize_config` must not emit a config its own validator rejects."""
 
     def test_four_over_six_entries_get_a_searching_algorithm(self):
-        from modelopt.torch.quantization.algorithms import _has_four_over_six
-
         flagged = [{"quantizer_name": "*weight_quantizer", "cfg": NVFP4_FOUR_OVER_SIX_ATTRS}]
         assert _has_four_over_six(flagged)
         assert not _has_four_over_six(
@@ -486,8 +468,6 @@ class TestCompressRejectsFourOverSixUpFront:
     """`mtq.compress` refuses before touching any weight, not partway through the model."""
 
     def test_compress_names_every_offending_quantizer(self, monkeypatch):
-        import modelopt.torch.quantization.nn.modules.tensor_quantizer as tqm
-
         monkeypatch.setattr(tqm, "static_blockwise_fp4_fake_quant", _reference_static_fp4)
 
         torch.manual_seed(0)
@@ -513,8 +493,6 @@ class TestCompressRejectsFourOverSixUpFront:
 
     def test_excluding_the_46_layers_still_compresses(self, monkeypatch):
         """The refusal is about what would actually be packed, not what the model contains."""
-        import modelopt.torch.quantization.nn.modules.tensor_quantizer as tqm
-
         monkeypatch.setattr(tqm, "static_blockwise_fp4_fake_quant", _reference_static_fp4)
 
         torch.manual_seed(0)
