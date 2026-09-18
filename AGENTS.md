@@ -41,6 +41,14 @@ cancel affected queued/running jobs, including resume dependencies and jobs
 created during cancellation; verify the submitter exited and those jobs are
 terminal. Record evidence or unresolved cleanup, never claim cancellation from
 wrapper exit alone. Do not cancel merely to free GPUs (see the evaluation skill).
+## Evaluation analysis
+
+Before analyzing completed evaluations or reporting scores, including standalone
+`launching-evals` sessions, read
+`plugins/modelopt/skills/evaluation/references/run-validation.md`.
+Its validation policy supersedes vendored `launching-evals` advice to uncap
+reasoning output (`max_tokens=null` or payload field removal), use fixed
+token/context limits, or treat any unfinished reasoning as invalid.
 
 ## Coding guidelines
 
