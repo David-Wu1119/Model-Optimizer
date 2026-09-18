@@ -91,33 +91,16 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      # Diagnostics for the intermittent 0xc000001d (STATUS_ILLEGAL_INSTRUCTION) crash: a native
-      # module executes an opcode this host lacks. The runner fleet is heterogeneous, so the same
-      # wheel passes on one machine and dies on another. Nothing here changes what is tested; it
-      # records which CPU ran, and leaves a dump behind naming the faulting DLL if it happens.
       - name: Record which CPU this runner got
-        # CPU model only -- torch is not installed in this interpreter yet, it lives in the nox
-        # venv created by the test step below. An earlier version of this step claimed to report
-        # torch's dispatch capability and could not; the ISA probe after the tests does that.
+        # The 0xc000001d crash this job used to hit tracked the host CPU, not the test, so this
+        # is the first thing worth knowing if it ever recurs. See the ONEDNN_MAX_CPU_ISA comment
+        # on the test step below.
         continue-on-error: true
         shell: pwsh
         run: |
           Get-CimInstance Win32_Processor | Select-Object Name, Description, NumberOfCores | Format-List
           python -c "import platform; print('machine:', platform.machine(), platform.processor())"
-      - name: Install a postmortem debugger that catches any crashing process
-        continue-on-error: true
-        shell: pwsh
-        run: |
-          # WER LocalDumps was tried here first and produced nothing, and procdump launched as a
-          # parent produced nothing either -- it wrapped the nox process while the crash was in
-          # the pytest child. `procdump -i` installs procdump as the system postmortem debugger
-          # (AeDebug), so it catches whichever process actually dies, anywhere in the tree.
-          $d = "$env:GITHUB_WORKSPACE\crashdumps"
-          New-Item -ItemType Directory -Force -Path $d | Out-Null
-          choco install procdump -y --no-progress | Out-Null
-          procdump -accepteula -ma -i $d
       - name: Run unit tests (without coverage)
-        id: unit
         # PEP 540 UTF-8 mode. Windows defaults text I/O to the locale codepage (cp1252 on these
         # runners), so any read of a UTF-8 file without an explicit encoding= dies with
         # UnicodeDecodeError on the first non-Latin-1 byte -- a failure no other platform sees.
@@ -125,8 +108,8 @@ jobs:
         # library code from passing encoding= explicitly: user processes will not have this set.
         env:
           PYTHONUTF8: "1"
-          # Unbuffered so a crash does not interleave two threads' faulthandler output and lose
-          # the main thread's frames, which is what made the last dump unreadable.
+          # Unbuffered so a crash does not interleave two threads' faulthandler output into
+          # each other, which is what made the 0xc000001d tracebacks unreadable.
           PYTHONUNBUFFERED: "1"
           PYTHONFAULTHANDLER: "1"
           # Cap oneDNN's instruction set. bf16 linear/matmul on CPU dispatch through oneDNN,
@@ -136,58 +119,12 @@ jobs:
           # pytest process. AMD EPYC runners have neither AMX nor AVX-512, take the AVX2 path,
           # and have never shown the crash -- so AVX2 is the ceiling with evidence behind it.
           # This is a CI mitigation for a torch/oneDNN Windows issue, not a ModelOpt bug: it
-          # changes which kernel runs, not what is being tested. The canary below keeps proving
-          # it is still load-bearing. See the commit that added this for the full evidence.
+          # changes which kernel runs, not what is being tested. To check whether it is still
+          # needed, drop it and run the suite repeatedly until an Intel host comes up.
+          # See the PR that added this for the six crashes and the host correlation behind it.
           ONEDNN_MAX_CPU_ISA: "AVX2"
           DNNL_MAX_CPU_ISA: "AVX2"
         run: pip install nox uv && nox -s "unit-3.12(torch_214, tf_latest)"
-      # --- 0xc000001d canary ----------------------------------------------------------------
-      # The cap above makes the suite stable, which also means a regression in the cap would be
-      # invisible. This step runs the offending operation -- a bf16 GEMM -- with the cap removed,
-      # in a throwaway process, and reports whether this host faults. It is the evidence that the
-      # cap is doing something, gathered per run and per CPU without flaking the job.
-      #
-      # exit 3221225501 is 0xc000001d: this host would have crashed the suite uncapped. exit 0
-      # means this host is unaffected (every AMD runner so far). Either way the job is unharmed.
-      - name: Canary -- does this host fault on an uncapped bf16 GEMM
-        if: always()
-        continue-on-error: true
-        shell: pwsh
-        run: |
-          $venv = Get-ChildItem -Path "D:/tmp/.nox","C:/tmp/.nox","/tmp/.nox","$env:GITHUB_WORKSPACE/.nox" `
-                    -Directory -ErrorAction SilentlyContinue |
-                  Where-Object { $_.Name -like "unit-3-12*" } | Select-Object -First 1
-          if (-not $venv) { Write-Host "no nox venv -- nothing to probe"; exit 0 }
-          $py = Join-Path $venv.FullName "Scripts\python.exe"
-          Remove-Item Env:\ONEDNN_MAX_CPU_ISA -ErrorAction SilentlyContinue
-          Remove-Item Env:\DNNL_MAX_CPU_ISA -ErrorAction SilentlyContinue
-          $env:ONEDNN_VERBOSE = "1"
-          # The first version of this canary was a bare `a @ b` and printed no onednn_verbose
-          # line at all, meaning it never created a oneDNN primitive -- so a clean exit from it
-          # proved nothing. name_faulting_module.py's sibling runs the real operation instead.
-          & $py .github/scripts/bf16_canary.py 2>&1 |
-            Select-String -Pattern "onednn_verbose.*info|bf16 linear" | ForEach-Object { $_.Line }
-          $code = $LASTEXITCODE
-          Write-Host "uncapped-bf16-gemm exit=$code"
-          if ($code -eq 3221225501) { Write-Host "=> this host faults uncapped; the ISA cap is load-bearing here" }
-      - name: Name the faulting module from the dump
-        if: always()
-        continue-on-error: true
-        shell: pwsh
-        run: |
-          Get-ChildItem "$env:GITHUB_WORKSPACE\crashdumps" -ErrorAction SilentlyContinue |
-            Format-Table Name, Length
-          python -m pip install --quiet minidump
-          python .github/scripts/name_faulting_module.py "$env:GITHUB_WORKSPACE\crashdumps"
-      - name: Upload crash dumps
-        # always(): the dump is the point of the run even when a later diagnostic step passes.
-        if: always()
-        continue-on-error: true
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-crashdumps
-          path: crashdumps/
-          if-no-files-found: ignore
   multi-version:
     if: needs.check-file-changes.outputs.any_changed == 'true'
     needs: [linux, check-file-changes]
