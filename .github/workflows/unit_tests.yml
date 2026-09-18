@@ -101,17 +101,7 @@ jobs:
           Get-CimInstance Win32_Processor | Select-Object Name, Description, NumberOfCores | Format-List
           python -c "import platform; print('machine:', platform.machine(), platform.processor())"
       - name: Run unit tests (without coverage)
-        # PEP 540 UTF-8 mode. Windows defaults text I/O to the locale codepage (cp1252 on these
-        # runners), so any read of a UTF-8 file without an explicit encoding= dies with
-        # UnicodeDecodeError on the first non-Latin-1 byte -- a failure no other platform sees.
-        # This makes the whole test process read UTF-8 regardless of locale. It does NOT excuse
-        # library code from passing encoding= explicitly: user processes will not have this set.
         env:
-          PYTHONUTF8: "1"
-          # Unbuffered so a crash does not interleave two threads' faulthandler output into
-          # each other, which is what made the 0xc000001d tracebacks unreadable.
-          PYTHONUNBUFFERED: "1"
-          PYTHONFAULTHANDLER: "1"
           # Cap oneDNN's instruction set. bf16 linear/matmul on CPU dispatch through oneDNN,
           # which by default picks the highest ISA the host advertises -- Intel AMX on the
           # Emerald Rapids runners in the Actions fleet. On those hosts that path executes an
