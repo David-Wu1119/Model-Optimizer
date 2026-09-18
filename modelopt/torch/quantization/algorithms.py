@@ -22,7 +22,7 @@ import types
 import warnings
 from abc import ABC, abstractmethod
 from collections import defaultdict
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import ExitStack, nullcontext
 from typing import Any
 
@@ -2169,12 +2169,32 @@ def get_auto_quantize_config(search_state, constraints=None, verbose=False):
     # modules override default disables such as ``*lm_head*``.
     quant_cfg.extend(global_entries.values())
     quant_cfg.extend(per_module_entries)
+    # NVFP4 4/6 is the one format where "max" is not merely a downgrade but wrong: the flag
+    # normalizes the per-block FP8 scales by 256 on the assumption that a search will pick
+    # M=4 for some blocks, and max never does. Emit the algorithm that makes those entries
+    # mean what they say (QuantizeConfig rejects the "max" pairing outright).
+    algorithm = "four_over_six" if _has_four_over_six(quant_cfg) else "max"
     warnings.warn(
-        "get_auto_quantize_config: returned config uses algorithm='max'. "
+        f"get_auto_quantize_config: returned config uses algorithm={algorithm!r}. "
         "Per-recipe calibration algorithms (e.g. smoothquant, awq) are not preserved. "
         "Update config['algorithm'] if a different calibration algorithm is needed (e.g. 'gptq')."
     )
-    return {"quant_cfg": quant_cfg, "algorithm": "max"}
+    return {"quant_cfg": quant_cfg, "algorithm": algorithm}
+
+
+def _has_four_over_six(quant_cfg: list[dict]) -> bool:
+    """True if any enabled entry sets the NVFP4 Four-Over-Six block_sizes flag."""
+    for entry in quant_cfg:
+        if entry.get("enable") is False:
+            continue
+        cfg = entry.get("cfg")
+        levels = cfg if isinstance(cfg, list) else [cfg]
+        if any(
+            isinstance(level, Mapping) and (level.get("block_sizes") or {}).get("four_over_six")
+            for level in levels
+        ):
+            return True
+    return False
 
 
 def _resolve_best_recipe(search_state, constraints, verbose=False):

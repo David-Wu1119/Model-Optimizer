@@ -380,6 +380,34 @@ class TestFourOverSixCoordination:
                 },
             )
 
+    def test_flag_is_accepted_when_type_is_omitted(self):
+        """An absent ``type`` is static: is_static_block_quant tests ``!= "dynamic"``."""
+        cfg = QuantizerAttributeConfig(
+            num_bits=(2, 1),
+            block_sizes={-1: BLOCK_SIZE, "scale_bits": (4, 3), "four_over_six": True},
+        )
+        assert cfg.block_sizes["four_over_six"]
+
+    @pytest.mark.parametrize(
+        "algorithm", ["lsq", {"method": "lsq"}, {"method": "lsq", "scale_algorithm": None}]
+    )
+    def test_lsq_defaults_its_bundled_search_to_mse(self, algorithm):
+        """``_run_weight_scale_calibration`` substitutes mse for an unset scale_algorithm."""
+        QuantizeConfig(
+            quant_cfg=_weight_only_quant_cfg(NVFP4_FOUR_OVER_SIX_ATTRS), algorithm=algorithm
+        )
+
+    @pytest.mark.parametrize(
+        "algorithm",
+        ["nvfp4_act_headroom", {"method": "nvfp4_act_headroom", "weight_scale_algorithm": None}],
+    )
+    def test_act_headroom_defaults_its_bundled_search_to_max(self, algorithm):
+        """Its default really is max, which never makes the M=6/M=4 choice."""
+        with pytest.raises(ValidationError, match="never searches weight scales"):
+            QuantizeConfig(
+                quant_cfg=_weight_only_quant_cfg(NVFP4_FOUR_OVER_SIX_ATTRS), algorithm=algorithm
+            )
+
     def test_flag_on_a_disabled_entry_does_not_constrain_the_algorithm(self):
         cfg = _weight_only_quant_cfg(NVFP4_FOUR_OVER_SIX_ATTRS)
         cfg[-1]["enable"] = False
@@ -398,6 +426,21 @@ class TestFourOverSixCoordination:
     def test_shipped_preset_uses_the_named_algorithm(self):
         assert mtq.NVFP4_FOUR_OVER_SIX_CFG["algorithm"] == "four_over_six"
         QuantizeConfig(**mtq.NVFP4_FOUR_OVER_SIX_CFG)
+
+
+class TestAutoQuantizeConfigStaysValid:
+    """`get_auto_quantize_config` must not emit a config its own validator rejects."""
+
+    def test_four_over_six_entries_get_a_searching_algorithm(self):
+        from modelopt.torch.quantization.algorithms import _has_four_over_six
+
+        flagged = [{"quantizer_name": "*weight_quantizer", "cfg": NVFP4_FOUR_OVER_SIX_ATTRS}]
+        assert _has_four_over_six(flagged)
+        assert not _has_four_over_six(
+            [{"quantizer_name": "*weight_quantizer", "cfg": NVFP4_STATIC_ATTRS}]
+        )
+        # ...and the algorithm it then picks yields a config that validates.
+        QuantizeConfig(quant_cfg=flagged, algorithm="four_over_six")
 
 
 class TestCompressRejectsFourOverSixUpFront:

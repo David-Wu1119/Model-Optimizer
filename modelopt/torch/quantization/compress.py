@@ -32,7 +32,7 @@ from .backends.gemm_registry import disable_real_quant_gemm, enable_real_quant_g
 from .config import CompressCfgType, CompressConfig
 from .conversion import _replace_quant_module, set_quantizer_attributes_partial
 from .nn.modules.quant_linear import RealQuantLinear
-from .nn.modules.tensor_quantizer import TensorQuantizer
+from .nn.modules.tensor_quantizer import SequentialQuantizer, TensorQuantizer
 from .qtensor import QTensorWrapper, pack_real_quantize_weight
 from .utils import is_quantized_linear
 
@@ -56,19 +56,31 @@ def _reject_unsupported_real_quant_formats(model: nn.Module) -> None:
 
     ``TensorQuantizer._real_quantize`` asserts the same predicate, but only once
     :func:`pack_real_quantize_weight` is already walking layers, so the run dies partway
-    through naming one layer. Checking here reports every offender up front -- and only for
-    quantizers that would actually be packed, so excluding them via the ``compress``
-    patterns still works.
+    through naming one layer. Checking here reports every offender up front.
+
+    Screens exactly what :func:`pack_real_quantize_weight` would pack -- same
+    ``convert_to_single_quantizer`` view so ``SequentialQuantizer`` weight quantizers are
+    seen, and the same weight/enable/fake_quant gate -- so it neither misses an offender
+    nor rejects a layer that would have been skipped anyway (including ones excluded via
+    the ``compress`` patterns).
     """
-    offenders = [
-        f"{name}.weight_quantizer"
-        for name, module in model.named_modules()
-        if isinstance(getattr(module, "weight_quantizer", None), TensorQuantizer)
-        # Mirrors _compress_and_update_module_weight's gate in pack_real_quantize_weight.
-        and module.weight_quantizer.is_enabled
-        and not module.weight_quantizer._fake_quant
-        and not module.weight_quantizer._is_real_quantize_support()
-    ]
+    offenders = []
+    with SequentialQuantizer.convert_to_single_quantizer(model):
+        for name, module in model.named_modules():
+            # Mirrors _compress_and_update_module_weight's gate in pack_real_quantize_weight.
+            weight = getattr(module, "weight", None)
+            quantizer = getattr(module, "weight_quantizer", None)
+            if (
+                weight is None
+                or weight.is_meta
+                or weight.element_size() <= 1
+                or not isinstance(quantizer, TensorQuantizer)
+                or not quantizer.is_enabled
+                or quantizer._fake_quant
+                or quantizer._is_real_quantize_support()
+            ):
+                continue
+            offenders.append(f"{name}.weight_quantizer")
     if offenders:
         raise NotImplementedError(
             "mtq.compress does not support the quantization format of these weight "

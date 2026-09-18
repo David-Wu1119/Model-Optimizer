@@ -349,7 +349,9 @@ def _validate_four_over_six_numerics(block_sizes: dict, num_bits: Any) -> None:
     # is a typed per-format model rather than a free dict, four_over_six becomes a field of
     # the static-NVFP4 variant and this check goes away.
     scale_bits, block_type = block_sizes.get("scale_bits"), block_sizes.get("type")
-    if (_as_exmy(num_bits), block_type, _as_exmy(scale_bits)) != ((2, 1), "static", (4, 3)):
+    # An absent `type` is static: TensorQuantizer.is_static_block_quant tests != "dynamic".
+    is_static = block_type in (None, "static")
+    if (_as_exmy(num_bits), is_static, _as_exmy(scale_bits)) != ((2, 1), True, (4, 3)):
         raise ValueError(
             "block_sizes['four_over_six'] is only supported on static NVFP4 weight quantizers "
             "(num_bits e2m1, type 'static', scale_bits e4m3), because its only effect is to "
@@ -1383,8 +1385,9 @@ class NVFP4ActHeadroomCalibConfig(QuantizeAlgorithmConfig):
         default={"method": "max"},
         title="Algorithm used to calibrate the weight scales.",
         description=(
-            "Weight scales are set by an independent algorithm -- ``max`` (default), ``mse`` or "
-            "``local_hessian`` -- because this algorithm only decides the NVFP4 *activation* "
+            "Weight scales are set by an independent algorithm -- ``max`` (default), ``mse``, "
+            "``four_over_six`` or ``local_hessian`` -- because this algorithm only decides the "
+            "NVFP4 *activation* "
             "global scale. Give the chosen algorithm's own options alongside ``method`` (for "
             "example ``{'method': 'mse', 'fp8_scale_sweep': true}``); ``distributed_sync`` and "
             "``shared_states`` belong to that weight calibration pass and are set there."
@@ -1464,7 +1467,7 @@ class LSQConfig(QuantizeAlgorithmConfig):
         default=None,
         title="Scale calibration algorithm to run first.",
         description=(
-            "Dict with 'method' key: 'mse', 'local_hessian', or 'max'. "
+            "Dict with 'method' key: 'mse', 'four_over_six', 'local_hessian', or 'max'. "
             "Optional keys include 'fp8_scale_sweep' for FP4 formats. "
             "Defaults to {'method': 'mse'} if None."
         ),
@@ -1521,9 +1524,15 @@ QuantizeAlgoCfgType = _QuantizeAlgoCfgType | list[_QuantizeAlgoCfgType] | None
 _FOUR_OVER_SIX_CAPABLE_ALGORITHMS = frozenset({"four_over_six", "mse", "local_hessian"})
 
 
-# Algorithms that bundle a weight-scale algorithm rather than running one themselves, so
-# the method that actually searches weight amax is nested one level down.
-_NESTED_SCALE_ALGORITHM_FIELDS = ("weight_scale_algorithm", "scale_algorithm")
+# Algorithms that bundle a weight-scale algorithm rather than running one themselves, so the
+# method that actually searches weight amax sits one level down: {method: (field, fallback
+# when the field is unset)}. The fallbacks mirror the call sites -- ``lsq`` lets
+# ``_run_weight_scale_calibration`` substitute mse for None, ``nvfp4_act_headroom`` passes
+# ``weight_scale_algorithm or {"method": "max"}``.
+_BUNDLED_SCALE_ALGORITHMS = {
+    "lsq": ("scale_algorithm", "mse"),
+    "nvfp4_act_headroom": ("weight_scale_algorithm", "max"),
+}
 
 
 def _algorithm_methods(algorithm: QuantizeAlgoCfgType) -> list[str | None]:
@@ -1534,26 +1543,31 @@ def _algorithm_methods(algorithm: QuantizeAlgoCfgType) -> list[str | None]:
     wants to reason about which algorithms will run has to destructure all four shapes.
 
     Descends into the bundled weight-scale algorithms of ``nvfp4_act_headroom`` and ``lsq``
-    too: those run a full weight-scale search, so for any question about what will actually
-    be searched the nested method counts as much as the outer one.
+    too, including the method each falls back to when its field is unset: those run a full
+    weight-scale search, so for any question about what will actually be searched the nested
+    method counts as much as the outer one.
     """
     if isinstance(algorithm, list):
         return [method for stage in algorithm for method in _algorithm_methods(stage)]
-    if algorithm is None or isinstance(algorithm, str):
-        return [algorithm]
+    if algorithm is None:
+        return [None]
 
     def field(name):
+        if isinstance(algorithm, str):
+            # A bare name still has to reach the bundled-default lookup below.
+            return algorithm if name == "method" else None
         return (
             algorithm.get(name)
             if isinstance(algorithm, Mapping)
             else getattr(algorithm, name, None)
         )
 
-    methods = [field("method")]
-    for nested_field in _NESTED_SCALE_ALGORITHM_FIELDS:
+    method = field("method")
+    methods = [method]
+    if method in _BUNDLED_SCALE_ALGORITHMS:
+        nested_field, fallback = _BUNDLED_SCALE_ALGORITHMS[method]
         nested = field(nested_field)
-        if nested is not None:
-            methods += _algorithm_methods(nested)
+        methods += _algorithm_methods(fallback if nested is None else nested)
     return methods
 
 
