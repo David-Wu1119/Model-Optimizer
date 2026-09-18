@@ -17,6 +17,7 @@
 
 import copy
 import warnings
+from contextlib import contextmanager
 from pathlib import Path
 
 import torch
@@ -98,6 +99,7 @@ def _export_fused_experts(
     # 2-3. Split + export each per-expert projection.
     fused_dim0 = first_proj.shape[1]  # gated: 2 * expert_dim; non-gated: expert_dim
 
+    expert_names = []
     for idx in range(n):
         expert = nn.Module()
 
@@ -225,10 +227,48 @@ def _export_fused_experts(
 
             expert.add_module(proj_name, proj)
 
-        module.add_module(str(idx), expert)
+        expert_name = str(idx)
+        module.add_module(expert_name, expert)
+        expert_names.append(expert_name)
 
     # 4. Remove fused params and quantizer lists — replaced by per-expert submodules
     _delete_fused_moe_source_attrs(module)
+
+    module._modelopt_exported_expert_children = tuple(expert_names)
+
+
+@contextmanager
+def release_exported_tensors(root: nn.Module):
+    """Drop what the export pass adds to ``root``, once the block has persisted it.
+
+    The handlers register scale buffers on ``root``'s existing sub-modules and
+    :func:`_export_fused_experts` attaches per-expert holders; an accelerate offload window
+    reclaims neither, so running the pass once per layer accumulates them. Nothing is
+    released if the block raises.
+    """
+    buffers_before = {name: set(mod._buffers) for name, mod in root.named_modules()}
+
+    yield
+
+    _release_exported_fused_experts(root)
+    for name, module in root.named_modules():
+        before = buffers_before.get(name)
+        if before is None:
+            continue
+        for buf_name in set(module._buffers) - before:
+            module._buffers[buf_name] = None
+
+
+def _release_exported_fused_experts(root: nn.Module) -> None:
+    # list(): the loop deletes children of the module it is holding.
+    for module in list(root.modules()):
+        children = getattr(module, "_modelopt_exported_expert_children", None)
+        if not children:
+            continue
+        for child in children:
+            if hasattr(module, child):
+                delattr(module, child)
+        del module._modelopt_exported_expert_children
 
 
 def save_expert_token_count_table(model: nn.Module, output_dir: str | Path | None = None):
