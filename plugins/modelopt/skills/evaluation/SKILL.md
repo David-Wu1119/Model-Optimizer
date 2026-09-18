@@ -563,7 +563,7 @@ Remove `limit_samples` overrides; keep canary-validated parallelism. If the cana
 
 ### Step 9 — Verify completed run and MLflow delivery
 
-Before pulling/reporting scores, validate the run. Read `references/run-validation.md` for NEL timeout/resume behavior, completed-run validation, diagnostics, and score harvesting. For a baseline that will be compared with a candidate, also perform its **External Baseline Sanity Check** before a success verdict, then hand the validated runs to `compare-results` for baseline-vs-candidate deltas.
+Before pulling/reporting scores, validate the run. Read `references/run-validation.md` for NEL timeout/resume behavior, completed-run validation, diagnostics, and score harvesting. Parents and evaluators must apply its **Response Truncation Policy**: report truncated/total responses and rate; ≤1.0% is a warning if all other checks pass, not an automatic retry. Above tolerance, return findings and a recommendation without automatically resubmitting. For a baseline that will be compared with a candidate, also perform its **External Baseline Sanity Check** before a success verdict, then hand the validated runs to `compare-results` for baseline-vs-candidate deltas.
 
 Then apply `references/mlflow-verification.md`: verify each task's actual MLflow
 run, recover failed/incomplete exports from existing results without rerunning
