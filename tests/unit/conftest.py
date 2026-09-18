@@ -15,9 +15,6 @@
 
 import contextlib
 import os
-import sys
-
-import pytest
 
 # Enforce no HuggingFace Hub network access for unit tests
 os.environ["HF_HUB_OFFLINE"] = "1"
@@ -28,27 +25,3 @@ with contextlib.suppress(ImportError):
     import huggingface_hub.constants as _hf_constants
 
     _hf_constants.HF_HUB_OFFLINE = True
-
-
-@pytest.fixture(scope="session", autouse=True)
-def _report_cpu_dispatch():
-    """On Windows, record what torch decided the CPU can do.
-
-    The job intermittently dies with 0xc000001d (STATUS_ILLEGAL_INSTRUCTION): a native module
-    executing an opcode the host lacks. torch selects a vectorized kernel set at runtime, so what
-    it chose -- compared against the CPU the workflow records before the run -- is the first thing
-    to check. Reported from inside the test process because that is where the torch under test
-    lives; the runner interpreter has only nox and uv.
-
-    Windows-only and best-effort: elsewhere it is noise, and a diagnostic must never fail a run.
-    """
-    if sys.platform != "win32":
-        return
-    with contextlib.suppress(Exception):
-        import torch
-
-        print(
-            f"\n[diag] torch {torch.__version__} "
-            f"cpu_capability={torch.backends.cpu.get_cpu_capability()}",
-            flush=True,
-        )
