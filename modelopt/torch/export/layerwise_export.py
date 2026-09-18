@@ -37,7 +37,7 @@ from modelopt.torch.utils import distributed as dist
 
 from .layer_utils import sync_moe_gate_up_amax
 from .model_utils import TiedWeightMap, get_language_model_from_vl
-from .moe_utils import release_exported_tensors
+from .moe_utils import _release_exported_tensors
 from .quant_aware_conversion import build_reverse_name_mapper, revert_quant_config_names
 from .quant_format import FUSION_FREE_FORMATS, QUANTIZATION_NVFP4
 from .quant_utils import (
@@ -312,7 +312,7 @@ class LayerwiseExporter:
 
         # The shard on disk is the artifact once this block closes; nothing reads the
         # layer again.
-        with release_exported_tensors(layer_module):
+        with _release_exported_tensors(layer_module):
             for sub_name, sub_mod in layer_module.named_modules():
                 full_name = f"{layer_name}.{sub_name}" if sub_name else layer_name
                 _dispatch_export_handler(full_name, sub_mod, self._ctx)

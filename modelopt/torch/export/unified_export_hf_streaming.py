@@ -44,7 +44,7 @@ from modelopt.torch.quantization.utils.layerwise_calib import LayerActivationCol
 from modelopt.torch.utils import distributed as _dist
 
 from .model_utils import get_export_units
-from .moe_utils import release_exported_tensors
+from .moe_utils import _release_exported_tensors
 from .quant_aware_conversion import _build_reverse_rules, build_reverse_name_mapper
 from .quant_utils import (
     _get_kv_cache_postprocess_config,
@@ -459,7 +459,7 @@ def _export_transformers_checkpoint_streaming(
             continue
         with (
             enable_weight_access_and_writeback(layer_module, model, names, writeback=False),
-            release_exported_tensors(layer_module),
+            _release_exported_tensors(layer_module),
         ):
             for sub_name, sub_mod in layer_module.named_modules():
                 full_name = f"{layer_name}.{sub_name}" if sub_name else layer_name

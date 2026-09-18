@@ -37,7 +37,7 @@ from _test_utils.torch.quantization.tied_modules import (
 
 import modelopt.torch.quantization as mtq
 from modelopt.torch.export.model_utils import TiedWeightMap
-from modelopt.torch.export.moe_utils import release_exported_tensors
+from modelopt.torch.export.moe_utils import _release_exported_tensors
 from modelopt.torch.export.quant_format import KV_CACHE_FP8, KV_CACHE_FP8_K_NVFP4_V, KV_CACHE_NVFP4
 from modelopt.torch.export.quant_utils import (
     _get_kv_cache_postprocess_config,
@@ -169,7 +169,7 @@ def test_meta_guard_not_raised_for_real_weight():
 
 
 # ---------------------------------------------------------------------------
-# release_exported_tensors
+# _release_exported_tensors
 # ---------------------------------------------------------------------------
 
 
@@ -184,7 +184,7 @@ def test_release_exported_tensors_drops_what_the_offload_window_leaves():
     hook = layer.self_attn._hf_hook
     assert hook.offload_buffers is False
 
-    with release_exported_tensors(layer):
+    with _release_exported_tensors(layer):
         hook.pre_forward(layer.self_attn)
         _export_quantized_weight(layer.self_attn, torch.float32)
         assert layer.self_attn.weight_scale.device.type != "meta"

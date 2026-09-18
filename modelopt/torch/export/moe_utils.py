@@ -231,20 +231,20 @@ def _export_fused_experts(
         module.add_module(expert_name, expert)
         expert_names.append(expert_name)
 
+    module._modelopt_exported_expert_children = tuple(expert_names)
+
     # 4. Remove fused params and quantizer lists — replaced by per-expert submodules
     _delete_fused_moe_source_attrs(module)
 
-    module._modelopt_exported_expert_children = tuple(expert_names)
-
 
 @contextmanager
-def release_exported_tensors(root: nn.Module):
+def _release_exported_tensors(root: nn.Module):
     """Drop what the export pass adds to ``root``, once the block has persisted it.
 
     The handlers register scale buffers on ``root``'s existing sub-modules and
     :func:`_export_fused_experts` attaches per-expert holders; an accelerate offload window
-    reclaims neither, so running the pass once per layer accumulates them. Nothing is
-    released if the block raises.
+    reclaims neither, so running the pass once per layer accumulates them. An export that
+    raises releases nothing, leaving the layer intact to be inspected.
     """
     buffers_before = {name: set(mod._buffers) for name, mod in root.named_modules()}
 
@@ -252,9 +252,7 @@ def release_exported_tensors(root: nn.Module):
 
     _release_exported_fused_experts(root)
     for name, module in root.named_modules():
-        before = buffers_before.get(name)
-        if before is None:
-            continue
+        before = buffers_before.get(name, set())
         for buf_name in set(module._buffers) - before:
             module._buffers[buf_name] = None
 

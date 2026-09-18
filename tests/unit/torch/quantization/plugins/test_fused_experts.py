@@ -26,7 +26,7 @@ from _test_utils.torch.quantization.tied_modules import tie_fused_experts_3d_par
 
 import modelopt.torch.quantization as mtq
 import modelopt.torch.quantization.nn.modules.tensor_quantizer as tensor_quantizer_module
-from modelopt.torch.export.moe_utils import _export_fused_experts, release_exported_tensors
+from modelopt.torch.export.moe_utils import _export_fused_experts, _release_exported_tensors
 from modelopt.torch.export.quant_utils import get_quant_config, get_quantization_format
 from modelopt.torch.quantization.config import QuantizerAttributeConfig
 from modelopt.torch.quantization.conversion import _normalize_fused_experts_quantizer_name
@@ -481,7 +481,7 @@ class TestExportFusedExperts:
         mtq.quantize(model, quant_cfg, forward_loop=forward_loop)
         converted = model.moe.experts
 
-        with release_exported_tensors(converted):
+        with _release_exported_tensors(converted):
             _export_fused_experts(converted, torch.float16)
 
             # Verify per-expert submodules exist
