@@ -1547,8 +1547,9 @@ def _four_over_six_numerics_problem(cfg: Any) -> str | None:
         num_bits, block_sizes = cfg.get("num_bits"), cfg.get("block_sizes") or {}
     else:
         num_bits, block_sizes = cfg.num_bits, cfg.block_sizes or {}
-    # The config-level spelling of TensorQuantizer.is_nvfp4_static; an absent `type` is
-    # static there too, since is_static_block_quant tests != "dynamic".
+    # TensorQuantizer.is_nvfp4_static minus its `_fake_quant` term, which is a runtime
+    # state compress flips rather than a property of the config. An absent `type` is static
+    # there too, since is_static_block_quant tests != "dynamic".
     scale_bits, block_type = block_sizes.get("scale_bits"), block_sizes.get("type")
     is_static = block_type in (None, "static")
     if (_as_exmy(num_bits), is_static, _as_exmy(scale_bits)) == ((2, 1), True, (4, 3)):

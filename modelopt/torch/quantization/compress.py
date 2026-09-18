@@ -59,29 +59,37 @@ def _reject_unsupported_real_quant_formats(model: nn.Module) -> None:
     view and gate reports every offender up front without rejecting layers that would have
     been skipped anyway.
     """
-    offenders = []
+    offenders, any_four_over_six = [], False
     with SequentialQuantizer.convert_to_single_quantizer(model):
         for name, module in model.named_modules():
-            # Mirrors _compress_and_update_module_weight's gate in pack_real_quantize_weight.
             weight = getattr(module, "weight", None)
             quantizer = getattr(module, "weight_quantizer", None)
             if (
-                weight is None
+                name == ""  # pack_real_quantize_weight skips the root module
+                or weight is None
                 or weight.is_meta
+                or weight.numel() == 0
                 or weight.element_size() <= 1
                 or not isinstance(quantizer, TensorQuantizer)
                 or not quantizer.is_enabled
+                or not quantizer._if_quant
                 or quantizer._fake_quant
                 or quantizer._is_real_quantize_support()
             ):
                 continue
             offenders.append(f"{name}.weight_quantizer")
+            any_four_over_six |= quantizer.is_four_over_six
     if offenders:
         raise NotImplementedError(
             "mtq.compress does not support the quantization format of these weight "
             f"quantizers: {offenders}. Use mtq.quantize + export instead, or exclude them "
-            "with the compress config. (NVFP4 Four-Over-Six is one such format: the "
-            "per-block M=4/M=6 choice baked into amax is not preserved by real quantization.)"
+            "with the compress config."
+            + (
+                " NVFP4 Four-Over-Six is one such format: the per-block M=4/M=6 choice "
+                "baked into amax is not preserved by real quantization."
+                if any_four_over_six
+                else ""
+            )
         )
 
 
