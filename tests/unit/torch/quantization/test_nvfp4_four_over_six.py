@@ -24,10 +24,15 @@ from types import SimpleNamespace
 
 import pytest
 import torch
-from pydantic import ValidationError
 
 import modelopt.torch.quantization as mtq
-from modelopt.torch.quantization.config import QuantizeConfig, QuantizerAttributeConfig, choices
+from modelopt.torch.quantization.config import (
+    QuantizeConfig,
+    QuantizerAttributeConfig,
+    choices,
+    four_over_six_config_problems,
+    normalize_quant_cfg_list,
+)
 from modelopt.torch.quantization.nn import NVFP4StaticQuantizer
 from modelopt.torch.quantization.qtensor.nvfp4_tensor import NVFP4QTensor
 from modelopt.torch.quantization.utils.numeric_utils import E2M1_MAX, E4M3_MAX, E4M3_MAX_46
@@ -271,38 +276,61 @@ class TestFourOverSixIsTheLegacyStanzaOnCPU:
 
 
 class TestFourOverSixCoordination:
-    """Neither half of 4/6 is useful alone, so a config carrying only one is rejected."""
+    """Neither half of 4/6 is useful alone, so a config carrying only one is rejected.
+
+    Config construction only warns: it also runs on the restore path, where the mismatch is
+    not actionable and raising would make an already-saved checkpoint unloadable.
+    ``mtq.quantize`` is where it is enforced.
+    """
+
+    @staticmethod
+    def _problems(quant_cfg, algorithm):
+        return four_over_six_config_problems(normalize_quant_cfg_list(quant_cfg), algorithm)
 
     def test_flag_requires_static_nvfp4(self):
-        with pytest.raises(ValidationError, match="only supported on static NVFP4"):
-            QuantizerAttributeConfig(
-                num_bits=(2, 1),
-                block_sizes={
-                    -1: BLOCK_SIZE,
-                    "type": "dynamic",
-                    "scale_bits": (4, 3),
-                    "four_over_six": True,
-                },
-            )
+        assert self._problems(
+            _weight_only_quant_cfg(
+                {
+                    "num_bits": (2, 1),
+                    "block_sizes": {
+                        -1: BLOCK_SIZE,
+                        "type": "dynamic",
+                        "scale_bits": (4, 3),
+                        "four_over_six": True,
+                    },
+                }
+            ),
+            "four_over_six",
+        )
 
     def test_flag_requires_e2m1(self):
-        with pytest.raises(ValidationError, match="only supported on static NVFP4"):
-            QuantizerAttributeConfig(
-                num_bits=(4, 3),
-                block_sizes={
-                    -1: BLOCK_SIZE,
-                    "type": "static",
-                    "scale_bits": (4, 3),
-                    "four_over_six": True,
-                },
-            )
+        problems = self._problems(
+            _weight_only_quant_cfg(
+                {
+                    "num_bits": (4, 3),
+                    "block_sizes": {
+                        -1: BLOCK_SIZE,
+                        "type": "static",
+                        "scale_bits": (4, 3),
+                        "four_over_six": True,
+                    },
+                }
+            ),
+            "four_over_six",
+        )
+        assert any("num_bits" in p for p in problems)
 
-    def test_flag_requires_e4m3_scale_bits(self):
-        with pytest.raises(ValidationError, match="only supported on static NVFP4"):
-            QuantizerAttributeConfig(
-                num_bits=(2, 1),
-                block_sizes={-1: BLOCK_SIZE, "type": "static", "four_over_six": True},
-            )
+    def test_flag_is_accepted_when_type_is_omitted(self):
+        """An absent ``type`` is static: is_static_block_quant tests ``!= "dynamic"``."""
+        assert not self._problems(
+            _weight_only_quant_cfg(
+                {
+                    "num_bits": (2, 1),
+                    "block_sizes": {-1: BLOCK_SIZE, "scale_bits": (4, 3), "four_over_six": True},
+                }
+            ),
+            "four_over_six",
+        )
 
     def test_flag_accepts_the_exmy_string_spelling(self):
         """Recipe YAML arrives as tuples, but the Python API keeps whatever was written."""
@@ -317,9 +345,14 @@ class TestFourOverSixCoordination:
         )
         assert cfg.block_sizes["four_over_six"]
 
-    def test_flag_without_a_weight_scale_search_is_rejected(self):
+    def test_flag_without_a_weight_scale_search_is_reported(self):
         """`max` never makes the M=6/M=4 choice, so the 256 normalization buys nothing."""
-        with pytest.raises(ValidationError, match="never searches weight scales"):
+        problems = self._problems(_weight_only_quant_cfg(NVFP4_FOUR_OVER_SIX_ATTRS), "max")
+        assert any("never searches weight scales" in p for p in problems)
+
+    def test_config_construction_warns_rather_than_raises(self):
+        """Raising here would make a pre-existing checkpoint unloadable on restore."""
+        with pytest.warns(UserWarning, match="never searches weight scales"):
             QuantizeConfig(
                 quant_cfg=_weight_only_quant_cfg(NVFP4_FOUR_OVER_SIX_ATTRS), algorithm="max"
             )
@@ -329,9 +362,7 @@ class TestFourOverSixCoordination:
         ["four_over_six", "mse", "local_hessian", LEGACY_FOUR_OVER_SIX_STANZA, ["awq_lite", "mse"]],
     )
     def test_flag_with_a_weight_scale_search_is_accepted(self, algorithm):
-        QuantizeConfig(
-            quant_cfg=_weight_only_quant_cfg(NVFP4_FOUR_OVER_SIX_ATTRS), algorithm=algorithm
-        )
+        assert not self._problems(_weight_only_quant_cfg(NVFP4_FOUR_OVER_SIX_ATTRS), algorithm)
 
     @pytest.mark.parametrize(
         "algorithm",
@@ -339,80 +370,102 @@ class TestFourOverSixCoordination:
             {"method": "nvfp4_act_headroom", "weight_scale_algorithm": {"method": "four_over_six"}},
             {"method": "nvfp4_act_headroom", "weight_scale_algorithm": {"method": "mse"}},
             {"method": "lsq", "scale_algorithm": {"method": "mse"}},
+            "lsq",
+            {"method": "lsq", "scale_algorithm": None},
         ],
     )
     def test_a_bundled_weight_scale_search_satisfies_the_flag(self, algorithm):
         """`nvfp4_act_headroom` and `lsq` run their weight-scale search one level down."""
-        QuantizeConfig(
-            quant_cfg=_weight_only_quant_cfg(NVFP4_FOUR_OVER_SIX_ATTRS), algorithm=algorithm
-        )
-
-    def test_a_bundled_max_does_not_satisfy_the_flag(self):
-        with pytest.raises(ValidationError, match="never searches weight scales"):
-            QuantizeConfig(
-                quant_cfg=_weight_only_quant_cfg(NVFP4_FOUR_OVER_SIX_ATTRS),
-                algorithm={
-                    "method": "nvfp4_act_headroom",
-                    "weight_scale_algorithm": {"method": "max"},
-                },
-            )
-
-    def test_a_bundled_four_over_six_still_requires_the_flag(self):
-        with pytest.raises(ValidationError, match="no enabled quant_cfg entry sets"):
-            QuantizeConfig(
-                quant_cfg=_weight_only_quant_cfg(NVFP4_STATIC_ATTRS),
-                algorithm={
-                    "method": "nvfp4_act_headroom",
-                    "weight_scale_algorithm": {"method": "four_over_six"},
-                },
-            )
-
-    def test_flag_is_accepted_when_type_is_omitted(self):
-        """An absent ``type`` is static: is_static_block_quant tests ``!= "dynamic"``."""
-        cfg = QuantizerAttributeConfig(
-            num_bits=(2, 1),
-            block_sizes={-1: BLOCK_SIZE, "scale_bits": (4, 3), "four_over_six": True},
-        )
-        assert cfg.block_sizes["four_over_six"]
-
-    @pytest.mark.parametrize(
-        "algorithm", ["lsq", {"method": "lsq"}, {"method": "lsq", "scale_algorithm": None}]
-    )
-    def test_lsq_defaults_its_bundled_search_to_mse(self, algorithm):
-        """``_run_weight_scale_calibration`` substitutes mse for an unset scale_algorithm."""
-        QuantizeConfig(
-            quant_cfg=_weight_only_quant_cfg(NVFP4_FOUR_OVER_SIX_ATTRS), algorithm=algorithm
-        )
+        assert not self._problems(_weight_only_quant_cfg(NVFP4_FOUR_OVER_SIX_ATTRS), algorithm)
 
     @pytest.mark.parametrize(
         "algorithm",
         ["nvfp4_act_headroom", {"method": "nvfp4_act_headroom", "weight_scale_algorithm": None}],
     )
     def test_act_headroom_defaults_its_bundled_search_to_max(self, algorithm):
-        """Its default really is max, which never makes the M=6/M=4 choice."""
-        with pytest.raises(ValidationError, match="never searches weight scales"):
-            QuantizeConfig(
-                quant_cfg=_weight_only_quant_cfg(NVFP4_FOUR_OVER_SIX_ATTRS), algorithm=algorithm
-            )
+        assert self._problems(_weight_only_quant_cfg(NVFP4_FOUR_OVER_SIX_ATTRS), algorithm)
 
     def test_flag_on_a_disabled_entry_does_not_constrain_the_algorithm(self):
         cfg = _weight_only_quant_cfg(NVFP4_FOUR_OVER_SIX_ATTRS)
         cfg[-1]["enable"] = False
-        QuantizeConfig(quant_cfg=cfg, algorithm="max")
+        assert not self._problems(cfg, "max")
 
-    def test_algorithm_without_the_flag_is_rejected(self):
+    def test_algorithm_without_the_flag_is_reported(self):
         """Searching M=4 while the scales are normalized by 448 encodes those blocks wrongly."""
-        with pytest.raises(ValidationError, match="no enabled quant_cfg entry sets"):
-            QuantizeConfig(
-                quant_cfg=_weight_only_quant_cfg(NVFP4_STATIC_ATTRS), algorithm="four_over_six"
-            )
+        problems = self._problems(_weight_only_quant_cfg(NVFP4_STATIC_ATTRS), "four_over_six")
+        assert any("no enabled quant_cfg entry sets" in p for p in problems)
 
     def test_plain_mse_is_unaffected_by_either_rule(self):
-        QuantizeConfig(quant_cfg=_weight_only_quant_cfg(NVFP4_STATIC_ATTRS), algorithm="mse")
+        assert not self._problems(_weight_only_quant_cfg(NVFP4_STATIC_ATTRS), "mse")
 
     def test_shipped_preset_uses_the_named_algorithm(self):
         assert mtq.NVFP4_FOUR_OVER_SIX_CFG["algorithm"] == "four_over_six"
-        QuantizeConfig(**mtq.NVFP4_FOUR_OVER_SIX_CFG)
+        cfg = QuantizeConfig(**mtq.NVFP4_FOUR_OVER_SIX_CFG)
+        assert not four_over_six_config_problems(cfg.quant_cfg, cfg.algorithm)
+
+
+class TestFourOverSixIsEnforcedAtQuantizeTime:
+    """The rules raise where the calibration intent is actionable -- and only there."""
+
+    @staticmethod
+    def _quantized_46_state(monkeypatch):
+        import modelopt.torch.opt as mto
+        import modelopt.torch.quantization.nn.modules.tensor_quantizer as tqm
+
+        monkeypatch.setattr(tqm, "static_blockwise_fp4_fake_quant", _reference_static_fp4)
+        torch.manual_seed(0)
+        model = torch.nn.Sequential(torch.nn.Linear(4 * BLOCK_SIZE, 4 * BLOCK_SIZE))
+        mtq.quantize(
+            model,
+            {
+                "quant_cfg": _weight_only_quant_cfg(NVFP4_FOUR_OVER_SIX_ATTRS),
+                "algorithm": "four_over_six",
+            },
+            lambda m: m(torch.randn(4, 4 * BLOCK_SIZE)),
+        )
+        return mto.modelopt_state(model)
+
+    def test_quantize_raises_on_a_half_configured_model(self, monkeypatch):
+        import modelopt.torch.quantization.nn.modules.tensor_quantizer as tqm
+
+        monkeypatch.setattr(tqm, "static_blockwise_fp4_fake_quant", _reference_static_fp4)
+        torch.manual_seed(0)
+        model = torch.nn.Sequential(torch.nn.Linear(4 * BLOCK_SIZE, 4 * BLOCK_SIZE))
+        with pytest.raises(ValueError, match="never searches weight scales"):
+            mtq.quantize(
+                model,
+                {
+                    "quant_cfg": _weight_only_quant_cfg(NVFP4_FOUR_OVER_SIX_ATTRS),
+                    "algorithm": "max",
+                },
+                lambda m: m(torch.randn(4, 4 * BLOCK_SIZE)),
+            )
+
+    def test_a_checkpoint_saved_with_the_old_pairing_still_restores(self, monkeypatch):
+        """Pre-PR ``get_auto_quantize_config`` emitted the flag with ``algorithm="max"``.
+
+        Restore has no calibration to fix, so raising there would strand the checkpoint.
+        """
+        import modelopt.torch.opt as mto
+
+        state = self._quantized_46_state(monkeypatch)
+        for mode_name, mode_state in state["modelopt_state_dict"]:
+            if mode_name == "quantize":
+                mode_state["config"]["algorithm"] = "max"
+
+        torch.manual_seed(0)
+        fresh = torch.nn.Sequential(torch.nn.Linear(4 * BLOCK_SIZE, 4 * BLOCK_SIZE))
+        with pytest.warns(UserWarning, match="never searches weight scales"):
+            mto.restore_from_modelopt_state(fresh, state)
+
+    def test_a_four_over_six_checkpoint_round_trips(self, monkeypatch):
+        import modelopt.torch.opt as mto
+
+        state = self._quantized_46_state(monkeypatch)
+        torch.manual_seed(0)
+        fresh = torch.nn.Sequential(torch.nn.Linear(4 * BLOCK_SIZE, 4 * BLOCK_SIZE))
+        mto.restore_from_modelopt_state(fresh, state)
+        assert fresh[0].weight_quantizer.is_four_over_six
 
 
 class TestAutoQuantizeConfigStaysValid:

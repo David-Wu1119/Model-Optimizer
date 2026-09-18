@@ -41,7 +41,7 @@ from modelopt.torch.utils import atomic_print
 from ._auto_quantize_cost import COST_MODEL_KV_CACHE
 from .algorithms import AutoQuantizeGradientSearcher, AutoQuantizeKLDivSearcher, QuantRecipe
 from .algorithms import get_auto_quantize_config as _get_auto_quantize_config
-from .config import QuantizeAlgoCfgType
+from .config import QuantizeAlgoCfgType, four_over_six_config_problems
 from .kv_cache_auto_quant import AutoQuantizeKVSearcher, get_kv_cache_auto_quantize_config
 from .kv_cache_auto_quant import _validate_search_inputs as _validate_kv_cache_search_inputs
 from .mode import QuantizeModeRegistry, get_modelike_from_algo_cfg
@@ -333,6 +333,9 @@ def quantize(
         set_quantizer_by_cfg(model, quantize_config.quant_cfg)
     # Fail before calibration rather than after exporting an unquantized checkpoint.
     _check_weight_quantization_took_effect(model, quantize_config)
+    problems = four_over_six_config_problems(quantize_config.quant_cfg, quantize_config.algorithm)
+    if problems:
+        raise ValueError("NVFP4 four_over_six config is inconsistent:\n  " + "\n  ".join(problems))
     return calibrate(model, config.get("algorithm"), forward_loop=forward_loop)
 
 

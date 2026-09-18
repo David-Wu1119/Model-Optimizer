@@ -22,7 +22,7 @@ import types
 import warnings
 from abc import ABC, abstractmethod
 from collections import defaultdict
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from contextlib import ExitStack, nullcontext
 from typing import Any
 
@@ -50,7 +50,7 @@ from ._auto_quantize_cost import (
     get_auto_quantize_cost_model,
     normalize_auto_quantize_constraints,
 )
-from .config import QuantizeConfig, QuantizerAttributeConfig, QuantizerCfgEntry
+from .config import QuantizeConfig, QuantizerAttributeConfig, QuantizerCfgEntry, has_four_over_six
 from .conversion import set_quantizer_by_cfg
 from .nn import QuantLinearConvBase, QuantModule, SequentialQuantizer, TensorQuantizer
 from .utils import is_quantized_linear
@@ -2172,10 +2172,18 @@ def get_auto_quantize_config(search_state, constraints=None, verbose=False):
     # For 4/6, "max" is not a downgrade but wrong -- the flag normalizes the FP8 scales by
     # 256 on the assumption something picks M=4 -- and QuantizeConfig rejects the pairing.
     algorithm = "four_over_six" if _has_four_over_six(quant_cfg) else "max"
+    note = (
+        " four_over_six runs its two-point MSE weight-amax search on every weight quantizer,"
+        " including the non-4/6 layers this search assigned other formats; set"
+        " config['algorithm'] explicitly to avoid that."
+        if algorithm == "four_over_six"
+        else ""
+    )
     warnings.warn(
         f"get_auto_quantize_config: returned config uses algorithm={algorithm!r}. "
         "Per-recipe calibration algorithms (e.g. smoothquant, awq) are not preserved. "
         "Update config['algorithm'] if a different calibration algorithm is needed (e.g. 'gptq')."
+        + note
     )
     return {"quant_cfg": quant_cfg, "algorithm": algorithm}
 
@@ -2186,11 +2194,7 @@ def _has_four_over_six(quant_cfg: list[dict]) -> bool:
         if entry.get("enable") is False:
             continue
         cfg = entry.get("cfg")
-        levels = cfg if isinstance(cfg, list) else [cfg]
-        if any(
-            isinstance(level, Mapping) and (level.get("block_sizes") or {}).get("four_over_six")
-            for level in levels
-        ):
+        if any(has_four_over_six(level) for level in (cfg if isinstance(cfg, list) else [cfg])):
             return True
     return False
 

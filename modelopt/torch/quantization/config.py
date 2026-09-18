@@ -333,27 +333,6 @@ def _as_exmy(value: Any) -> tuple[int, int] | None:
     return None
 
 
-def _validate_four_over_six_numerics(block_sizes: dict, num_bits: Any) -> None:
-    """Reject the ``four_over_six`` flag on numerics where it is silently inert.
-
-    Its whole effect -- normalizing the per-block FP8 scales by 256 instead of 448 -- is
-    read only on the static NVFP4 fake-quant and export paths.
-    """
-    if not block_sizes.get("four_over_six"):
-        return
-    # The config-level spelling of TensorQuantizer.is_nvfp4_static; an absent `type` is
-    # static there too, since is_static_block_quant tests != "dynamic".
-    scale_bits, block_type = block_sizes.get("scale_bits"), block_sizes.get("type")
-    is_static = block_type in (None, "static")
-    if (_as_exmy(num_bits), is_static, _as_exmy(scale_bits)) != ((2, 1), True, (4, 3)):
-        raise ValueError(
-            "block_sizes['four_over_six'] is only supported on static NVFP4 weight quantizers "
-            "(num_bits e2m1, type 'static', scale_bits e4m3), because its only effect is to "
-            "normalize the per-block FP8 scales by 256 instead of 448 on that path. Got "
-            f"num_bits={num_bits!r}, type={block_type!r}, scale_bits={scale_bits!r}."
-        )
-
-
 class QuantizerAttributeConfig(ModeloptBaseConfig):
     """Quantizer attribute type."""
 
@@ -599,7 +578,6 @@ class QuantizerAttributeConfig(ModeloptBaseConfig):
                 assert _k in ["type", "scale_bits", "scale_block_sizes", "four_over_six"]
             else:
                 assert isinstance(_k, int) and (_v is None or isinstance(_v, int))
-        _validate_four_over_six_numerics(v, info.data.get("num_bits"))
         return v
 
     @field_validator("bias")
@@ -1551,6 +1529,84 @@ def _algorithm_methods(algorithm: QuantizeAlgoCfgType) -> list[str | None]:
     return methods
 
 
+def has_four_over_six(cfg: Any) -> bool:
+    """True if a quantizer attribute config (object or mapping) sets the 4/6 flag."""
+    if cfg is None:
+        return False
+    block_sizes = cfg.get("block_sizes") if isinstance(cfg, Mapping) else cfg.block_sizes
+    return bool(block_sizes and block_sizes.get("four_over_six"))
+
+
+def _four_over_six_numerics_problem(cfg: Any) -> str | None:
+    """Describe why the 4/6 flag is inert on this quantizer's numerics, or None if it isn't.
+
+    Its whole effect -- normalizing the per-block FP8 scales by 256 instead of 448 -- is
+    read only on the static NVFP4 fake-quant and export paths.
+    """
+    if isinstance(cfg, Mapping):
+        num_bits, block_sizes = cfg.get("num_bits"), cfg.get("block_sizes") or {}
+    else:
+        num_bits, block_sizes = cfg.num_bits, cfg.block_sizes or {}
+    # The config-level spelling of TensorQuantizer.is_nvfp4_static; an absent `type` is
+    # static there too, since is_static_block_quant tests != "dynamic".
+    scale_bits, block_type = block_sizes.get("scale_bits"), block_sizes.get("type")
+    is_static = block_type in (None, "static")
+    if (_as_exmy(num_bits), is_static, _as_exmy(scale_bits)) == ((2, 1), True, (4, 3)):
+        return None
+    return (
+        "block_sizes['four_over_six'] is only supported on static NVFP4 weight quantizers "
+        "(num_bits e2m1, type 'static', scale_bits e4m3), because its only effect is to "
+        "normalize the per-block FP8 scales by 256 instead of 448 on that path. Got "
+        f"num_bits={num_bits!r}, type={block_type!r}, scale_bits={scale_bits!r}."
+    )
+
+
+def four_over_six_config_problems(quant_cfg, algorithm: QuantizeAlgoCfgType) -> list[str]:
+    """Report every way a config has one half of NVFP4 4/6 without the other.
+
+    Either alone is silently wrong: the flag without a search pays for headroom nothing
+    uses, and the search without the flag encodes the M=4 blocks against the wrong
+    normalization.
+
+    ``quant_cfg`` is last-wins layered, so without a model we cannot tell which entry owns
+    a given quantizer; the flag scan is presence-based over entries that are not explicitly
+    disabled.
+    """
+    problems, flagged = [], []
+    for entry in quant_cfg:
+        cfg = entry.get("cfg") if isinstance(entry, Mapping) else entry.cfg
+        enabled = entry.get("enable", True) if isinstance(entry, Mapping) else entry.enable
+        name = entry.get("quantizer_name") if isinstance(entry, Mapping) else entry.quantizer_name
+        if not enabled or cfg is None:
+            continue
+        # A SequentialQuantizer entry carries one attribute config per level.
+        for level in cfg if isinstance(cfg, list) else [cfg]:
+            if not has_four_over_six(level):
+                continue
+            flagged.append(name)
+            problem = _four_over_six_numerics_problem(level)
+            if problem:
+                problems.append(f"{name}: {problem}")
+
+    methods = _algorithm_methods(algorithm)
+    if flagged and not (set(methods) & _FOUR_OVER_SIX_CAPABLE_ALGORITHMS):
+        problems.append(
+            f"quant_cfg enables four_over_six on {flagged}, but algorithm {algorithm!r} "
+            "never searches weight scales, so the per-block M=6/M=4 choice is never made. "
+            "The quantizer pays the 256 FP8 normalization and gets nothing for it. Use "
+            f"algorithm 'four_over_six' (or one of {sorted(_FOUR_OVER_SIX_CAPABLE_ALGORITHMS)}), "
+            "or drop the four_over_six flag."
+        )
+    if "four_over_six" in methods and not flagged:
+        problems.append(
+            "algorithm 'four_over_six' searches the per-block M=6/M=4 choice, but no enabled "
+            "quant_cfg entry sets block_sizes['four_over_six'], so the resulting per-block FP8 "
+            "scales would be normalized by 448 and the M=4 blocks encoded wrongly. Add "
+            "four_over_six: true to the static NVFP4 weight quantizers, or use algorithm 'mse'."
+        )
+    return problems
+
+
 def normalize_quant_cfg_list(
     v: RawQuantizeQuantCfgType | DeprecatedQuantCfgType,
 ) -> list[QuantizerCfgEntry]:
@@ -1724,47 +1780,15 @@ class QuantizeConfig(ModeloptBaseConfig):
         return normalize_quant_cfg_list(v)
 
     @model_validator(mode="after")
-    def _validate_four_over_six_coordination(self):
-        """Require the two halves of NVFP4 4/6 to agree.
+    def _warn_on_four_over_six_mismatch(self):
+        """Warn here, raise in :func:`mtq.quantize`.
 
-        Either alone is silently wrong: the flag without a search pays for headroom nothing
-        uses, and the search without the flag encodes the M=4 blocks against the wrong
-        normalization.
-
-        ``quant_cfg`` is last-wins layered, so without a model we cannot tell which entry
-        owns a given quantizer; both checks are presence-based over entries that are not
-        explicitly disabled.
+        This validator also runs when a stored config is reconstructed on the restore path,
+        where the mismatch is not actionable and raising would make an already-saved
+        checkpoint unloadable. Enforcement lives at the quantize boundary instead.
         """
-        flagged = []
-        for entry in self.quant_cfg:
-            if not entry.enable or entry.cfg is None:
-                continue
-            # A SequentialQuantizer entry carries one attribute config per level.
-            levels = entry.cfg if isinstance(entry.cfg, list) else [entry.cfg]
-            # isinstance is redundant at runtime; the mypy hook has no pydantic stubs.
-            if any(
-                isinstance(level, QuantizerAttributeConfig)
-                and (level.block_sizes or {}).get("four_over_six")
-                for level in levels
-            ):
-                flagged.append(entry.quantizer_name)
-        methods = _algorithm_methods(self.algorithm)
-
-        if flagged and not (set(methods) & _FOUR_OVER_SIX_CAPABLE_ALGORITHMS):
-            raise ValueError(
-                f"quant_cfg enables four_over_six on {flagged}, but algorithm {self.algorithm!r} "
-                "never searches weight scales, so the per-block M=6/M=4 choice is never made. "
-                "The quantizer pays the 256 FP8 normalization and gets nothing for it. Use "
-                f"algorithm 'four_over_six' (or one of {sorted(_FOUR_OVER_SIX_CAPABLE_ALGORITHMS)}), "
-                "or drop the four_over_six flag."
-            )
-        if "four_over_six" in methods and not flagged:
-            raise ValueError(
-                "algorithm 'four_over_six' searches the per-block M=6/M=4 choice, but no enabled "
-                "quant_cfg entry sets block_sizes['four_over_six'], so the resulting per-block FP8 "
-                "scales would be normalized by 448 and the M=4 blocks encoded wrongly. Add "
-                "four_over_six: true to the static NVFP4 weight quantizers, or use algorithm 'mse'."
-            )
+        for problem in four_over_six_config_problems(self.quant_cfg, self.algorithm):
+            warnings.warn(f"NVFP4 four_over_six: {problem}")
         return self
 
 
