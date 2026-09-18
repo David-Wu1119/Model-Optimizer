@@ -83,7 +83,10 @@ jobs:
     if: needs.check-file-changes.outputs.any_changed == 'true'
     needs: [linux, check-file-changes]
     runs-on: windows-latest
-    timeout-minutes: 15
+    # 15 while this job only ran the suite once. The 0xc000001d diagnosis reruns it at a capped
+    # oneDNN ISA when it crashes, which needs room for a second pass. Revert to 15 once the
+    # crash is understood and the diagnostic steps come out.
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
@@ -104,21 +107,20 @@ jobs:
         run: |
           Get-CimInstance Win32_Processor | Select-Object Name, Description, NumberOfCores | Format-List
           python -c "import platform; print('machine:', platform.machine(), platform.processor())"
-      - name: Enable crash dumps
+      - name: Install a postmortem debugger that catches any crashing process
         continue-on-error: true
         shell: pwsh
         run: |
-          # WER local dumps. The Python-level faulthandler output does not identify the module --
-          # it prints parked background threads while the main thread's native frame is lost as
-          # the process dies. A minidump names the faulting DLL and offset outright.
+          # WER LocalDumps was tried here first and produced nothing, and procdump launched as a
+          # parent produced nothing either -- it wrapped the nox process while the crash was in
+          # the pytest child. `procdump -i` installs procdump as the system postmortem debugger
+          # (AeDebug), so it catches whichever process actually dies, anywhere in the tree.
           $d = "$env:GITHUB_WORKSPACE\crashdumps"
           New-Item -ItemType Directory -Force -Path $d | Out-Null
-          $k = "HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps"
-          New-Item -Path $k -Force | Out-Null
-          Set-ItemProperty -Path $k -Name DumpFolder -Value $d -Type ExpandString
-          Set-ItemProperty -Path $k -Name DumpType -Value 2 -Type DWord
-          Set-ItemProperty -Path $k -Name DumpCount -Value 5 -Type DWord
+          choco install procdump -y --no-progress | Out-Null
+          procdump -accepteula -ma -i $d
       - name: Run unit tests (without coverage)
+        id: unit
         # PEP 540 UTF-8 mode. Windows defaults text I/O to the locale codepage (cp1252 on these
         # runners), so any read of a UTF-8 file without an explicit encoding= dies with
         # UnicodeDecodeError on the first non-Latin-1 byte -- a failure no other platform sees.
@@ -132,55 +134,69 @@ jobs:
           PYTHONFAULTHANDLER: "1"
         run: pip install nox uv && nox -s "unit-3.12(torch_214, tf_latest)"
       # --- 0xc000001d diagnosis -------------------------------------------------------------
-      # What the last run established: the fault is deterministic, not intermittent. It is always
-      # test_fp8_export_rejects_unsupported_dtype_conversion[mixed-format], and the three sibling
-      # parametrizations pass in the milliseconds before it. That case is the only one whose model
-      # is a bf16 128x128 Linear; the others quantize a 4x4 Linear. A bf16 GEMM of that size is
-      # where torch's CPU path hands off to oneDNN, which JIT-generates a kernel from runtime CPU
-      # detection. This runner is an Emerald Rapids Xeon (Family 6 Model 207), which advertises
-      # AMX-BF16 -- and AMX faults with #UD unless the hypervisor enabled its XSAVE tile state.
-      # #UD is STATUS_ILLEGAL_INSTRUCTION, raised in several oneDNN worker threads at once, which
-      # is why the faulthandler output was two threads interleaved over each other.
+      # Corrected picture, after sampling runs back to July. The crash is NOT deterministic and
+      # NOT specific to one test: it has landed on test_peft_save_restore (four times, Jul-Aug),
+      # test_unet_save_restore, and now test_fp8_export_rejects[mixed-format]. It appeared on
+      # five unrelated branches, so it is neither new nor anything a PR introduced. Within a
+      # single job it reproduces every time -- which is what made it look deterministic -- but
+      # that is because all attempts share one VM.
       #
-      # ATEN_CPU_CAPABILITY did not clear it and could not: it governs ATen's own vectorized
-      # kernels, not oneDNN's JIT. DNNL_MAX_CPU_ISA is the knob that does. This sweep runs the one
-      # crashing test at descending ISA ceilings -- the highest value that passes names the opcode
-      # family responsible, and becomes the fix.
+      # What it tracks is the CPU. The run that crashed drew an Intel Xeon 8573C (Emerald
+      # Rapids: AVX-512 and AMX). The very next run drew an AMD EPYC 7763 (Zen 3: neither) and
+      # the whole suite passed, including the test that had just crashed three times in a row.
+      # So the suspect is native code dispatching to an AVX-512 or AMX path on Intel hosts, most
+      # likely AMX -- its tile instructions fault with #UD, which is exactly 0xc000001d, unless
+      # the hypervisor enabled XSAVE tile state, and that enablement varies across the fleet.
       #
-      # It calls pytest from the nox venv directly, because the `unit` session hardcodes
-      # `tests/unit` and drops posargs: that is why the previous probe silently ran the whole
-      # suite instead of the single test it named. exit=3221225501 is the crash, 0 pass, 1 fail.
-      - name: Which CPU ISA does the crash need
+      # ATEN_CPU_CAPABILITY was tried and did not help. It would not: it governs ATen's own
+      # kernels, while oneDNN JIT-generates its own from runtime detection. ONEDNN_MAX_CPU_ISA
+      # is the knob for that, and it is what the rerun below tests.
+      - name: What ISA did oneDNN actually select
         if: always()
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $venv = Get-ChildItem -Path "D:/tmp/.nox","C:/tmp/.nox","/tmp/.nox","$env:GITHUB_WORKSPACE/.nox" `
+                    -Directory -ErrorAction SilentlyContinue |
+                  Where-Object { $_.Name -like "unit-3-12*" } | Select-Object -First 1
+          if (-not $venv) { Write-Host "no nox venv -- nothing to report"; exit 0 }
+          $py = Join-Path $venv.FullName "Scripts\python.exe"
+          $env:ONEDNN_VERBOSE = "1"
+          # oneDNN prints its selected ISA once, when the first primitive is created. A bf16
+          # matmul is the cheapest way to force that and is the shape of op both crash sites run.
+          & $py -c "import torch; a=torch.randn(256,256,dtype=torch.bfloat16); b=torch.randn(256,256,dtype=torch.bfloat16); print('result', float((a@b).sum()))" 2>&1 |
+            Select-String -Pattern "onednn_verbose.*info|result" | ForEach-Object { $_.Line }
+          Remove-Item Env:\ONEDNN_VERBOSE -ErrorAction SilentlyContinue
+      - name: Does lowering the oneDNN ISA stop the crash
+        # Only worth the five minutes when the suite actually crashed -- and only the full suite
+        # is a proven reproducer. Running the single test in isolation passed on the AMD host,
+        # so a green single-test result would prove nothing either way.
+        if: always() && steps.unit.outcome == 'failure'
         continue-on-error: true
         shell: pwsh
         env:
           PYTHONUTF8: "1"
+          PYTHONUNBUFFERED: "1"
+          ONEDNN_MAX_CPU_ISA: "AVX2"
+          DNNL_MAX_CPU_ISA: "AVX2"
         run: |
-          $venv = Get-ChildItem -Path "C:/tmp/.nox","/tmp/.nox","$env:GITHUB_WORKSPACE/.nox" -Directory -ErrorAction SilentlyContinue |
-                  Where-Object { $_.Name -like "unit-3-12*" } | Select-Object -First 1
-          if (-not $venv) { Write-Host "no nox venv found -- nothing to probe"; exit 0 }
-          $py = Join-Path $venv.FullName "Scripts\python.exe"
-          Write-Host "venv python: $py"
-          & $py -c "import torch; print('torch', torch.__version__, 'mkldnn', torch.backends.mkldnn.is_available()); print([l for l in torch.__config__.show().splitlines() if 'CPU capability' in l or 'oneDNN' in l])"
-          $t = "tests/unit/torch/deploy/utils/test_torch_onnx_utils.py::test_fp8_export_rejects_unsupported_dtype_conversion[mixed-format]"
-          foreach ($isa in @("__unset__","AVX512_CORE_AMX","AVX512_CORE_BF16","AVX512_CORE","AVX2")) {
-            if ($isa -eq "__unset__") {
-              Remove-Item Env:\DNNL_MAX_CPU_ISA -ErrorAction SilentlyContinue
-              Remove-Item Env:\ONEDNN_MAX_CPU_ISA -ErrorAction SilentlyContinue
-            } else {
-              $env:DNNL_MAX_CPU_ISA = $isa
-              $env:ONEDNN_MAX_CPU_ISA = $isa
-            }
-            & $py -m pytest $t -o addopts= -q -p no:faulthandler > isa_out.txt 2>&1
-            $code = $LASTEXITCODE
-            Get-Content isa_out.txt -Tail 3 -ErrorAction SilentlyContinue
-            Write-Host "ISA=$isa exit=$code"
-          }
-          Remove-Item Env:\DNNL_MAX_CPU_ISA -ErrorAction SilentlyContinue
-          Remove-Item Env:\ONEDNN_MAX_CPU_ISA -ErrorAction SilentlyContinue
+          nox -s "unit-3.12(torch_214, tf_latest)"
+          # 3221225501 is 0xc000001d. 0 means capping the ISA fixed it, and the fix is this env
+          # var; 1 means ordinary test failures and the crash did not recur; 3221225501 means the
+          # ISA ceiling is not the mechanism and the dump below is the remaining lead.
+          Write-Host "full-suite-at-AVX2 exit=$LASTEXITCODE"
+      - name: Name the faulting module from the dump
+        if: always()
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          Get-ChildItem "$env:GITHUB_WORKSPACE\crashdumps" -ErrorAction SilentlyContinue |
+            Format-Table Name, Length
+          python -m pip install --quiet minidump
+          python .github/scripts/name_faulting_module.py "$env:GITHUB_WORKSPACE\crashdumps"
       - name: Upload crash dumps
-        if: failure()
+        # always(): the dump is the point of the run even when a later diagnostic step passes.
+        if: always()
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
