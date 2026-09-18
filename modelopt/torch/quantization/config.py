@@ -158,7 +158,7 @@ from typing import Any, ClassVar, Literal, TypeAlias
 from pydantic import Field, ValidationInfo, field_serializer, field_validator, model_validator
 
 from modelopt.torch.opt.config import ModeloptBaseConfig, ModeloptField
-from modelopt.torch.opt.config_loader import load_config
+from modelopt.torch.opt.config_loader import _parse_exmy, load_config
 from modelopt.torch.utils.network import ConstructorLike
 
 
@@ -324,11 +324,12 @@ def _as_exmy(value: Any) -> tuple[int, int] | None:
 
     Both spellings reach the config: YAML goes through ``_parse_exmy_num_bits`` in the
     config loader and arrives as a tuple, while the Python API keeps whatever the caller
-    wrote (commonly the ``"e2m1"`` string).
+    wrote (commonly the ``"e2m1"`` string). Defers to the loader's parser so the two paths
+    cannot disagree about the ExMy grammar.
     """
     if isinstance(value, str):
-        match = re.fullmatch(r"[Ee](\d+)[Mm](\d+)", value)
-        return (int(match.group(1)), int(match.group(2))) if match else None
+        parsed = _parse_exmy(value)
+        return parsed if isinstance(parsed, tuple) else None
     if isinstance(value, (tuple, list)) and len(value) == 2:
         return (value[0], value[1]) if all(isinstance(v, int) for v in value) else None
     return None
@@ -342,23 +343,18 @@ def _validate_four_over_six_numerics(block_sizes: dict, num_bits: Any) -> None:
     the static NVFP4 fake-quant and export paths. On any other format the flag is silently
     inert, so the user gets none of 4/6 and no indication of why.
     """
-    if not block_sizes.get("four_over_six", False):
+    if not block_sizes.get("four_over_six"):
         return
-    problems = []
-    if _as_exmy(num_bits) != (2, 1):
-        problems.append(f"num_bits must be e2m1, got {num_bits!r}")
-    if block_sizes.get("type") != "static":
-        problems.append(f"block_sizes['type'] must be 'static', got {block_sizes.get('type')!r}")
-    if _as_exmy(block_sizes.get("scale_bits")) != (4, 3):
-        problems.append(
-            f"block_sizes['scale_bits'] must be e4m3, got {block_sizes.get('scale_bits')!r}"
-        )
-    if problems:
+    # The config-level spelling of TensorQuantizer.is_nvfp4_static. TODO: once block_sizes
+    # is a typed per-format model rather than a free dict, four_over_six becomes a field of
+    # the static-NVFP4 variant and this check goes away.
+    scale_bits, block_type = block_sizes.get("scale_bits"), block_sizes.get("type")
+    if (_as_exmy(num_bits), block_type, _as_exmy(scale_bits)) != ((2, 1), "static", (4, 3)):
         raise ValueError(
             "block_sizes['four_over_six'] is only supported on static NVFP4 weight quantizers "
             "(num_bits e2m1, type 'static', scale_bits e4m3), because its only effect is to "
-            "normalize the per-block FP8 scales by 256 instead of 448 on that path. Problems: "
-            + "; ".join(problems)
+            "normalize the per-block FP8 scales by 256 instead of 448 on that path. Got "
+            f"num_bits={num_bits!r}, type={block_type!r}, scale_bits={scale_bits!r}."
         )
 
 
@@ -1525,20 +1521,40 @@ QuantizeAlgoCfgType = _QuantizeAlgoCfgType | list[_QuantizeAlgoCfgType] | None
 _FOUR_OVER_SIX_CAPABLE_ALGORITHMS = frozenset({"four_over_six", "mse", "local_hessian"})
 
 
-def algorithm_methods(algorithm: QuantizeAlgoCfgType) -> list[str | None]:
-    """Return the calibration method name of every stage in an ``algorithm`` value.
+# Algorithms that bundle a weight-scale algorithm rather than running one themselves, so
+# the method that actually searches weight amax is nested one level down.
+_NESTED_SCALE_ALGORITHM_FIELDS = ("weight_scale_algorithm", "scale_algorithm")
+
+
+def _algorithm_methods(algorithm: QuantizeAlgoCfgType) -> list[str | None]:
+    """Return the calibration method name of every algorithm an ``algorithm`` value runs.
 
     ``algorithm`` is deliberately loosely typed (``str``, ``dict``, a
     :class:`QuantizeAlgorithmConfig`, or a list of those run in sequence), so anything that
     wants to reason about which algorithms will run has to destructure all four shapes.
+
+    Descends into the bundled weight-scale algorithms of ``nvfp4_act_headroom`` and ``lsq``
+    too: those run a full weight-scale search, so for any question about what will actually
+    be searched the nested method counts as much as the outer one.
     """
     if isinstance(algorithm, list):
-        return [method for stage in algorithm for method in algorithm_methods(stage)]
+        return [method for stage in algorithm for method in _algorithm_methods(stage)]
     if algorithm is None or isinstance(algorithm, str):
         return [algorithm]
-    if isinstance(algorithm, Mapping):
-        return [algorithm.get("method")]
-    return [getattr(algorithm, "method", None)]
+
+    def field(name):
+        return (
+            algorithm.get(name)
+            if isinstance(algorithm, Mapping)
+            else getattr(algorithm, name, None)
+        )
+
+    methods = [field("method")]
+    for nested_field in _NESTED_SCALE_ALGORITHM_FIELDS:
+        nested = field(nested_field)
+        if nested is not None:
+            methods += _algorithm_methods(nested)
+    return methods
 
 
 def normalize_quant_cfg_list(
@@ -1734,13 +1750,15 @@ class QuantizeConfig(ModeloptBaseConfig):
                 continue
             # A SequentialQuantizer entry carries one attribute config per level.
             levels = entry.cfg if isinstance(entry.cfg, list) else [entry.cfg]
+            # The isinstance is redundant at runtime -- pydantic has already coerced every
+            # level -- but the pre-commit mypy env has no pydantic stubs and widens `cfg`.
             if any(
                 isinstance(level, QuantizerAttributeConfig)
-                and (level.block_sizes or {}).get("four_over_six", False)
+                and (level.block_sizes or {}).get("four_over_six")
                 for level in levels
             ):
                 flagged.append(entry.quantizer_name)
-        methods = algorithm_methods(self.algorithm)
+        methods = _algorithm_methods(self.algorithm)
 
         if flagged and not (set(methods) & _FOUR_OVER_SIX_CAPABLE_ALGORITHMS):
             raise ValueError(

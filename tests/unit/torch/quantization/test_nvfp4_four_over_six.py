@@ -187,12 +187,6 @@ class TestFourOverSixAlgorithm:
         assert name == "four_over_six_calibrate"
         assert name in CalibrateModeRegistry
 
-    def test_config_constructs_with_all_defaults(self):
-        """``BaseCalibrateModeDescriptor.name`` instantiates the config class at import time."""
-        from modelopt.torch.quantization.config import FourOverSixCalibConfig
-
-        assert FourOverSixCalibConfig().method == "four_over_six"
-
     def test_config_does_not_expose_the_search_grid(self):
         """The whole point of the name: the multipliers cannot be retyped, so they cannot drift."""
         from modelopt.torch.quantization.config import FourOverSixCalibConfig
@@ -202,39 +196,25 @@ class TestFourOverSixAlgorithm:
             fields
         )
 
-    def test_multiplier_is_derived_from_the_e2m1_max(self):
-        from modelopt.torch.quantization.utils.numeric_utils import (
-            FOUR_OVER_SIX_M,
-            FOUR_OVER_SIX_MULTIPLIER,
-        )
+    def test_delegates_to_mse_with_the_two_46_candidates(self, monkeypatch):
+        """The grid handed to MSE is the legacy stanza, and it yields exactly {M=6, M=4}.
 
-        assert FOUR_OVER_SIX_M == 4.0
-        assert FOUR_OVER_SIX_MULTIPLIER == E2M1_MAX / 4.0 == 1.5
-
-    def test_delegates_to_mse_with_the_legacy_stanza(self, monkeypatch):
-        """The grid handed to MSE is exactly the stanza the shipped recipes used to spell out."""
+        Driven by what ``four_over_six_calibrate`` actually passes, not by literals, so it
+        fails if the derived grid ever stops being the two 4/6 candidates.
+        """
         import modelopt.torch.quantization.model_calib as mc
+        from modelopt.torch.quantization.calib import MseCalibrator
 
         captured = {}
         monkeypatch.setattr(mc, "mse_calibrate", lambda *a, **kw: captured.update(kw))
         mc.four_over_six_calibrate(torch.nn.Linear(4, 4))
 
-        assert captured["start_multiplier"] == 1.0
-        assert captured["stop_multiplier"] == 1.5
-        assert captured["step_size"] == 0.5
+        grid = {k: captured[k] for k in ("step_size", "start_multiplier", "stop_multiplier")}
+        assert grid == {k: LEGACY_FOUR_OVER_SIX_STANZA[k] for k in grid}
         assert captured["fp8_scale_sweep"] is False
-
-    def test_the_grid_is_exactly_the_two_46_candidates(self):
-        """1.0 keeps the M=6 range; 1.5 == 6/4 is the M=4 range. No third candidate."""
-        from modelopt.torch.quantization.calib import MseCalibrator
-
-        cal = MseCalibrator(
-            amax=torch.ones(1),
-            step_size=LEGACY_FOUR_OVER_SIX_STANZA["step_size"],
-            start_multiplier=LEGACY_FOUR_OVER_SIX_STANZA["start_multiplier"],
-            stop_multiplier=LEGACY_FOUR_OVER_SIX_STANZA["stop_multiplier"],
-        )
-        assert cal._generate_candidates(torch.device("cpu")).tolist() == [1.0, 1.5]
+        # 1.0 keeps the M=6 range; 1.5 == 6/4 is the M=4 range. No third candidate.
+        cal = MseCalibrator(amax=torch.ones(1), **grid)
+        assert cal._generate_candidates(torch.device("cpu")).tolist() == [1.0, E2M1_MAX / 4.0]
 
 
 def _reference_static_fp4(inputs, amax, global_amax, quantize_block_scales, fp8_max, dtype, ptb):
@@ -250,12 +230,13 @@ def _reference_static_fp4(inputs, amax, global_amax, quantize_block_scales, fp8_
     return (torch.round(flat / scale).clamp(-E2M1_MAX, E2M1_MAX) * scale).reshape(inputs.shape)
 
 
-class TestFourOverSixIsTheLegacyStanza:
+class TestFourOverSixIsTheLegacyStanzaOnCPU:
     """`algorithm: four_over_six` calibrates bit-identically to the stanza it replaces.
 
     This is the acceptance gate for renaming the three shipped 4/6 recipes: the name has
     to be a name, not a behaviour change. Runs on CPU by stubbing the Triton-only static
-    NVFP4 kernel; ``tests/gpu`` carries the same comparison against the real kernel.
+    NVFP4 kernel; ``TestFourOverSixIsTheLegacyStanzaOnCUDA`` in ``tests/gpu`` runs the same
+    comparison against the real kernel.
     """
 
     @staticmethod
@@ -318,7 +299,7 @@ class TestFourOverSixCoordination:
             )
 
     def test_flag_requires_e2m1(self):
-        with pytest.raises(ValidationError, match="num_bits must be e2m1"):
+        with pytest.raises(ValidationError, match="only supported on static NVFP4"):
             QuantizerAttributeConfig(
                 num_bits=(4, 3),
                 block_sizes={
@@ -330,7 +311,7 @@ class TestFourOverSixCoordination:
             )
 
     def test_flag_requires_e4m3_scale_bits(self):
-        with pytest.raises(ValidationError, match=r"scale_bits.*must be e4m3"):
+        with pytest.raises(ValidationError, match="only supported on static NVFP4"):
             QuantizerAttributeConfig(
                 num_bits=(2, 1),
                 block_sizes={-1: BLOCK_SIZE, "type": "static", "four_over_six": True},
@@ -364,6 +345,40 @@ class TestFourOverSixCoordination:
         QuantizeConfig(
             quant_cfg=_weight_only_quant_cfg(NVFP4_FOUR_OVER_SIX_ATTRS), algorithm=algorithm
         )
+
+    @pytest.mark.parametrize(
+        "algorithm",
+        [
+            {"method": "nvfp4_act_headroom", "weight_scale_algorithm": {"method": "four_over_six"}},
+            {"method": "nvfp4_act_headroom", "weight_scale_algorithm": {"method": "mse"}},
+            {"method": "lsq", "scale_algorithm": {"method": "mse"}},
+        ],
+    )
+    def test_a_bundled_weight_scale_search_satisfies_the_flag(self, algorithm):
+        """`nvfp4_act_headroom` and `lsq` run their weight-scale search one level down."""
+        QuantizeConfig(
+            quant_cfg=_weight_only_quant_cfg(NVFP4_FOUR_OVER_SIX_ATTRS), algorithm=algorithm
+        )
+
+    def test_a_bundled_max_does_not_satisfy_the_flag(self):
+        with pytest.raises(ValidationError, match="never searches weight scales"):
+            QuantizeConfig(
+                quant_cfg=_weight_only_quant_cfg(NVFP4_FOUR_OVER_SIX_ATTRS),
+                algorithm={
+                    "method": "nvfp4_act_headroom",
+                    "weight_scale_algorithm": {"method": "max"},
+                },
+            )
+
+    def test_a_bundled_four_over_six_still_requires_the_flag(self):
+        with pytest.raises(ValidationError, match="no enabled quant_cfg entry sets"):
+            QuantizeConfig(
+                quant_cfg=_weight_only_quant_cfg(NVFP4_STATIC_ATTRS),
+                algorithm={
+                    "method": "nvfp4_act_headroom",
+                    "weight_scale_algorithm": {"method": "four_over_six"},
+                },
+            )
 
     def test_flag_on_a_disabled_entry_does_not_constrain_the_algorithm(self):
         cfg = _weight_only_quant_cfg(NVFP4_FOUR_OVER_SIX_ATTRS)
@@ -406,7 +421,9 @@ class TestCompressRejectsFourOverSixUpFront:
             },
             lambda m: m(torch.randn(4, 4 * BLOCK_SIZE)),
         )
-        with pytest.raises(NotImplementedError, match="four_over_six enabled") as excinfo:
+        with pytest.raises(
+            NotImplementedError, match="does not support the quantization format"
+        ) as excinfo:
             mtq.compress(model)
         # Up front and complete: both quantizers are named, so the user sees the whole
         # problem rather than whichever layer compression happened to reach first.

@@ -792,16 +792,10 @@ def four_over_six_calibrate(
 ):
     """Calibrate NVFP4 Four-Over-Six (4/6) weight quantizers.
 
-    4/6 gives each weight block a choice of two dynamic ranges: the full E2M1 range (M=6)
-    or a reduced one (M=4). Picking M=4 is arithmetically the same as scaling that block's
-    amax by 6/4, so the choice is an MSE amax search over exactly two candidates,
-    ``[1.0, FOUR_OVER_SIX_MULTIPLIER]``, and the winner is folded into the quantizer amax.
-
-    The other half of 4/6 is the ``four_over_six: true`` flag in the weight quantizer's
-    ``block_sizes``, which normalizes the per-block FP8 scales by 256 instead of 448 to
-    leave room for the M=4 blocks. Neither half does anything useful without the other, so
-    :class:`QuantizeConfig <modelopt.torch.quantization.config.QuantizeConfig>` requires
-    them to agree.
+    An MSE amax search over exactly two candidates, ``[1.0, FOUR_OVER_SIX_MULTIPLIER]``,
+    whose winner is folded into the quantizer amax. See :class:`FourOverSixCalibConfig
+    <modelopt.torch.quantization.config.FourOverSixCalibConfig>` for what 4/6 is and why
+    it needs the matching ``block_sizes`` flag.
 
     Args:
         model: Model to be calibrated.

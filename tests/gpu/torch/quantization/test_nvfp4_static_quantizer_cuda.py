@@ -434,12 +434,13 @@ class TestNVFP4MSECalibrator:
         assert torch.allclose(scale_qdq, scale)
 
 
-class TestFourOverSixIsTheLegacyStanza:
+class TestFourOverSixIsTheLegacyStanzaOnCUDA:
     """`algorithm: four_over_six` calibrates bit-identically to the stanza it replaced.
 
-    The CPU twin of this test (``tests/unit/.../test_nvfp4_four_over_six.py``) stubs the
-    Triton static-NVFP4 kernel, so it cannot show the real kernel agrees. This one runs
-    against it. Renaming the shipped 4/6 recipes is only safe if this holds.
+    The CPU twin (``TestFourOverSixIsTheLegacyStanzaOnCPU`` in
+    ``tests/unit/torch/quantization/test_nvfp4_four_over_six.py``) stubs the Triton
+    static-NVFP4 kernel, so it cannot show the real kernel agrees. This one runs against
+    it. Renaming the shipped 4/6 recipes is only safe if this holds.
     """
 
     # What modelopt_recipes spelled out by hand before `four_over_six` existed.
@@ -467,16 +468,20 @@ class TestFourOverSixIsTheLegacyStanza:
         },
     ]
 
-    @staticmethod
-    def _calibrated_weight_amax(base, data, algorithm):
+    @pytest.fixture
+    def toy_model(self):
+        torch.manual_seed(0)
+        base = nn.Sequential(nn.Linear(64, 32), nn.ReLU(), nn.Linear(32, 64)).cuda()
+        return base, [torch.randn(4, 64, device="cuda") for _ in range(2)]
+
+    @classmethod
+    def _calibrated_weight_amax(cls, toy_model, algorithm):
+        base, data = toy_model
         torch.manual_seed(0)
         model = copy.deepcopy(base)
         mtq.quantize(
             model,
-            {
-                "quant_cfg": copy.deepcopy(TestFourOverSixIsTheLegacyStanza.QUANT_CFG),
-                "algorithm": algorithm,
-            },
+            {"quant_cfg": copy.deepcopy(cls.QUANT_CFG), "algorithm": algorithm},
             lambda m: [m(d) for d in data],
         )
         return {
@@ -485,13 +490,9 @@ class TestFourOverSixIsTheLegacyStanza:
             if getattr(q, "amax", None) is not None
         }
 
-    def test_matches_the_legacy_stanza_bit_identically(self):
-        torch.manual_seed(0)
-        base = nn.Sequential(nn.Linear(64, 32), nn.ReLU(), nn.Linear(32, 64)).cuda()
-        data = [torch.randn(4, 64, device="cuda") for _ in range(2)]
-
-        legacy = self._calibrated_weight_amax(base, data, self.LEGACY_STANZA)
-        named = self._calibrated_weight_amax(base, data, "four_over_six")
+    def test_matches_the_legacy_stanza_bit_identically(self, toy_model):
+        legacy = self._calibrated_weight_amax(toy_model, self.LEGACY_STANZA)
+        named = self._calibrated_weight_amax(toy_model, "four_over_six")
 
         assert set(legacy) == set(named)
         # Per-block amax, or the comparison says nothing about the 4/6 selection.
@@ -499,16 +500,14 @@ class TestFourOverSixIsTheLegacyStanza:
         for name in legacy:
             assert torch.equal(legacy[name], named[name]), name
 
-    def test_the_search_actually_picks_both_ranges(self):
+    def test_the_search_actually_picks_both_ranges(self, toy_model):
         """Guard against a vacuous pass: the M=4 candidate has to win somewhere."""
-        torch.manual_seed(0)
-        base = nn.Sequential(nn.Linear(64, 32), nn.ReLU(), nn.Linear(32, 64)).cuda()
-        data = [torch.randn(4, 64, device="cuda") for _ in range(2)]
+        # A one-candidate grid pinned at M=6. Deliberately not `algorithm="max"`: the 4/6
+        # flag requires a weight-scale search, so `max` is rejected at config time.
+        m6_only = self.LEGACY_STANZA | {"stop_multiplier": 1.0, "step_size": 1.0}
 
-        named = self._calibrated_weight_amax(base, data, "four_over_six")
-        max_only = self._calibrated_weight_amax(
-            base, data, self.LEGACY_STANZA | {"stop_multiplier": 1.0, "step_size": 1.0}
-        )
-        assert any(not torch.equal(named[n], max_only[n]) for n in named), (
+        named = self._calibrated_weight_amax(toy_model, "four_over_six")
+        m6 = self._calibrated_weight_amax(toy_model, m6_only)
+        assert any(not torch.equal(named[n], m6[n]) for n in named), (
             "no block chose M=4, so this fixture cannot distinguish the two grids"
         )

@@ -468,8 +468,8 @@ class MseCalibrateModeDescriptor(BaseCalibrateModeDescriptor):
 class FourOverSixCalibrateModeDescriptor(BaseCalibrateModeDescriptor):
     """Mode for the NVFP4 Four-Over-Six (4/6) calibration algorithm.
 
-    An MSE amax search whose grid is fixed by the format to the two 4/6 candidates
-    (keep amax for M=6, scale it by 6/4 for M=4) rather than being configured.
+    See :class:`FourOverSixCalibConfig
+    <modelopt.torch.quantization.config.FourOverSixCalibConfig>`.
     """
 
     @property

@@ -580,6 +580,11 @@ class TensorQuantizer(nn.Module):
             and self._block_sizes.get("scale_bits") == (4, 3)
         )
 
+    @property
+    def is_four_over_six(self):
+        """True for NVFP4 Four-Over-Six (4/6): per-block FP8 scales normalized by 256, not 448."""
+        return bool(self._block_sizes and self._block_sizes.get("four_over_six"))
+
     def is_mxfp(self, bits):
         """Check if is MXFP4/MXFP6/MXFP8."""
         if bits == 4:
@@ -787,6 +792,10 @@ class TensorQuantizer(nn.Module):
 
     def _is_real_quantize_support(self):
         """Check if real quantization is supported for this quant config."""
+        if self.is_four_over_six:
+            # The per-block M=4/M=6 choice lives in amax and is not preserved by real
+            # quantization, so 4/6 is mtq.quantize + export only.
+            return False
         return (
             (self._num_bits == 4 and self._block_sizes)
             or (self._num_bits == (2, 1) and self._block_sizes)
@@ -794,6 +803,15 @@ class TensorQuantizer(nn.Module):
         )
 
     def _real_quantize(self, inputs):
+        # Checked before the generic precondition so 4/6 keeps its specific explanation;
+        # _is_real_quantize_support() also returns False here, and is what mtq.compress
+        # screens the whole model with up front.
+        if self.is_four_over_six:
+            raise NotImplementedError(
+                "NVFP4 Four-Over-Six (4/6) is not supported via mtq.compress: the per-block "
+                "M=4/M=6 choice baked into the quantizer amax by calibration is not "
+                "preserved by real quantization. Use mtq.quantize + export for 4/6 instead."
+            )
         assert self._is_real_quantize_support(), "Real quantization not supported for this format."
 
         buffer_to_register = {}
@@ -858,12 +876,6 @@ class TensorQuantizer(nn.Module):
         elif self._block_sizes.get("scale_bits") == (4, 3):
             # NVFP4 default quantization
             # Return real quantized tensor and store scales inside TensorQuantizer
-            if self._block_sizes.get("four_over_six", False):
-                raise NotImplementedError(
-                    "NVFP4 Four-Over-Six (4/6) is not supported via mtq.compress: the per-block "
-                    "M=4/M=6 choice baked into the quantizer amax by MSE calibration is not "
-                    "preserved by real quantization. Use mtq.quantize + export for 4/6 instead."
-                )
             outputs, _weights_scaling_factor, _weights_scaling_factor_2 = NVFP4QTensor.quantize(
                 inputs,
                 self._block_sizes[-1],
