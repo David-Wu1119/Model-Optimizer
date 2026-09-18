@@ -25,6 +25,7 @@ from pathlib import Path
 
 
 def main(folder: str) -> int:
+    """Print the exception and the module containing its address, for each dump found."""
     dumps = sorted(Path(folder).glob("*.dmp"))
     if not dumps:
         print("no .dmp files -- the crash did not reach the postmortem debugger")
@@ -39,7 +40,7 @@ def main(folder: str) -> int:
         print(f"=== {d.name} ({d.stat().st_size / 1e6:.1f} MB) ===")
         try:
             mf = MinidumpFile.parse(str(d))
-        except Exception as exc:  # noqa: BLE001 - diagnostic, never fatal
+        except Exception as exc:
             print(f"  unreadable: {exc}")
             continue
 
@@ -65,8 +66,10 @@ def main(folder: str) -> int:
                 print(f"  >>> FAULTING MODULE: {getattr(m, 'name', '?')}  (+0x{addr - base:x})")
                 break
         else:
-            print(f"  >>> address 0x{addr:x} is in NO loaded module "
-                  "-- a jump into non-code memory, i.e. corruption, not a missing opcode")
+            print(
+                f"  >>> address 0x{addr:x} is in NO loaded module "
+                "-- a jump into non-code memory, i.e. corruption, not a missing opcode"
+            )
     return 0
 
 

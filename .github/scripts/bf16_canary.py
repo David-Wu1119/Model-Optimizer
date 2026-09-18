@@ -24,6 +24,7 @@ import torch
 
 
 def main() -> int:
+    """Run the bf16 Linear forwards; a #UD here kills the process rather than returning."""
     torch.set_grad_enabled(False)
     # The crashing test builds a 128-wide bf16 Linear; 512 is included because oneDNN selects a
     # kernel by shape as well as by ISA, and the small case may stay in a reference path.
