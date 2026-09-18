@@ -162,16 +162,10 @@ jobs:
           Remove-Item Env:\ONEDNN_MAX_CPU_ISA -ErrorAction SilentlyContinue
           Remove-Item Env:\DNNL_MAX_CPU_ISA -ErrorAction SilentlyContinue
           $env:ONEDNN_VERBOSE = "1"
-          # A bare tensor @ tensor did not reach oneDNN on the first attempt -- no verbose line
-          # appeared -- so this runs what the crash sites actually run: an nn.Linear forward in
-          # bf16, under eval/no_grad, at the 128-wide shape from the crashing test and a larger
-          # one, since oneDNN picks its kernel by shape as well as by ISA.
-          & $py -c "import torch
-torch.set_grad_enabled(False)
-for n in (128, 512):
-    m = torch.nn.Linear(n, n, bias=False).eval().to(torch.bfloat16)
-    x = torch.ones(8, n, dtype=torch.bfloat16)
-    print('bf16 linear', n, 'ok', float(m(x).sum()))" 2>&1 |
+          # The first version of this canary was a bare `a @ b` and printed no onednn_verbose
+          # line at all, meaning it never created a oneDNN primitive -- so a clean exit from it
+          # proved nothing. name_faulting_module.py's sibling runs the real operation instead.
+          & $py .github/scripts/bf16_canary.py 2>&1 |
             Select-String -Pattern "onednn_verbose.*info|bf16 linear" | ForEach-Object { $_.Line }
           $code = $LASTEXITCODE
           Write-Host "uncapped-bf16-gemm exit=$code"
