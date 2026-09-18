@@ -155,7 +155,8 @@ Ask the 5 questions via AskUserQuestion (categories must match `nel skills build
 
 1. **Execution:** Local / SLURM
 2. **Deployment:** None (External) / vLLM / SGLang / NIM / TRT-LLM. Prefer vLLM unless the user/card says otherwise.
-3. **Auto-export:** None / MLflow / wandb
+3. **Auto-export:** None / MLflow / wandb. Before enabling uploads, apply the
+   config/log secret-scanning and redaction safeguards in `references/mlflow-verification.md`.
 4. **Model type:** Base / Chat / Reasoning
 5. **Benchmarks** (multi-select): standard / code / math_reasoning / safety / multilingual
 
@@ -558,9 +559,14 @@ Remove `limit_samples` overrides; keep canary-validated parallelism. If the cana
 
 ---
 
-### Step 9 — Verify completed run
+### Step 9 — Verify completed run and MLflow delivery
 
 Before pulling/reporting scores, validate the run. Read `references/run-validation.md` for NEL timeout/resume behavior, completed-run validation, diagnostics, and score harvesting. For a baseline that will be compared with a candidate, also perform its **External Baseline Sanity Check** before a success verdict, then hand the validated runs to `compare-results` for baseline-vs-candidate deltas.
+
+Then apply `references/mlflow-verification.md`: verify each task's actual MLflow
+run, recover failed/incomplete exports from existing results without rerunning
+evaluation, and report evaluation and export outcomes separately. This gate also
+applies after nel-next's explicit `mlflow-push`.
 
 ---
 
