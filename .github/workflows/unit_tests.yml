@@ -95,7 +95,10 @@ jobs:
       # module executes an opcode this host lacks. The runner fleet is heterogeneous, so the same
       # wheel passes on one machine and dies on another. Nothing here changes what is tested; it
       # records which CPU ran, and leaves a dump behind naming the faulting DLL if it happens.
-      - name: Record CPU and torch dispatch capability
+      - name: Record which CPU this runner got
+        # CPU model only -- torch is not installed in this interpreter yet, it lives in the nox
+        # venv created by the test step below. An earlier version of this step claimed to report
+        # torch's dispatch capability and could not; the ISA probe after the tests does that.
         continue-on-error: true
         shell: pwsh
         run: |
@@ -129,44 +132,53 @@ jobs:
           PYTHONFAULTHANDLER: "1"
         run: pip install nox uv && nox -s "unit-3.12(torch_214, tf_latest)"
       # --- 0xc000001d diagnosis -------------------------------------------------------------
-      # The fault is an illegal instruction in a native module, and the python-level output names
-      # only parked threads. These two steps answer "which binary" from opposite directions, and
-      # both are continue-on-error: windows no longer gates the merge, so they can experiment.
-      - name: Probe whether torch's vectorized kernels are responsible
-        # torch selects a CPU kernel set at runtime; ATEN_CPU_CAPABILITY forces a lower one. If
-        # the crashing test passes with "default" and dies without it, the fault is in torch's
-        # AVX-512/AVX2 paths and the fix is pinning this variable -- no dump needed. If it dies
-        # either way, torch is excluded and the module is elsewhere (onnx, onnxruntime).
+      # What the last run established: the fault is deterministic, not intermittent. It is always
+      # test_fp8_export_rejects_unsupported_dtype_conversion[mixed-format], and the three sibling
+      # parametrizations pass in the milliseconds before it. That case is the only one whose model
+      # is a bf16 128x128 Linear; the others quantize a 4x4 Linear. A bf16 GEMM of that size is
+      # where torch's CPU path hands off to oneDNN, which JIT-generates a kernel from runtime CPU
+      # detection. This runner is an Emerald Rapids Xeon (Family 6 Model 207), which advertises
+      # AMX-BF16 -- and AMX faults with #UD unless the hypervisor enabled its XSAVE tile state.
+      # #UD is STATUS_ILLEGAL_INSTRUCTION, raised in several oneDNN worker threads at once, which
+      # is why the faulthandler output was two threads interleaved over each other.
+      #
+      # ATEN_CPU_CAPABILITY did not clear it and could not: it governs ATen's own vectorized
+      # kernels, not oneDNN's JIT. DNNL_MAX_CPU_ISA is the knob that does. This sweep runs the one
+      # crashing test at descending ISA ceilings -- the highest value that passes names the opcode
+      # family responsible, and becomes the fix.
+      #
+      # It calls pytest from the nox venv directly, because the `unit` session hardcodes
+      # `tests/unit` and drops posargs: that is why the previous probe silently ran the whole
+      # suite instead of the single test it named. exit=3221225501 is the crash, 0 pass, 1 fail.
+      - name: Which CPU ISA does the crash need
         if: always()
         continue-on-error: true
         shell: pwsh
         env:
           PYTHONUTF8: "1"
         run: |
-          $t = "tests/unit/torch/deploy/utils/test_torch_onnx_utils.py::test_fp8_export_rejects_unsupported_dtype_conversion"
-          Write-Host "--- with ATEN_CPU_CAPABILITY=default ---"
-          $env:ATEN_CPU_CAPABILITY = "default"
-          nox -s "unit-3.12(torch_214, tf_latest)" -- $t -o addopts= -q -p no:faulthandler
-          Write-Host "exit(default)=$LASTEXITCODE"
-          Write-Host "--- unrestricted ---"
-          Remove-Item Env:\ATEN_CPU_CAPABILITY
-          nox -s "unit-3.12(torch_214, tf_latest)" -- $t -o addopts= -q -p no:faulthandler
-          Write-Host "exit(unrestricted)=$LASTEXITCODE"
-      - name: Capture a dump that names the faulting module
-        # procdump attaches as a debugger, so it sees the exception regardless of WER policy or
-        # pytest's faulthandler plugin -- which is why the WER LocalDumps route produced nothing.
-        # -e dumps on unhandled exception, -ma writes a full dump.
-        if: always()
-        continue-on-error: true
-        shell: pwsh
-        env:
-          PYTHONUTF8: "1"
-        run: |
-          choco install procdump -y --no-progress | Out-Null
-          $t = "tests/unit/torch/deploy/utils/test_torch_onnx_utils.py::test_fp8_export_rejects_unsupported_dtype_conversion"
-          $py = (Get-Command python).Source
-          procdump -accepteula -e -ma -x "$env:GITHUB_WORKSPACE\crashdumps" $py -m nox -s "unit-3.12(torch_214, tf_latest)" -- $t -o addopts= -q -p no:faulthandler
-          Get-ChildItem "$env:GITHUB_WORKSPACE\crashdumps" -ErrorAction SilentlyContinue | Format-Table Name, Length
+          $venv = Get-ChildItem -Path "C:/tmp/.nox","/tmp/.nox","$env:GITHUB_WORKSPACE/.nox" -Directory -ErrorAction SilentlyContinue |
+                  Where-Object { $_.Name -like "unit-3-12*" } | Select-Object -First 1
+          if (-not $venv) { Write-Host "no nox venv found -- nothing to probe"; exit 0 }
+          $py = Join-Path $venv.FullName "Scripts\python.exe"
+          Write-Host "venv python: $py"
+          & $py -c "import torch; print('torch', torch.__version__, 'mkldnn', torch.backends.mkldnn.is_available()); print([l for l in torch.__config__.show().splitlines() if 'CPU capability' in l or 'oneDNN' in l])"
+          $t = "tests/unit/torch/deploy/utils/test_torch_onnx_utils.py::test_fp8_export_rejects_unsupported_dtype_conversion[mixed-format]"
+          foreach ($isa in @("__unset__","AVX512_CORE_AMX","AVX512_CORE_BF16","AVX512_CORE","AVX2")) {
+            if ($isa -eq "__unset__") {
+              Remove-Item Env:\DNNL_MAX_CPU_ISA -ErrorAction SilentlyContinue
+              Remove-Item Env:\ONEDNN_MAX_CPU_ISA -ErrorAction SilentlyContinue
+            } else {
+              $env:DNNL_MAX_CPU_ISA = $isa
+              $env:ONEDNN_MAX_CPU_ISA = $isa
+            }
+            & $py -m pytest $t -o addopts= -q -p no:faulthandler > isa_out.txt 2>&1
+            $code = $LASTEXITCODE
+            Get-Content isa_out.txt -Tail 3 -ErrorAction SilentlyContinue
+            Write-Host "ISA=$isa exit=$code"
+          }
+          Remove-Item Env:\DNNL_MAX_CPU_ISA -ErrorAction SilentlyContinue
+          Remove-Item Env:\ONEDNN_MAX_CPU_ISA -ErrorAction SilentlyContinue
       - name: Upload crash dumps
         if: failure()
         continue-on-error: true
