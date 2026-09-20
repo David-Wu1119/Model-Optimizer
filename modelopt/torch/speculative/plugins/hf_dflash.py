@@ -666,8 +666,10 @@ class HFDFlashModel(DFlashModel):
         Placed on ``__call__`` rather than on ``forward`` deliberately: Domino, DSpark and
         any future variant override ``forward`` and would each have to remember to wrap
         it, and the one that forgot would not fail on a bf16 base until someone ran it
-        outside the Trainer. Overriding here covers them all, including the heads they
-        apply after the draft backbone, which live outside ``dflash_module``.
+        outside the Trainer. Overriding here covers them all, including the heads those
+        overrides apply after the backbone -- their parameters sit inside
+        ``dflash_module``, but the matmuls do not, so wrapping the module alone would miss
+        them.
         """
         with self._draft_autocast():
             return super().__call__(*args, **kwargs)
