@@ -67,8 +67,8 @@ Draft model components:
            projections before concatenating with noise K/V)
         2. Handle lazy rope initialization (see ``_setup_kimi_k2_decoder`` in
            ``modelopt.torch.speculative.utils`` for the EAGLE3 approach)
-        3. The ``_apply`` meta buffer fix in ``DFlashModule`` already handles the
-           lazy rope pattern needed for MLA models.
+        3. ``modify()`` builds the draft's rotary buffer eagerly once the base model is
+           off meta; ``_maybe_init_rotary_emb`` stays idempotent for the lazy pattern.
 """
 
 import contextlib
@@ -542,9 +542,33 @@ class HFDFlashModel(DFlashModel):
         # Match base model dtype/device. Skipped when the base is on meta, which is the
         # from_pretrained restore path: the weights are not loaded yet and the draft cannot be
         # placed. `restore_draft_precision` is what picks it up again there.
+        #
+        # The dtype has to be settled before the Trainer builds the optimizer, because AdamW
+        # allocates its moments with `zeros_like(p)`; a cast afterwards would leave the
+        # moments in the half that cannot represent its own updates. Only the draft is
+        # promoted -- the frozen base has no optimizer state, and upcasting it would change
+        # the hidden states the draft trains against. The rotary buffer is built here rather
+        # than on the draft's first forward: that forward returns early for a rank whose
+        # batch has no valid anchor, leaving its buffer list one short, and DDP's
+        # `broadcast_buffers` hangs rather than raises on mismatched lists.
         base_device = self._base_device()
         if base_device.type != "meta":
-            self._place_draft(base_device)
+            draft_dtype = (
+                torch.float32 if self.dflash_fp32_master_weights else self._base_model.dtype
+            )
+            self.dflash_module.to(device=base_device, dtype=draft_dtype)
+            # Logged, not assumed: the optimizer dtype this decides is not visible until step 1.
+            logger.info(
+                "DFlash draft on %s in %s (dflash_fp32_master_weights=%s); Adam moments will "
+                "follow. Frozen base left at %s.",
+                base_device,
+                draft_dtype,
+                self.dflash_fp32_master_weights,
+                self._base_model.dtype,
+            )
+            # After the cast: `Module.to` casts float buffers, so building first would round
+            # the RoPE frequencies to the base dtype.
+            self.dflash_module._maybe_init_rotary_emb(device=base_device)
 
         # Delete base model layers for offline training (save memory)
         if self.dflash_offline:
@@ -563,62 +587,20 @@ class HFDFlashModel(DFlashModel):
             return self._base_model_lm_head.weight.device
         return next(self._base_model.layers[-1].parameters()).device
 
-    def _place_draft(self, base_device):
-        """Put the draft on its training device and dtype and build its rotary buffer.
-
-        The dtype has to be settled before the Trainer builds the optimizer, because AdamW
-        allocates its moments with ``zeros_like(p)``: a cast afterwards would fix the
-        parameters and leave the moments in the base model's dtype, which is the half that
-        cannot represent its own updates. Only the draft takes fp32 under
-        ``dflash_fp32_master_weights`` -- the frozen base has no trainable parameters and no
-        optimizer state, so promoting it would double its memory for nothing and change the
-        hidden states the draft is trained against. The matmuls still run in the base dtype;
-        that comes from ``_draft_autocast``, not from whoever calls the model.
-
-        The rotary buffer is built here rather than on the draft's first forward.
-        ``_maybe_init_rotary_emb`` creates the non-persistent ``inv_freq`` lazily, and the
-        DFlash forward returns early -- without running the draft -- for a rank whose batch
-        has no valid anchor. That rank ends the step one buffer short, and DDP's
-        ``broadcast_buffers`` then coalesces buffer lists of differing flattened size across
-        ranks, which hangs rather than raising. Building it up front makes every rank's
-        buffer list identical for the whole run. Numerically inert: ``inv_freq`` is a pure
-        function of the config and, being non-persistent, is absent from the state dict
-        either way.
-
-        Idempotent, so the resume path can call it again through
-        ``restore_draft_precision``.
-        """
-        draft_dtype = torch.float32 if self.dflash_fp32_master_weights else self._base_model.dtype
-        self.dflash_module.to(device=base_device, dtype=draft_dtype)
-        # Logged, not assumed: the optimizer dtype this decides is not visible until step 1.
-        logger.info(
-            "DFlash draft on %s in %s (dflash_fp32_master_weights=%s); Adam moments will "
-            "follow. Frozen base left at %s.",
-            base_device,
-            draft_dtype,
-            self.dflash_fp32_master_weights,
-            self._base_model.dtype,
-        )
-        self.dflash_module._maybe_init_rotary_emb(device=base_device)
-
     def restore_draft_precision(self):
-        """Re-apply the draft's device, dtype and rotary buffer after a checkpoint restore.
+        """Re-apply what ``modify()`` could not, after a ``from_pretrained`` restore.
 
-        ``modify()`` runs during ``from_pretrained`` with the base model still on meta, so it
-        skips all three. Left alone, a resumed run keeps whatever dtype the checkpoint loaded
-        at, AdamW allocates its moments to match, and ``dflash_fp32_master_weights`` is
-        silently inert for the rest of the run -- the resumed half of a long training job
-        quietly loses the feature. Call this once the weights are loaded and before the
-        Trainer builds the optimizer. A no-op on a freshly converted model, which did all
-        three in ``modify()``.
+        ``modify()`` runs with the base model still on meta there, so it skips the draft's
+        placement entirely. Call this once the weights are loaded and before the Trainer
+        builds the optimizer, which is the last point that can still decide the Adam moment
+        dtype. A no-op on a freshly converted model.
         """
         base_device = self._base_device()
         if base_device.type == "meta":
             return
-        # Checked BEFORE _place_draft, which would cast a bf16 draft up to fp32 and hide
-        # this. The dtype hints modify() gives the loader are the only chance to keep the
-        # mantissa bits an fp32 draft wrote to disk; once they are dropped, casting up
-        # yields a rounded copy, so the honest outcome is to stop rather than train on it.
+        # Checked before anything casts, which would turn a bf16 draft into a rounded fp32
+        # copy and hide this. The dtype hints modify() gives the loader are the only chance
+        # to keep the mantissa bits an fp32 draft wrote to disk.
         if self.dflash_fp32_master_weights:
             loaded = {p.dtype for p in self.dflash_module.parameters()}
             if loaded and loaded != {torch.float32}:
@@ -629,7 +611,10 @@ class HFDFlashModel(DFlashModel):
                     f"bits are already gone for this load. Use a transformers version where "
                     f"the hints apply, or set dflash_fp32_master_weights=false."
                 )
-        self._place_draft(base_device)
+        # Device only: the loader already settled the dtype, and a `device_map` or offloaded
+        # restore can still leave the draft off the base's last layer.
+        self.dflash_module.to(device=base_device)
+        self.dflash_module._maybe_init_rotary_emb(device=base_device)
 
     def _draft_autocast(self):
         """Autocast for a promoted draft, so the flag does not depend on its caller.
@@ -1305,7 +1290,7 @@ class HFDFlashModel(DFlashModel):
         selected = [base_outputs.hidden_states[lid + hid_offset] for lid in self.target_layer_ids]
         # target_layer_ids spans early and late layers, so under device_map="auto" these come
         # off different GPUs and the cat below fails. Everything the draft consumes is gathered
-        # onto the draft's own device -- the last base layer's, per _place_draft() -- which is
+        # onto the draft's own device -- the last base layer's, per modify() -- which is
         # also not input_ids.device once the base model is sharded. All no-ops single-device.
         device = self._base_device()
         target_hidden = torch.cat([h.to(device) for h in selected], dim=-1)
