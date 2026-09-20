@@ -71,6 +71,7 @@ Draft model components:
            lazy rope pattern needed for MLA models.
 """
 
+import contextlib
 import logging
 from pathlib import Path
 from typing import Any
@@ -559,7 +560,8 @@ class HFDFlashModel(DFlashModel):
         cannot represent its own updates. Only the draft takes fp32 under
         ``dflash_fp32_master_weights`` -- the frozen base has no trainable parameters and no
         optimizer state, so promoting it would double its memory for nothing and change the
-        hidden states the draft is trained against.
+        hidden states the draft is trained against. The matmuls still run in the base dtype;
+        that comes from ``_draft_autocast``, not from whoever calls the model.
 
         The rotary buffer is built here rather than on the draft's first forward.
         ``_maybe_init_rotary_emb`` creates the non-persistent ``inv_freq`` lazily, and the
@@ -586,28 +588,6 @@ class HFDFlashModel(DFlashModel):
             self._base_model.dtype,
         )
         self.dflash_module._maybe_init_rotary_emb(device=base_device)
-
-    def _require_autocast_for_promoted_draft(self, device):
-        """Fail early, and by name, when a promoted draft is about to run unautocast.
-
-        ``dflash_fp32_master_weights`` needs a bf16 autocast around the forward, and HF
-        ``Trainer`` only wraps ``forward``. AR validation reaches the draft through
-        ``pseudo_speculative_generate``, which is called directly, so it runs outside that
-        wrapper: with ``estimate_ar: true`` a run trains normally and then dies at the first
-        ``ar_validate_steps`` boundary on a bare matmul dtype mismatch, possibly hours in.
-        Name the two knobs instead of letting ``F.linear`` report it.
-        """
-        if not self.dflash_fp32_master_weights or self._base_model.dtype == torch.float32:
-            return
-        if torch.is_autocast_enabled(device.type):
-            return
-        raise RuntimeError(
-            f"DFlash: dflash_fp32_master_weights holds the draft in fp32 while the frozen "
-            f"base is {self._base_model.dtype}, and this path runs outside the autocast that "
-            f"reconciles them, so the draft's first matmul would fail. Wrap the call in "
-            f"torch.autocast(device_type={device.type!r}, dtype={self._base_model.dtype}), "
-            f"or set estimate_ar=false, or set dflash_fp32_master_weights=false."
-        )
 
     def restore_draft_precision(self, checkpoint_dir=None):
         """Re-apply the draft's device, dtype and rotary buffer after a checkpoint restore.
@@ -664,6 +644,47 @@ class HFDFlashModel(DFlashModel):
             len(own),
             checkpoint_dir,
         )
+
+    def _draft_autocast(self):
+        """Autocast for a promoted draft, so the flag does not depend on its caller.
+
+        ``dflash_fp32_master_weights`` is only mixed precision if something casts the
+        matmuls back down to the base model's dtype; on its own it is fp32 parameters
+        being fed bf16 hidden states by the frozen target, which raises on the first
+        matmul. Nothing in this package used to supply that cast. HF ``Trainer`` supplies
+        one around ``compute_loss`` when ``TrainingArguments.bf16`` is set, which is why
+        training works, but ``pseudo_speculative_generate`` and a plain ``convert()``
+        followed by a forward get no such wrapper.
+
+        This is the same context the Trainer would install, entered by the model itself.
+        When the Trainer's is already active this nests with the same device type and
+        dtype and changes nothing; when it is not, it is the difference between bf16
+        matmuls and a dtype mismatch. Disabled whenever there is nothing to reconcile:
+        an unpromoted draft, or a base model that is already fp32.
+        """
+        draft = getattr(self, "dflash_module", None)
+        base_dtype = getattr(getattr(self, "_base_model", None), "dtype", None)
+        # Written as an early return rather than an `enabled` flag so that mypy narrows
+        # `draft` past None for the `next(draft.parameters())` below.
+        if (
+            draft is None
+            or not getattr(self, "dflash_fp32_master_weights", False)
+            or base_dtype not in (torch.float16, torch.bfloat16)
+        ):
+            return contextlib.nullcontext()
+        return torch.autocast(device_type=next(draft.parameters()).device.type, dtype=base_dtype)
+
+    def __call__(self, *args, **kwargs):
+        """Enter the draft's autocast around every forward, whoever calls it.
+
+        Placed on ``__call__`` rather than on ``forward`` deliberately: Domino, DSpark and
+        any future variant override ``forward`` and would each have to remember to wrap
+        it, and the one that forgot would not fail on a bf16 base until someone ran it
+        outside the Trainer. Overriding here covers them all, including the heads they
+        apply after the draft backbone, which live outside ``dflash_module``.
+        """
+        with self._draft_autocast():
+            return super().__call__(*args, **kwargs)
 
     # Draft-module entries that legitimately come from the base model rather than the
     # exported draft checkpoint, so their absence (or presence) is not an error.
@@ -1322,17 +1343,18 @@ class HFDFlashModel(DFlashModel):
 
         attn_mask = self._build_generate_swa_mask(ctx_len, bsz, target_hidden.dtype, device)
 
-        # Draft forward
-        self._require_autocast_for_promoted_draft(device)
-        draft_hidden = self.dflash_module(
-            noise_embedding=noise_embedding,
-            target_hidden=target_hidden,
-            position_ids=pos_ids,
-            attention_mask=attn_mask,
-        )
+        # Draft forward. Wrapped explicitly because this method is called directly rather
+        # than through `__call__`, so it does not inherit the autocast installed there.
+        with self._draft_autocast():
+            draft_hidden = self.dflash_module(
+                noise_embedding=noise_embedding,
+                target_hidden=target_hidden,
+                position_ids=pos_ids,
+                attention_mask=attn_mask,
+            )
 
-        # Logits on positions 1..block_size-1 (skip anchor at position 0)
-        draft_logits = self._base_model_lm_head(draft_hidden[:, 1:, :])
+            # Logits on positions 1..block_size-1 (skip anchor at position 0)
+            draft_logits = self._base_model_lm_head(draft_hidden[:, 1:, :])
         draft_tokens = draft_logits.argmax(dim=-1)  # [B, block_size-1]
 
         # Return up to `steps` tokens. base_token already follows input_ids; draft_tokens is

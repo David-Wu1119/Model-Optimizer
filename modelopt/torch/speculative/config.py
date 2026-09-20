@@ -283,13 +283,15 @@ class DFlashConfig(ModeloptBaseConfig):
     dflash_fp32_master_weights: bool = ModeloptField(
         default=False,
         description=(
-            "Keep the draft's parameters in fp32 while its matmuls run in bf16, i.e. "
-            "classic mixed precision with fp32 master weights.\n\n"
-            "Requires a bf16 autocast around the forward, which HF Trainer supplies under "
-            "TrainingArguments.bf16. Paths that do not go through the Trainer -- "
-            "evaluation, pseudo_speculative_generate, a plain convert() and forward -- "
-            "currently need the caller to supply it. No shipped recipe exercises those "
-            "(estimate_ar: false, do_eval: false).\n\n"
+            "Keep the draft's parameters in fp32 while its matmuls still run in the base "
+            "model's dtype, i.e. classic mixed precision with fp32 master weights.\n\n"
+            "The lower-precision half is supplied by the model, not by the caller: the "
+            "draft enters an autocast to the frozen base's dtype around its own forward, "
+            "so the flag behaves the same under HF Trainer's `bf16`, under "
+            "pseudo_speculative_generate (which AR validation calls directly, outside the "
+            "Trainer's wrapper) and under a plain convert-and-forward. Where the Trainer's "
+            "autocast is already active this nests with the same dtype and changes "
+            "nothing.\n\n"
             "The cost is memory: about 12 bytes per parameter for the weight plus Adam's "
             "two moments, instead of 6. Compute is unchanged, but note that fp32 "
             "parameters also mean fp32 gradients, so under DDP the gradient all-reduce "
