@@ -33,6 +33,7 @@ from modelopt.torch.speculative.eagle.utils import (
     EagleOfflineDataCollator,
     OfflineSupervisedDataset,
 )
+from modelopt.torch.speculative.plugins.master_weight_adamw import MasterWeightAdamW
 from modelopt.torch.speculative.utils import get_ttt_msk_func
 from modelopt.torch.utils import print_rank_0
 from modelopt.torch.utils.distributed import is_master
@@ -190,6 +191,28 @@ class EagleTrainerWithAccLog(Trainer):
 
     def create_optimizer(self):
         """Override to give LoRA parameters a higher learning rate."""
+        if self.optimizer is None and getattr(self.model, "dflash_fp32_master_weights", False):
+            # Built here rather than left to HF: the flag asks for an fp32 master copy of the
+            # draft, and that lives in the optimizer. `create_optimizer` below sees
+            # `self.optimizer` already set and keeps its own param-group work.
+            cls, kwargs = self.get_optimizer_cls_and_kwargs(self.args, self.model)
+            if not issubclass(cls, torch.optim.AdamW):
+                raise ValueError(
+                    f"dflash_fp32_master_weights needs an AdamW-family optimizer to hold the "
+                    f"master weights, but training.optim resolved to {cls.__name__}."
+                )
+            decay = self.get_decay_parameter_names(self.model)
+            named = [(n, p) for n, p in self.model.named_parameters() if p.requires_grad]
+            self.optimizer = MasterWeightAdamW(
+                [
+                    {
+                        "params": [p for n, p in named if n in decay],
+                        "weight_decay": self.args.weight_decay,
+                    },
+                    {"params": [p for n, p in named if n not in decay], "weight_decay": 0.0},
+                ],
+                **{k: v for k, v in kwargs.items() if k != "weight_decay"},
+            )
         super().create_optimizer()
         if self.lora_lr_multiplier != 1.0:
             lora_ids = {

@@ -61,6 +61,7 @@ from modelopt.torch.speculative.plugins.hf_domino import DominoLambdaCallback
 from modelopt.torch.speculative.plugins.hf_training_args import (
     TrainingArguments as SpecTrainingArgs,
 )
+from modelopt.torch.speculative.plugins.master_weight_adamw import VerifyMasterWeightsCallback
 from modelopt.torch.speculative.utils import load_vlm_or_llm, patch_transformers5_params_loading
 from modelopt.torch.utils import print_rank_0
 from modelopt.torch.utils.distributed import is_master, local_rank
@@ -321,6 +322,11 @@ def train():
         and recipe.dflash.dflash_architecture_config.get("projector_type") == "domino"
     ):
         callbacks.append(DominoLambdaCallback())
+    # fp32 master weights are the optimizer's job, and wiring the optimizer is the training
+    # loop's. This fails the run if that wiring is ever missed, rather than letting the flag
+    # be silently inert for a whole job.
+    if getattr(model, "dflash_fp32_master_weights", False):
+        callbacks.append(VerifyMasterWeightsCallback())
     # Leave training_args.ignore_data_skip at its default (False). The dataset is
     # map-style, so HF Trainer's resume skips consumed indices at the batch-sampler
     # level (accelerate.skip_first_batches) without re-fetching them, landing at the

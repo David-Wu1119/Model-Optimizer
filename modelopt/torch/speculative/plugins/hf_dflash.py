@@ -71,7 +71,6 @@ Draft model components:
            off meta; ``_maybe_init_rotary_emb`` stays idempotent for the lazy pattern.
 """
 
-import contextlib
 import logging
 from pathlib import Path
 from typing import Any
@@ -527,47 +526,22 @@ class HFDFlashModel(DFlashModel):
         # so the loaded tensors get cast alongside the rest of the module.
         if self.dflash_init_checkpoint:
             self._load_init_checkpoint(self.dflash_init_checkpoint)
-        # Tell the loader the draft keeps fp32 even though the rest of the checkpoint is
-        # bf16. Two spellings because transformers moved the wiring: >=5.3 reads
-        # `_keep_in_fp32_modules_strict` off the instance at load time, while 5.0-5.2 build
-        # `dtype_plan` eagerly in `post_init`, which has already run by the time modify()
-        # does. `restore_draft_precision` asserts the outcome rather than trusting either.
-        if self.dflash_fp32_master_weights:
-            self._keep_in_fp32_modules_strict = set(
-                getattr(self, "_keep_in_fp32_modules_strict", None) or ()
-            ) | {"dflash_module"}
-            if isinstance(getattr(self, "dtype_plan", None), dict):
-                self.dtype_plan["dflash_module"] = torch.float32
-
         # Match base model dtype/device. Skipped when the base is on meta, which is the
         # from_pretrained restore path: the weights are not loaded yet and the draft cannot be
         # placed. `restore_draft_precision` is what picks it up again there.
         #
-        # The dtype has to be settled before the Trainer builds the optimizer, because AdamW
-        # allocates its moments with `zeros_like(p)`; a cast afterwards would leave the
-        # moments in the half that cannot represent its own updates. Only the draft is
-        # promoted -- the frozen base has no optimizer state, and upcasting it would change
-        # the hidden states the draft trains against. The rotary buffer is built here rather
-        # than on the draft's first forward: that forward returns early for a rank whose
-        # batch has no valid anchor, leaving its buffer list one short, and DDP's
-        # `broadcast_buffers` hangs rather than raises on mismatched lists.
+        # The draft matches the frozen base exactly, in dtype as well as device, so nothing
+        # downstream has to reconcile the two. The extra precision `dflash_fp32_master_weights`
+        # asks for lives in the optimizer instead; see `plugins/master_weight_adamw.py`.
+        #
+        # The rotary buffer is built here rather than on the draft's first forward: that
+        # forward returns early for a rank whose batch has no valid anchor, leaving its buffer
+        # list one short, and DDP's `broadcast_buffers` hangs rather than raises on mismatched
+        # lists. After the cast, because `Module.to` casts float buffers and building first
+        # would round the RoPE frequencies.
         base_device = self._base_device()
         if base_device.type != "meta":
-            draft_dtype = (
-                torch.float32 if self.dflash_fp32_master_weights else self._base_model.dtype
-            )
-            self.dflash_module.to(device=base_device, dtype=draft_dtype)
-            # Logged, not assumed: the optimizer dtype this decides is not visible until step 1.
-            logger.info(
-                "DFlash draft on %s in %s (dflash_fp32_master_weights=%s); Adam moments will "
-                "follow. Frozen base left at %s.",
-                base_device,
-                draft_dtype,
-                self.dflash_fp32_master_weights,
-                self._base_model.dtype,
-            )
-            # After the cast: `Module.to` casts float buffers, so building first would round
-            # the RoPE frequencies to the base dtype.
+            self.dflash_module.to(device=base_device, dtype=self._base_model.dtype)
             self.dflash_module._maybe_init_rotary_emb(device=base_device)
 
         # Delete base model layers for offline training (save memory)
@@ -591,73 +565,13 @@ class HFDFlashModel(DFlashModel):
         """Re-apply what ``modify()`` could not, after a ``from_pretrained`` restore.
 
         ``modify()`` runs with the base model still on meta there, so it skips the draft's
-        placement entirely. Call this once the weights are loaded and before the Trainer
-        builds the optimizer, which is the last point that can still decide the Adam moment
-        dtype. A no-op on a freshly converted model.
+        placement entirely. A no-op on a freshly converted model.
         """
         base_device = self._base_device()
         if base_device.type == "meta":
             return
-        # Checked before anything casts, which would turn a bf16 draft into a rounded fp32
-        # copy and hide this. The dtype hints modify() gives the loader are the only chance
-        # to keep the mantissa bits an fp32 draft wrote to disk.
-        if self.dflash_fp32_master_weights:
-            loaded = {p.dtype for p in self.dflash_module.parameters()}
-            if loaded and loaded != {torch.float32}:
-                raise RuntimeError(
-                    f"DFlash: dflash_fp32_master_weights is set but the draft loaded as "
-                    f"{loaded}, so transformers {transformers.__version__} did not apply the "
-                    f"fp32 dtype hints modify() installed. The checkpoint's fp32 mantissa "
-                    f"bits are already gone for this load. Use a transformers version where "
-                    f"the hints apply, or set dflash_fp32_master_weights=false."
-                )
-        # Device only: the loader already settled the dtype, and a `device_map` or offloaded
-        # restore can still leave the draft off the base's last layer.
-        self.dflash_module.to(device=base_device)
+        self.dflash_module.to(device=base_device, dtype=self._base_model.dtype)
         self.dflash_module._maybe_init_rotary_emb(device=base_device)
-
-    def _draft_autocast(self):
-        """Autocast for a promoted draft, so the flag does not depend on its caller.
-
-        ``dflash_fp32_master_weights`` is only mixed precision if something casts the
-        matmuls back down to the base model's dtype; on its own it is fp32 parameters
-        being fed bf16 hidden states by the frozen target, which raises on the first
-        matmul. Nothing in this package used to supply that cast. HF ``Trainer`` supplies
-        one around ``compute_loss`` when ``TrainingArguments.bf16`` is set, which is why
-        training works, but ``pseudo_speculative_generate`` and a plain ``convert()``
-        followed by a forward get no such wrapper.
-
-        This is the same context the Trainer would install, entered by the model itself.
-        When the Trainer's is already active this nests with the same device type and
-        dtype and changes nothing; when it is not, it is the difference between bf16
-        matmuls and a dtype mismatch. Disabled whenever there is nothing to reconcile:
-        an unpromoted draft, or a base model that is already fp32.
-        """
-        draft = getattr(self, "dflash_module", None)
-        base_dtype = getattr(getattr(self, "_base_model", None), "dtype", None)
-        # Written as an early return rather than an `enabled` flag so that mypy narrows
-        # `draft` past None for the `next(draft.parameters())` below.
-        if (
-            draft is None
-            or not getattr(self, "dflash_fp32_master_weights", False)
-            or base_dtype not in (torch.float16, torch.bfloat16)
-        ):
-            return contextlib.nullcontext()
-        return torch.autocast(device_type=next(draft.parameters()).device.type, dtype=base_dtype)
-
-    def __call__(self, *args, **kwargs):
-        """Enter the draft's autocast around every forward, whoever calls it.
-
-        Placed on ``__call__`` rather than on ``forward`` deliberately: Domino, DSpark and
-        any future variant override ``forward`` and would each have to remember to wrap
-        it, and the one that forgot would not fail on a bf16 base until someone ran it
-        outside the Trainer. Overriding here covers them all, including the heads those
-        overrides apply after the backbone -- their parameters sit inside
-        ``dflash_module``, but the matmuls do not, so wrapping the module alone would miss
-        them.
-        """
-        with self._draft_autocast():
-            return super().__call__(*args, **kwargs)
 
     # Draft-module entries that legitimately come from the base model rather than the
     # exported draft checkpoint, so their absence (or presence) is not an error.
@@ -1316,18 +1230,16 @@ class HFDFlashModel(DFlashModel):
 
         attn_mask = self._build_generate_swa_mask(ctx_len, bsz, target_hidden.dtype, device)
 
-        # Draft forward. Wrapped explicitly because this method is called directly rather
-        # than through `__call__`, so it does not inherit the autocast installed there.
-        with self._draft_autocast():
-            draft_hidden = self.dflash_module(
-                noise_embedding=noise_embedding,
-                target_hidden=target_hidden,
-                position_ids=pos_ids,
-                attention_mask=attn_mask,
-            )
+        # Draft forward
+        draft_hidden = self.dflash_module(
+            noise_embedding=noise_embedding,
+            target_hidden=target_hidden,
+            position_ids=pos_ids,
+            attention_mask=attn_mask,
+        )
 
-            # Logits on positions 1..block_size-1 (skip anchor at position 0)
-            draft_logits = self._base_model_lm_head(draft_hidden[:, 1:, :])
+        # Logits on positions 1..block_size-1 (skip anchor at position 0)
+        draft_logits = self._base_model_lm_head(draft_hidden[:, 1:, :])
         draft_tokens = draft_logits.argmax(dim=-1)  # [B, block_size-1]
 
         # Return up to `steps` tokens. base_token already follows input_ids; draft_tokens is
