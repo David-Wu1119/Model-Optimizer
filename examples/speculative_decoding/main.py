@@ -279,10 +279,9 @@ def train():
     # meta, so the draft has no device, dtype or rotary buffer yet. Re-apply them here, before
     # the Trainer is built: create_optimizer freezes the Adam moment dtype off the parameters,
     # so a draft still sitting at the checkpoint's loaded dtype would silently spend the rest
-    # of the run without fp32 master weights. Passing the checkpoint also restores the
-    # precision `dtype="auto"` dropped on load. A no-op on a fresh convert.
+    # of the run without fp32 master weights. A no-op on a fresh convert.
     if isinstance(model, HFDFlashModel):
-        model.restore_draft_precision(checkpoint if checkpoint_is_hf else None)
+        model.restore_draft_precision()
 
     if dry_run:
         # is_master() is unreliable here: we return before the HF Trainer inits torch.distributed,

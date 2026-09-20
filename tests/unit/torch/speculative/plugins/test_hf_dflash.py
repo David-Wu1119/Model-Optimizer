@@ -1034,21 +1034,21 @@ class TestDFlashFp32MasterWeights:
         with tempfile.TemporaryDirectory() as tmp:
             model.save_pretrained(tmp)
             # `dtype="auto"` is what the resume path in examples/speculative_decoding/main.py
-            # uses, and it is also what collapses every tensor onto the base model's dtype.
+            # uses, and on its own it collapses every tensor onto the base model's dtype.
             restored = AutoModelForCausalLM.from_pretrained(tmp, dtype="auto")
 
-            # What the restore leaves behind on its own, which is the bug this guards: the
-            # draft comes back at the base model's dtype with the flag still set.
-            assert {p.dtype for p in restored.dflash_module.parameters()} == {
-                restored._base_model.dtype
-            }
+            # The dtype hints modify() gives the loader keep the draft out of that collapse,
+            # so it arrives in fp32 with its stored mantissa bits rather than needing a
+            # second pass over the checkpoint to recover them.
+            assert {p.dtype for p in restored.dflash_module.parameters()} == {torch.float32}
+            assert restored._base_model.dtype == torch.bfloat16
+            for name, param in restored.dflash_module.named_parameters():
+                assert torch.equal(param.detach(), reference[name]), name
 
-            restored.restore_draft_precision(tmp)
+            restored.restore_draft_precision()
 
         assert {p.dtype for p in restored.dflash_module.parameters()} == {torch.float32}
         assert hasattr(restored.dflash_module, "rotary_emb")
-        # The checkpoint stores the draft in fp32; reloading at the stored dtype is what
-        # keeps a resume from costing the run a rounding of its master weights.
         for name, param in restored.dflash_module.named_parameters():
             assert torch.equal(param.detach(), reference[name]), name
 
@@ -1064,6 +1064,25 @@ class TestDFlashFp32MasterWeights:
             for state in optimizer.state.values()
             for key in ("exp_avg", "exp_avg_sq")
         } == {torch.float32}
+
+    def test_restore_refuses_a_draft_the_loader_left_in_the_base_dtype(self):
+        """The dtype hints are transformers-internal, and they fail silently.
+
+        If a future transformers stops applying them the draft comes back in bf16 with no
+        error, and the fp32 mantissa bits the checkpoint held are already gone -- casting up
+        would only hide it and train from a rounded copy. Refuse instead.
+        """
+        model = _converted(fp32_master_weights=True)
+        model.dflash_module.to(torch.bfloat16)  # what an unhonoured hint leaves behind
+
+        with pytest.raises(RuntimeError, match="did not apply the fp32 dtype hints"):
+            model.restore_draft_precision()
+
+    def test_restore_is_silent_when_the_flag_is_off(self):
+        """An unpromoted draft is supposed to sit at the base dtype, so nothing is wrong."""
+        model = _converted(fp32_master_weights=False)
+        model.restore_draft_precision()
+        assert {p.dtype for p in model.dflash_module.parameters()} == {torch.bfloat16}
 
     def test_forward_needs_no_autocast_from_the_caller(self):
         """A promoted draft is fed bf16 hidden states by the frozen bf16 target.

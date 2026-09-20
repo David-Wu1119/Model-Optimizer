@@ -527,6 +527,18 @@ class HFDFlashModel(DFlashModel):
         # so the loaded tensors get cast alongside the rest of the module.
         if self.dflash_init_checkpoint:
             self._load_init_checkpoint(self.dflash_init_checkpoint)
+        # Tell the loader the draft keeps fp32 even though the rest of the checkpoint is
+        # bf16. Two spellings because transformers moved the wiring: >=5.3 reads
+        # `_keep_in_fp32_modules_strict` off the instance at load time, while 5.0-5.2 build
+        # `dtype_plan` eagerly in `post_init`, which has already run by the time modify()
+        # does. `restore_draft_precision` asserts the outcome rather than trusting either.
+        if self.dflash_fp32_master_weights:
+            self._keep_in_fp32_modules_strict = set(
+                getattr(self, "_keep_in_fp32_modules_strict", None) or ()
+            ) | {"dflash_module"}
+            if isinstance(getattr(self, "dtype_plan", None), dict):
+                self.dtype_plan["dflash_module"] = torch.float32
+
         # Match base model dtype/device. Skipped when the base is on meta, which is the
         # from_pretrained restore path: the weights are not loaded yet and the draft cannot be
         # placed. `restore_draft_precision` is what picks it up again there.
@@ -589,7 +601,7 @@ class HFDFlashModel(DFlashModel):
         )
         self.dflash_module._maybe_init_rotary_emb(device=base_device)
 
-    def restore_draft_precision(self, checkpoint_dir=None):
+    def restore_draft_precision(self):
         """Re-apply the draft's device, dtype and rotary buffer after a checkpoint restore.
 
         ``modify()`` runs during ``from_pretrained`` with the base model still on meta, so it
@@ -599,51 +611,25 @@ class HFDFlashModel(DFlashModel):
         quietly loses the feature. Call this once the weights are loaded and before the
         Trainer builds the optimizer. A no-op on a freshly converted model, which did all
         three in ``modify()``.
-
-        ``checkpoint_dir`` additionally restores the precision the draft was *saved* at.
-        ``from_pretrained(dtype="auto")`` gives every tensor a single dtype -- the base
-        model's -- which discards the extra mantissa bits an fp32 draft wrote to disk.
-        Reloading those tensors at their stored dtype is the only way to get them back, and
-        without it a resume silently costs the run one rounding of its master weights. Pass
-        it only for an HF-format checkpoint; it raises if there are no safetensors there,
-        which is better than silently keeping the wrong precision.
         """
         base_device = self._base_device()
         if base_device.type == "meta":
             return
+        # Checked BEFORE _place_draft, which would cast a bf16 draft up to fp32 and hide
+        # this. The dtype hints modify() gives the loader are the only chance to keep the
+        # mantissa bits an fp32 draft wrote to disk; once they are dropped, casting up
+        # yields a rounded copy, so the honest outcome is to stop rather than train on it.
+        if self.dflash_fp32_master_weights:
+            loaded = {p.dtype for p in self.dflash_module.parameters()}
+            if loaded and loaded != {torch.float32}:
+                raise RuntimeError(
+                    f"DFlash: dflash_fp32_master_weights is set but the draft loaded as "
+                    f"{loaded}, so transformers {transformers.__version__} did not apply the "
+                    f"fp32 dtype hints modify() installed. The checkpoint's fp32 mantissa "
+                    f"bits are already gone for this load. Use a transformers version where "
+                    f"the hints apply, or set dflash_fp32_master_weights=false."
+                )
         self._place_draft(base_device)
-        if checkpoint_dir is not None:
-            self._reload_draft_weights_at_stored_precision(checkpoint_dir)
-
-    def _reload_draft_weights_at_stored_precision(self, checkpoint_dir):
-        """Copy the draft's tensors back out of the checkpoint at the dtype they were saved in."""
-        # Imported here rather than at module scope to keep this file's own import-time
-        # footprint minimal; hf_checkpoint_utils itself only needs huggingface_hub + safetensors.
-        from modelopt.torch.utils.plugins.hf_checkpoint_utils import (
-            indexed_weight_map,
-            read_safetensors_subset,
-        )
-
-        weight_map = indexed_weight_map(checkpoint_dir)
-        if not weight_map:
-            raise RuntimeError(
-                f"No safetensors checkpoint at {checkpoint_dir} "
-                "(expected model.safetensors or model.safetensors.index.json)."
-            )
-        prefix = "dflash_module."
-        stored = read_safetensors_subset(checkpoint_dir, weight_map, lambda k: k.startswith(prefix))
-        own = dict(self.dflash_module.named_parameters())
-        with torch.no_grad():
-            for key, saved in stored.items():
-                param = own.get(key[len(prefix) :])
-                if param is not None and param.shape == saved.shape:
-                    param.copy_(saved.to(param.dtype))
-        logger.info(
-            "DFlash draft precision restore: %d/%d tensors reloaded from %s.",
-            len(stored),
-            len(own),
-            checkpoint_dir,
-        )
 
     def _draft_autocast(self):
         """Autocast for a promoted draft, so the flag does not depend on its caller.
