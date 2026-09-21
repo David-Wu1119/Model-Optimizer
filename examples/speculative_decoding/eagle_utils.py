@@ -201,6 +201,16 @@ class EagleTrainerWithAccLog(Trainer):
                     f"dflash_fp32_master_weights needs an AdamW-family optimizer to hold the "
                     f"master weights, but training.optim resolved to {cls.__name__}."
                 )
+            # `optim` defaults to adamw_torch_fused, and the fused kernel writes the update
+            # straight into the parameter it was handed -- which for us is the bf16 model
+            # weight, not the fp32 master, so the master would never advance. foreach is the
+            # multi-tensor path and is equivalent here.
+            if kwargs.pop("fused", False):
+                kwargs.setdefault("foreach", True)
+                print_rank_0(
+                    "dflash_fp32_master_weights: using the foreach AdamW path instead of "
+                    "the fused one, which cannot hold master weights."
+                )
             decay = self.get_decay_parameter_names(self.model)
             named = [(n, p) for n, p in self.model.named_parameters() if p.requires_grad]
             self.optimizer = MasterWeightAdamW(
