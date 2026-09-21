@@ -946,9 +946,11 @@ if HAS_TE:
 
             # Per-expert amax: assign the same global expert identity the weights use.
             ep_group, expt_dp_group = self._expert_parallel_groups()
+            parallel_state = self.parallel_state
+            assert parallel_state is not None
+            expt_tp_group = parallel_state.tensor_parallel_group.group
             num_global_experts = get_pg_size(ep_group) * self.num_gemms
             local_expert_indices_offset = get_pg_rank(ep_group) * self.num_gemms
-            edp_replica_id = get_pg_rank(expt_dp_group)
             ep_axis = len(sharded_offsets)
             for gemm_idx, subs in enumerate(per_expert_subs):
                 if not subs:
@@ -970,16 +972,18 @@ if HAS_TE:
                     if axis is not None
                 }
                 sub_sd = make_sharded_tensors_for_checkpoint(
-                    expert_state, "", expert_axis, new_sharded_offsets
+                    expert_state,
+                    "",
+                    expert_axis,
+                    new_sharded_offsets,
+                    tp_group=expt_tp_group,
+                    dp_cp_group=expt_dp_group,
                 )
                 # Rewrite each ShardedTensor.key to carry the global expert identity (dict keys,
                 # which map to the local buffers on restore, are left untouched).
                 replace_prefix_for_sharding(sub_sd, f"{gemm_idx}.", expert_prefix)
                 for sub, _, _ in subs:
                     sh_ten = sub_sd[f"{gemm_idx}.weight_quantizer.{sub}"]
-                    replica_id = sh_ten.replica_id
-                    if len(replica_id) == 3:
-                        sh_ten.replica_id = (*replica_id[:2], edp_replica_id)
                     sharded_state_dict[f"{prefix}weight_quantizer.{gemm_idx}.{sub}"] = sh_ten
             return sharded_state_dict
 

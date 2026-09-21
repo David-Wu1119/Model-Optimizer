@@ -1184,6 +1184,8 @@ def _test_te_grouped_sharded_state_dict_reshard_helper(
     checkpoint_path,
     rank,
     size,
+    save_etp_size=None,
+    load_etp_size=None,
 ):
     """Round-trip TEGroupedMLP amax through a topology change."""
     num_experts = 4
@@ -1191,12 +1193,14 @@ def _test_te_grouped_sharded_state_dict_reshard_helper(
     initialize_for_megatron(
         tensor_model_parallel_size=save_tp_size,
         expert_model_parallel_size=save_ep_size,
+        expert_tensor_parallel_size=save_etp_size,
         seed=SEED,
     )
 
     source = _gpt_model_provider(
         tp_size=save_tp_size,
         ep_size=save_ep_size,
+        etp_size=save_etp_size,
         hidden_size=32,
         moe_grouped_gemm=True,
         transformer_impl="transformer_engine",
@@ -1219,11 +1223,13 @@ def _test_te_grouped_sharded_state_dict_reshard_helper(
     initialize_for_megatron(
         tensor_model_parallel_size=load_tp_size,
         expert_model_parallel_size=load_ep_size,
+        expert_tensor_parallel_size=load_etp_size,
         seed=SEED,
     )
     target = _gpt_model_provider(
         tp_size=load_tp_size,
         ep_size=load_ep_size,
+        etp_size=load_etp_size,
         hidden_size=32,
         moe_grouped_gemm=True,
         transformer_impl="transformer_engine",
@@ -1301,6 +1307,24 @@ def test_te_grouped_sharded_state_dict_reshard(
             quant_cfg,
             expect_global_amax,
             tmp_path,
+        )
+    )
+
+
+def test_te_grouped_sharded_state_dict_combined_tp_ep(dist_workers_size_4, tmp_path):
+    """Round-trip grouped expert quantizer state with TP and EP both greater than one."""
+    dist_workers_size_4.run(
+        partial(
+            _test_te_grouped_sharded_state_dict_reshard_helper,
+            2,
+            2,
+            2,
+            2,
+            mtq.NVFP4_DEFAULT_CFG,
+            False,
+            tmp_path,
+            save_etp_size=1,
+            load_etp_size=1,
         )
     )
 
