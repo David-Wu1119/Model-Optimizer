@@ -47,6 +47,7 @@ from .algo_cfg import (
     capabilities_for,
     compile_algo_cfg,
     derive_handoff,
+    prepare_grid,
     stage_predicate,
 )
 from .compress import compress_convert, compress_restore, update_compress_metadata
@@ -562,6 +563,14 @@ class MseCalibrateModeDescriptor(BaseCalibrateModeDescriptor):
         produces=frozenset({WEIGHT_AMAX, INPUT_AMAX}),
     )
 
+    @classmethod
+    def capabilities_for_cfg(cls, cfg: dict) -> AlgoCapabilities:
+        """The fp8 scale sweep searches stored per-block scales, so it needs a static grid."""
+        caps = super().capabilities_for_cfg(cfg)
+        if cfg.get("fp8_scale_sweep"):
+            caps = replace(caps, requires_grid="static")
+        return caps
+
 
 @CalibrateModeRegistry.register_mode
 class LocalHessianModeDescriptor(BaseCalibrateModeDescriptor):
@@ -585,6 +594,14 @@ class LocalHessianModeDescriptor(BaseCalibrateModeDescriptor):
         produces=frozenset({WEIGHT_AMAX, INPUT_AMAX}),
         honors_write_mask=False,
     )
+
+    @classmethod
+    def capabilities_for_cfg(cls, cfg: dict) -> AlgoCapabilities:
+        """The fp8 scale sweep searches stored per-block scales, so it needs a static grid."""
+        caps = super().capabilities_for_cfg(cfg)
+        if cfg.get("fp8_scale_sweep"):
+            caps = replace(caps, requires_grid="static")
+        return caps
 
 
 @CalibrateModeRegistry.register_mode
@@ -626,6 +643,7 @@ class AWQLiteModeDescriptor(BaseCalibrateModeDescriptor):
         consumes=frozenset({"acts", WEIGHT}),
         produces=frozenset({PRE_QUANT_SCALE, WEIGHT_AMAX, INPUT_AMAX, WEIGHT}),
         conflicts_with=frozenset({PRE_QUANT_SCALE}),
+        requires_grid="dynamic",
     )
 
 
@@ -646,6 +664,7 @@ class AWQClipModeDescriptor(BaseCalibrateModeDescriptor):
         optimizes="weight",
         consumes=frozenset({"acts", WEIGHT, WEIGHT_AMAX}),
         produces=frozenset({WEIGHT_AMAX, INPUT_AMAX}),
+        requires_grid="dynamic",
     )
 
 
@@ -666,6 +685,7 @@ class AWQFullModeDescriptor(BaseCalibrateModeDescriptor):
         consumes=frozenset({"acts", WEIGHT}),
         produces=frozenset({PRE_QUANT_SCALE, WEIGHT_AMAX, INPUT_AMAX, WEIGHT}),
         conflicts_with=frozenset({PRE_QUANT_SCALE}),
+        requires_grid="dynamic",
     )
 
 
@@ -754,9 +774,10 @@ def calibration_plan_convert(
         ]
         # Only algorithms exposing a knob for it can act on a handoff; the rest would reject
         # the extra kwarg.
+        grid_changed = prepare_grid(model, stage)
         handoff = {
             key: value
-            for key, value in derive_handoff(model, plan, i).items()
+            for key, value in ({} if grid_changed else derive_handoff(model, plan, i)).items()
             if key in descriptor.config_class.model_fields
         }
         # The user's explicit value wins: the handoff is only an inference.

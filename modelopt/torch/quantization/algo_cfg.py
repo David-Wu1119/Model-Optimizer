@@ -32,6 +32,7 @@ __all__ = [
     "CalibrationPlan",
     "capabilities_for",
     "compile_algo_cfg",
+    "prepare_grid",
     "stage_predicate",
 ]
 
@@ -61,6 +62,10 @@ class AlgoCapabilities:
     conflicts_with: frozenset[str] = frozenset()
     #: Honours the ``should_process`` write-mask. One that does not must never be scoped.
     honors_write_mask: bool = True
+    #: NVFP4 weight grid this algorithm needs: ``"static"`` (a stored per-block amax it can
+    #: search) or ``"dynamic"`` (scales derived in-kernel). ``None`` = works on either.
+    #: Dynamic upgrades to static as a prep step; static never downgrades.
+    requires_grid: str | None = None
 
 
 WEIGHT_AMAX = "weight_amax"
@@ -381,6 +386,24 @@ def _validate_scopes(model: nn.Module, plan: CalibrationPlan, sink: list[str]) -
                 )
 
 
+def _validate_grid(model: nn.Module, plan: CalibrationPlan, sink: list[str]) -> None:
+    for stage in plan:
+        caps = stage.capabilities
+        if caps is None or caps.requires_grid != "dynamic":
+            continue
+        _, quantizers = stage_targets(model, stage)
+        static = sorted(
+            q for q in quantizers if getattr(model.get_submodule(q), "is_nvfp4_static", False)
+        )
+        if static:
+            _report(
+                f"{stage.algo!r} needs a dynamic NVFP4 weight grid but {len(static)} target(s) "
+                f"are static (e.g. {static[0]!r}), and static never downgrades. Declare "
+                "`type: dynamic` in quant_cfg; a later stage needing static will upgrade.",
+                sink=sink,
+            )
+
+
 def _validate_fused_siblings(model: nn.Module, plan: CalibrationPlan, sink: list[str]) -> None:
     pipeline_of: dict[str, tuple[str | None, ...]] = {}
     for stage in plan:
@@ -483,6 +506,7 @@ def compile_algo_cfg(
     if model is not None:
         violations: list[str] = []
         _validate_scopes(model, plan, violations)
+        _validate_grid(model, plan, violations)
         _validate_fused_siblings(model, plan, violations)
         _validate_dependencies(model, plan, violations)
         if violations:
@@ -536,3 +560,22 @@ def derive_handoff(model: nn.Module, plan: CalibrationPlan, i: int) -> dict:
 def _stage_targets(model: nn.Module, stage: AlgoStage) -> set[str]:
     modules, quantizers = stage_targets(model, stage)
     return modules | quantizers
+
+
+def prepare_grid(model: nn.Module, stage: AlgoStage) -> bool:
+    """Upgrade this stage's NVFP4 weight quantizers to a static grid if it requires one.
+
+    Returns ``True`` when the grid changed. The stage's own ``max_calibrate`` then seeds the
+    per-block amax and promotes; any amax an earlier stage produced described the old grid.
+    """
+    caps = stage.capabilities
+    if caps is None or caps.requires_grid != "static":
+        return False
+    _, quantizers = stage_targets(model, stage)
+    upgrade = [q for q in quantizers if getattr(model.get_submodule(q), "is_nvfp4_dynamic", False)]
+    for name in upgrade:
+        quantizer = model.get_submodule(name)
+        quantizer.block_sizes["type"] = "static"
+        # A dynamic grid's amax is one global scalar and means nothing per block.
+        quantizer.reset_amax()
+    return bool(upgrade)

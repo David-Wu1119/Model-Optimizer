@@ -673,3 +673,48 @@ def test_legacy_path_is_numerically_unchanged():
     legacy_amax, planned_amax = _weight_amax(legacy), _weight_amax(planned)
     assert set(legacy_amax) == set(planned_amax)
     assert all(torch.equal(legacy_amax[k], planned_amax[k]) for k in legacy_amax)
+
+
+# ---------------------------------------------------------------------------- nvfp4 grid
+
+NVFP4_DYN = {"num_bits": (2, 1), "block_sizes": {-1: 16, "type": "dynamic", "scale_bits": (4, 3)}}
+NVFP4_STA = {"num_bits": (2, 1), "block_sizes": {-1: 16, "type": "static", "scale_bits": (4, 3)}}
+
+
+def _nvfp4_model(wcfg):
+    torch.manual_seed(0)
+    model = nn.Sequential(nn.Linear(128, 64, bias=False))
+    mtq.quantize(
+        model,
+        {
+            "quant_cfg": {
+                "default": {"enable": False},
+                "*input_quantizer": {"enable": False},
+                "*weight_quantizer": {**wcfg, "enable": True},
+            },
+            "algorithm": None,
+        },
+        forward_loop=None,
+    )
+    return model
+
+
+def test_awq_needs_a_dynamic_grid_and_static_never_downgrades():
+    with pytest.raises(AlgoCfgValidationError, match="needs a dynamic NVFP4 weight grid"):
+        _compile(_nvfp4_model(NVFP4_STA), {"module_name": "*", "cfg": ["awq_lite"]})
+
+
+def test_fp8_scale_sweep_requires_static_and_a_dynamic_grid_is_upgraded():
+    from modelopt.torch.quantization.algo_cfg import capabilities_for, prepare_grid
+
+    assert capabilities_for("mse", {"fp8_scale_sweep": True}).requires_grid == "static"
+    assert capabilities_for("mse").requires_grid is None
+
+    model = _nvfp4_model(NVFP4_DYN)
+    stage = _compile(
+        model, {"module_name": "*", "cfg": [{"method": "mse", "fp8_scale_sweep": True}]}
+    )[0]
+    quantizer = model[0].weight_quantizer
+    assert quantizer.block_sizes["type"] == "dynamic"
+    prepare_grid(model, stage)
+    assert model[0].weight_quantizer.block_sizes["type"] == "static"
