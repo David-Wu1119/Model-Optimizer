@@ -999,16 +999,6 @@ class MseCalibConfig(_SharedStatesConfig, QuantizeAlgorithmConfig):
         description="If True, the amax will be synced across the distributed processes.",
     )
 
-    skip_max_init: bool = ModeloptField(
-        default=False,
-        title="Skip the max-calibration that initializes amax before the MSE search.",
-        description="MSE normally runs ``max_calibrate`` first to seed ``amax``. When a previous "
-        "stage of an ``algo_cfg`` pipeline already produced weights and an initial ``amax`` "
-        "(e.g. ``gptq`` or ``awq_lite``), re-running max calibration would discard nothing but "
-        "does cost a forward; more importantly the search should refine *that* stage's amax. "
-        "The calibration-plan executor sets this automatically for non-leading MSE stages.",
-    )
-
 
 class LocalHessianCalibConfig(_SharedStatesConfig, QuantizeAlgorithmConfig):
     """Configuration for local Hessian-weighted MSE calibration.
@@ -1250,17 +1240,6 @@ class GPTQCalibConfig(QuantizeAlgorithmConfig):
         title="Use fused Triton kernel for GPTQ.",
         description="""When True, use a fused Triton kernel that combines quantization and
         per-column error propagation into one launch per GPTQ block.""",
-    )
-
-    skip_max_init: bool = ModeloptField(
-        default=False,
-        title="Skip the max-calibration that initializes amax before the GPTQ update.",
-        description="GPTQ normally runs ``max_calibrate`` first so every quantizer has an amax to "
-        "round against. When an earlier stage of an ``algo_cfg`` pipeline already produced that "
-        "amax -- e.g. an ``mse`` range search -- re-deriving it from max would discard the search "
-        "and make GPTQ compensate against a grid the model will not use. The calibration-plan "
-        "executor sets this automatically for non-leading GPTQ stages; it must not be set when "
-        "GPTQ runs first, since nothing else would initialize amax.",
     )
 
     @model_validator(mode="after")

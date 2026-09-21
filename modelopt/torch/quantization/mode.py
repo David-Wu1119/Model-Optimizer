@@ -251,6 +251,7 @@ def wrapped_calib_func(
     func: Callable | None = None,
     supports_layerwise: bool = True,
     should_process: Callable[[nn.Module], bool] | None = None,
+    handoff: dict | None = None,
 ) -> ConvertReturnType:
     """Wrap the calibration function to be compatible with the ModelOpt convert entrypoint.
 
@@ -282,12 +283,15 @@ def wrapped_calib_func(
         # For backward compatibility
         kwargs["algorithm"] = method
 
-    # Scoping write-mask. `None` means whole model (today's behaviour) so it is not forwarded;
-    # only algorithms declaring the parameter get it. `algo_cfg` refuses to scope the rest.
-    if should_process is not None and func is not None:
-        params = inspect.signature(func).parameters
-        if "should_process" in params:
-            kwargs["should_process"] = should_process
+    # Values derived from the plan -- the write-mask and the handoff -- are function arguments,
+    # never config fields: they describe the plan, not the algorithm the user asked for. Only
+    # algorithms that declare the parameter receive it; `algo_cfg` refuses to scope the rest.
+    params = inspect.signature(func).parameters if func is not None else {}
+    if should_process is not None and "should_process" in params:
+        kwargs["should_process"] = should_process
+    for key, value in (handoff or {}).items():
+        if key in params:
+            kwargs[key] = value
 
     moe_calib_experts_ratio = kwargs.pop("moe_calib_experts_ratio", None)
     if moe_calib_experts_ratio is not None:
@@ -592,7 +596,6 @@ class LocalHessianModeDescriptor(BaseCalibrateModeDescriptor):
         optimizes="weight",
         consumes=frozenset({WEIGHT, WEIGHT_AMAX, "acts"}),
         produces=frozenset({WEIGHT_AMAX, INPUT_AMAX}),
-        honors_write_mask=False,
     )
 
     @classmethod
@@ -775,13 +778,8 @@ def calibration_plan_convert(
         # Only algorithms exposing a knob for it can act on a handoff; the rest would reject
         # the extra kwarg.
         grid_changed = prepare_grid(model, stage)
-        handoff = {
-            key: value
-            for key, value in ({} if grid_changed else derive_handoff(model, plan, i)).items()
-            if key in descriptor.config_class.model_fields
-        }
-        # The user's explicit value wins: the handoff is only an inference.
-        stage_config = descriptor.config_class(**{**handoff, **stage.cfg})
+        handoff = {} if grid_changed else derive_handoff(model, plan, i)
+        stage_config = descriptor.config_class(**stage.cfg)
         wrapped_calib_func(
             model,
             stage_config,
@@ -789,6 +787,7 @@ def calibration_plan_convert(
             func=type(descriptor)._calib_func,
             supports_layerwise=type(descriptor)._supports_layerwise,
             should_process=stage_predicate(model, stage),
+            handoff=handoff,
         )
 
     metadata = {}

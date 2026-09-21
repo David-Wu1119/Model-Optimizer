@@ -1061,6 +1061,8 @@ def local_hessian_calibrate(
     block_size: int = 16,
     debug: bool = False,
     shared_states: Mapping[str, Mapping[str, Sequence[str]]] | None = None,
+    skip_max_init: bool = False,
+    should_process: Callable[[nn.Module], bool] | None = None,
 ):
     """Calibrate weight quantizers by minimizing the Hessian-weighted error.
 
@@ -1096,7 +1098,14 @@ def local_hessian_calibrate(
 
     # Phase 1: max-calibrate (also bootstraps dead experts + promotes/syncs NVFP4 static).
     print_rank_0("local_hessian: Running max calibration for all quantizers...")
-    max_calibrate(model, forward_loop, distributed_sync, shared_states=shared_states)
+    if not skip_max_init:
+        max_calibrate(
+            model,
+            forward_loop,
+            distributed_sync,
+            shared_states=shared_states,
+            should_process=should_process,
+        )
 
     name_to_module = dict(model.named_modules())
 
@@ -1152,6 +1161,7 @@ def local_hessian_calibrate(
         fp8_scale_sweep=fp8_scale_sweep,
         error_func_for=lambda q: error_funcs.get(id(q)),
         hessian_for=lambda q: hessians.get(id(q)),
+        should_process=should_process,
     )
 
     # Release the per-block Hessians (held by the error_func closures, calibrators, and the

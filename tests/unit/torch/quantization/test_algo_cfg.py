@@ -475,22 +475,19 @@ def test_handoff_fires_when_the_producer_covers_the_consumer(quantized):
     assert derive_handoff(quantized, plan, 1) == {"skip_max_init": True}
 
 
-def test_a_user_written_kwarg_beats_the_derived_handoff():
-    model = mtq.quantize(
-        _model(),
-        {
-            "quant_cfg": QUANT_CFG,
-            "algorithm": None,
-            "algo_cfg": [
-                {
-                    "module_name": "*mlp*",
-                    "cfg": ["max", {"method": "mse", "skip_max_init": False}],
-                }
-            ],
-        },
-        _forward_loop,
-    )
-    assert _weight_amax(model)
+def test_the_handoff_is_not_user_facing_config():
+    import inspect
+
+    from modelopt.torch.quantization.config import GPTQCalibConfig, MseCalibConfig
+    from modelopt.torch.quantization.model_calib import gptq, local_hessian_calibrate, mse_calibrate
+
+    # The handoff describes the plan, not the algorithm the user asked for, so it reaches the
+    # calibration function as an argument (like `should_process`) and is not a settable field.
+    for cfg in (MseCalibConfig, GPTQCalibConfig):
+        assert "skip_max_init" not in cfg.model_fields
+    for func in (mse_calibrate, gptq, local_hessian_calibrate):
+        assert "skip_max_init" in inspect.signature(func).parameters
+        assert "should_process" in inspect.signature(func).parameters
 
 
 def test_unknown_algorithm_is_fatal_even_when_not_strict(quantized):
@@ -596,12 +593,12 @@ def test_quantizer_scoped_entry_leaves_the_fallback_able_to_calibrate_weights():
 
 def test_algorithms_that_ignore_the_write_mask_cannot_be_scoped(quantized):
     with pytest.raises(AlgoCfgValidationError, match="does not honour the scoping write-mask"):
-        _compile(quantized, {"module_name": "*mlp*", "cfg": ["local_hessian"]})
+        _compile(quantized, {"module_name": "*mlp*", "cfg": ["lsq"]})
 
 
 def test_algorithms_that_ignore_the_write_mask_are_still_usable_whole_model(quantized):
-    plan = _compile(quantized, {"quantizer_name": "*", "cfg": ["local_hessian"]})
-    assert [stage.algo for stage in plan] == ["local_hessian"]
+    plan = _compile(quantized, {"quantizer_name": "*", "cfg": ["lsq"]})
+    assert [stage.algo for stage in plan] == ["lsq"]
 
 
 def test_scoping_never_toggles_enable_state():
