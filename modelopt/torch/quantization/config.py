@@ -158,7 +158,7 @@ from typing import Any, ClassVar, Literal, TypeAlias
 from pydantic import Field, ValidationInfo, field_serializer, field_validator, model_validator
 
 from modelopt.torch.opt.config import ModeloptBaseConfig, ModeloptField
-from modelopt.torch.opt.config_loader import _parse_exmy, load_config
+from modelopt.torch.opt.config_loader import load_config
 from modelopt.torch.utils.network import ConstructorLike
 
 
@@ -322,12 +322,11 @@ class RotateConfig(ModeloptBaseConfig):
 def _as_exmy(value: Any) -> tuple[int, int] | None:
     """Normalize a ``num_bits`` / ``scale_bits`` value to an ``(E, M)`` tuple, else None.
 
-    YAML arrives already parsed into a tuple; the Python API keeps whatever the caller
-    wrote, commonly the ``"e2m1"`` string.
+    Deliberately does not accept the ``"e2m1"`` string spelling. Only the YAML loader
+    normalizes it (``_parse_exmy_num_bits``); a hand-written Python config keeps the string,
+    and ``TensorQuantizer.is_nvfp4_static`` compares against tuples -- so on that config the
+    4/6 flag really is inert, and the rule below should say so rather than bless it.
     """
-    if isinstance(value, str):
-        parsed = _parse_exmy(value)
-        return parsed if isinstance(parsed, tuple) else None
     if isinstance(value, (tuple, list)) and len(value) == 2:
         return (value[0], value[1]) if all(isinstance(v, int) for v in value) else None
     return None
@@ -1024,8 +1023,9 @@ class FourOverSixCalibConfig(_SharedStatesConfig, QuantizeAlgorithmConfig):
 
     Pairs with the ``four_over_six: true`` flag in a weight quantizer's ``block_sizes``,
     which normalizes the per-block FP8 scales by 256 instead of 448 to leave headroom for
-    the M=4 blocks. :class:`QuantizeConfig` rejects a config that has one half without the
-    other.
+    the M=4 blocks. :func:`mtq.quantize` rejects a config that has one half without the
+    other; constructing :class:`QuantizeConfig` directly only warns, so a stored config can
+    still be reconstructed on the restore path.
 
     .. note::
         Supported via ``mtq.quantize`` plus HF / Megatron export only, not
@@ -1529,7 +1529,7 @@ def _algorithm_methods(algorithm: QuantizeAlgoCfgType) -> list[str | None]:
     return methods
 
 
-def has_four_over_six(cfg: Any) -> bool:
+def _has_four_over_six_cfg(cfg: Any) -> bool:
     """True if a quantizer attribute config (object or mapping) sets the 4/6 flag."""
     if cfg is None:
         return False
@@ -1562,7 +1562,7 @@ def _four_over_six_numerics_problem(cfg: Any) -> str | None:
     )
 
 
-def four_over_six_config_problems(quant_cfg, algorithm: QuantizeAlgoCfgType) -> list[str]:
+def _four_over_six_config_problems(quant_cfg, algorithm: QuantizeAlgoCfgType) -> list[str]:
     """Report every way a config has one half of NVFP4 4/6 without the other.
 
     Either alone is silently wrong: the flag without a search pays for headroom nothing
@@ -1582,7 +1582,7 @@ def four_over_six_config_problems(quant_cfg, algorithm: QuantizeAlgoCfgType) -> 
             continue
         # A SequentialQuantizer entry carries one attribute config per level.
         for level in cfg if isinstance(cfg, list) else [cfg]:
-            if not has_four_over_six(level):
+            if not _has_four_over_six_cfg(level):
                 continue
             flagged.append(name)
             problem = _four_over_six_numerics_problem(level)
@@ -1788,7 +1788,7 @@ class QuantizeConfig(ModeloptBaseConfig):
         where the mismatch is not actionable and raising would make an already-saved
         checkpoint unloadable. Enforcement lives at the quantize boundary instead.
         """
-        for problem in four_over_six_config_problems(self.quant_cfg, self.algorithm):
+        for problem in _four_over_six_config_problems(self.quant_cfg, self.algorithm):
             warnings.warn(f"NVFP4 four_over_six: {problem}")
         return self
 

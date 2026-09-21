@@ -35,8 +35,8 @@ from modelopt.torch.quantization.config import (
     FourOverSixCalibConfig,
     QuantizeConfig,
     QuantizerAttributeConfig,
+    _four_over_six_config_problems,
     choices,
-    four_over_six_config_problems,
     normalize_quant_cfg_list,
 )
 from modelopt.torch.quantization.mode import BaseCalibrateModeDescriptor, CalibrateModeRegistry
@@ -278,7 +278,7 @@ class TestFourOverSixCoordination:
 
     @staticmethod
     def _problems(quant_cfg, algorithm):
-        return four_over_six_config_problems(normalize_quant_cfg_list(quant_cfg), algorithm)
+        return _four_over_six_config_problems(normalize_quant_cfg_list(quant_cfg), algorithm)
 
     def test_flag_requires_static_nvfp4(self):
         assert self._problems(
@@ -325,18 +325,27 @@ class TestFourOverSixCoordination:
             "four_over_six",
         )
 
-    def test_flag_accepts_the_exmy_string_spelling(self):
-        """Recipe YAML arrives as tuples, but the Python API keeps whatever was written."""
-        cfg = QuantizerAttributeConfig(
-            num_bits="e2m1",
-            block_sizes={
-                -1: BLOCK_SIZE,
-                "type": "static",
-                "scale_bits": "e4m3",
-                "four_over_six": True,
-            },
+    def test_flag_is_reported_for_the_exmy_string_spelling(self):
+        """Only the YAML loader normalizes ``"e2m1"``; a Python config keeps the string.
+
+        ``is_nvfp4_static`` compares against tuples, so on that config the flag is inert --
+        rule 1 matches the runtime rather than blessing it.
+        """
+        problems = self._problems(
+            _weight_only_quant_cfg(
+                {
+                    "num_bits": "e2m1",
+                    "block_sizes": {
+                        -1: BLOCK_SIZE,
+                        "type": "static",
+                        "scale_bits": "e4m3",
+                        "four_over_six": True,
+                    },
+                }
+            ),
+            "four_over_six",
         )
-        assert cfg.block_sizes["four_over_six"]
+        assert any("only supported on static NVFP4" in p for p in problems)
 
     def test_flag_without_a_weight_scale_search_is_reported(self):
         """`max` never makes the M=6/M=4 choice, so the 256 normalization buys nothing."""
@@ -394,7 +403,7 @@ class TestFourOverSixCoordination:
     def test_shipped_preset_uses_the_named_algorithm(self):
         assert mtq.NVFP4_FOUR_OVER_SIX_CFG["algorithm"] == "four_over_six"
         cfg = QuantizeConfig(**mtq.NVFP4_FOUR_OVER_SIX_CFG)
-        assert not four_over_six_config_problems(cfg.quant_cfg, cfg.algorithm)
+        assert not _four_over_six_config_problems(cfg.quant_cfg, cfg.algorithm)
 
 
 class TestFourOverSixIsEnforcedAtQuantizeTime:

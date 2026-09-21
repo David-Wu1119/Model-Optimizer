@@ -22,7 +22,7 @@ imports:
   w4a4_nvfp4_nvfp4_four_over_six: configs/ptq/units/w4a4_nvfp4_nvfp4_four_over_six
   default_disabled_quantizers: configs/ptq/units/default_disabled_quantizers
 
-# Weight-only: the activation quantizers are max-calibrated.
+# Weight-only: the search does not touch the dynamic activation quantizers.
 algorithm: four_over_six
 quant_cfg:
   - $import: base_disable_all

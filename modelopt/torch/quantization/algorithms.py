@@ -50,7 +50,12 @@ from ._auto_quantize_cost import (
     get_auto_quantize_cost_model,
     normalize_auto_quantize_constraints,
 )
-from .config import QuantizeConfig, QuantizerAttributeConfig, QuantizerCfgEntry, has_four_over_six
+from .config import (
+    QuantizeConfig,
+    QuantizerAttributeConfig,
+    QuantizerCfgEntry,
+    _has_four_over_six_cfg,
+)
 from .conversion import set_quantizer_by_cfg
 from .nn import QuantLinearConvBase, QuantModule, SequentialQuantizer, TensorQuantizer
 from .utils import is_quantized_linear
@@ -2194,7 +2199,9 @@ def _has_four_over_six(quant_cfg: list[dict]) -> bool:
         if entry.get("enable") is False:
             continue
         cfg = entry.get("cfg")
-        if any(has_four_over_six(level) for level in (cfg if isinstance(cfg, list) else [cfg])):
+        if any(
+            _has_four_over_six_cfg(level) for level in (cfg if isinstance(cfg, list) else [cfg])
+        ):
             return True
     return False
 
