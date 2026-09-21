@@ -36,7 +36,7 @@ from transformers import TrainerCallback
 __all__ = ["MasterWeightAdamW", "VerifyMasterWeightsCallback"]
 
 # State keys this optimizer adds or owns, all of which must stay fp32 across a resume.
-_FP32_STATE_KEYS = ("master", "exp_avg", "exp_avg_sq")
+_FP32_STATE_KEYS = ("master", "exp_avg", "exp_avg_sq", "max_exp_avg_sq")
 
 
 class MasterWeightAdamW(torch.optim.AdamW):
@@ -52,11 +52,35 @@ class MasterWeightAdamW(torch.optim.AdamW):
 
     @torch.no_grad()
     def step(self, closure=None):
-        """Run one AdamW step in fp32 and write the result back at the parameter's dtype."""
+        """Run one AdamW step in fp32 and write the result back at the parameter's dtype.
+
+        This is ``AdamW.step`` with one substitution: the tensors handed to the functional
+        update are the fp32 masters rather than the parameters. Everything else -- the
+        group options, the lazy state init, the update itself -- is torch's.
+
+        Swapping ``p.data`` to the master and calling ``super().step()`` would be shorter,
+        but it is silently wrong under FSDP2: for a ``DTensor`` parameter the assignment
+        updates the wrapper's reported dtype while the local shard stays in the model's, so
+        ``zeros_like(p)`` allocates the moments in bf16 after all.
+        """
         loss = closure() if closure is not None else None
 
         for group in self.param_groups:
-            downcast, targets, grads, exp_avgs, exp_avg_sqs, steps = [], [], [], [], [], []
+            if group.get("fused"):
+                raise ValueError(
+                    "fused AdamW writes through to the parameters it is given, which is not "
+                    "compatible with fp32 master weights. Use foreach instead."
+                )
+            amsgrad = group.get("amsgrad", False)
+            downcast, targets, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, steps = (
+                [],
+                [],
+                [],
+                [],
+                [],
+                [],
+                [],
+            )
             for p in group["params"]:
                 if p.grad is None:
                     continue
@@ -65,9 +89,12 @@ class MasterWeightAdamW(torch.optim.AdamW):
                 if not state:
                     if needs_master:
                         state["master"] = p.detach().float().clone()
-                    state["exp_avg"] = torch.zeros_like(p, dtype=torch.float32)
-                    state["exp_avg_sq"] = torch.zeros_like(p, dtype=torch.float32)
+                    zeros = state.get("master", p).detach().float()
+                    state["exp_avg"] = torch.zeros_like(zeros)
+                    state["exp_avg_sq"] = torch.zeros_like(zeros)
                     state["step"] = torch.zeros((), dtype=torch.float32)
+                if amsgrad and "max_exp_avg_sq" not in state:
+                    state["max_exp_avg_sq"] = torch.zeros_like(state["exp_avg"])
                 target = state["master"] if needs_master else p
                 if needs_master:
                     downcast.append((p, target))
@@ -75,6 +102,8 @@ class MasterWeightAdamW(torch.optim.AdamW):
                 grads.append(p.grad if p.grad.dtype == torch.float32 else p.grad.float())
                 exp_avgs.append(state["exp_avg"])
                 exp_avg_sqs.append(state["exp_avg_sq"])
+                if amsgrad:
+                    max_exp_avg_sqs.append(state["max_exp_avg_sq"])
                 steps.append(state["step"])
 
             if not targets:
@@ -86,18 +115,18 @@ class MasterWeightAdamW(torch.optim.AdamW):
                 grads,
                 exp_avgs,
                 exp_avg_sqs,
-                [],
+                max_exp_avg_sqs,
                 steps,
-                amsgrad=False,
+                amsgrad=amsgrad,
                 beta1=beta1,
                 beta2=beta2,
                 lr=group["lr"],
                 weight_decay=group["weight_decay"],
                 eps=group["eps"],
                 maximize=group.get("maximize", False),
-                foreach=False,
-                capturable=False,
-                differentiable=False,
+                foreach=group.get("foreach"),
+                capturable=group.get("capturable", False),
+                differentiable=group.get("differentiable", False),
             )
             for param, master in downcast:
                 param.copy_(master)
