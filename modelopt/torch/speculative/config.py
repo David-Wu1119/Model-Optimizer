@@ -281,7 +281,7 @@ class DFlashConfig(ModeloptBaseConfig):
     )
 
     dflash_fp32_master_weights: bool = ModeloptField(
-        default=False,
+        default=True,
         description=(
             "Keep an fp32 master copy of the draft's parameters in the OPTIMIZER, while the "
             "draft itself stays in the frozen base model's dtype.\n\n"
@@ -302,8 +302,12 @@ class DFlashConfig(ModeloptBaseConfig):
             "`modelopt.torch.speculative.plugins.master_weight_adamw.MasterWeightAdamW`; "
             "`examples/speculative_decoding` does. `VerifyMasterWeightsCallback` raises after "
             "the first step if it did not, rather than letting the flag be silently inert.\n\n"
-            "Applies to every projector_type. Off by default; both LiLiCorr recipes set it "
-            "to true."
+            "Applies to every projector_type, and on by default: it costs optimizer memory "
+            "and nothing else, and the arithmetic it replaces loses step size from step 1. "
+            "Set it to False to reclaim that memory when training at the limit of a node.\n\n"
+            "NOTE: a training loop that builds its own optimizer gets plain AdamW and "
+            "therefore none of this, silently. Build MasterWeightAdamW, or install "
+            "VerifyMasterWeightsCallback, which turns that into an error at the first step."
         ),
     )
 
