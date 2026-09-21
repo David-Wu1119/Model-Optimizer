@@ -47,8 +47,6 @@ from .algo_cfg import (
     capabilities_for,
     compile_algo_cfg,
     derive_handoff,
-    describe_plan,
-    plan_hash,
     stage_predicate,
 )
 from .compress import compress_convert, compress_restore, update_compress_metadata
@@ -746,10 +744,7 @@ def calibration_plan_convert(
         model,
         strict=config.strict,
     )
-    print_rank_0(
-        f"calibration_plan: {len(plan)} stage(s), hash {plan_hash(plan)}\n"
-        + describe_plan(plan, model)
-    )
+    print_rank_0(f"calibration_plan: {' -> '.join(str(s.algo) for s in plan)}")
 
     for i, stage in enumerate(plan):
         if stage.algo is None:

@@ -28,7 +28,6 @@ from modelopt.torch.quantization.algo_cfg import (
     AlgoCfgValidationError,
     compile_algo_cfg,
     derive_handoff,
-    plan_hash,
     resolve_targets,
     stage_predicate,
     stage_targets,
@@ -183,7 +182,7 @@ def test_entry_wraps_a_bare_cfg_in_a_list():
 def test_algorithm_and_equivalent_algo_cfg_compile_to_the_same_plan(quantized):
     legacy = _compile(quantized, algorithm="max")
     explicit = _compile(quantized, {"quantizer_name": "*", "cfg": ["max"]})
-    assert plan_hash(legacy) == plan_hash(explicit)
+    assert [x.key() for x in legacy] == [x.key() for x in explicit]
 
 
 def test_pipeline_lowers_in_order_with_kwargs(quantized):
@@ -206,14 +205,7 @@ def test_fallback_algorithm_excludes_scopes_claimed_by_entries(quantized):
     assert not (fallback_quantizers & mlp_quantizers)
 
 
-def test_plan_hash_ignores_provenance_only_differences(quantized):
-    a = _compile(quantized, {"module_name": "*mlp*", "cfg": ["max"]})
-    b = _compile(quantized, {"module_name": "*mlp*", "cfg": ["max"]})
-    assert plan_hash(a) == plan_hash(b)
-
-
 # ---------------------------------------------------------------------------- validation
-
 
 REJECTIONS = [
     ("unknown algorithm", [{"module_name": "*", "cfg": ["awq_supreme"]}]),

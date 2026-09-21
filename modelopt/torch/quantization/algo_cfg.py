@@ -17,8 +17,7 @@
 
 import fnmatch
 import warnings
-from collections.abc import Callable, Iterable, Iterator
-from contextlib import contextmanager
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 
 import torch.nn as nn
@@ -33,8 +32,6 @@ __all__ = [
     "CalibrationPlan",
     "capabilities_for",
     "compile_algo_cfg",
-    "describe_plan",
-    "plan_hash",
     "stage_predicate",
 ]
 
@@ -147,30 +144,8 @@ class _ModelIndex:
     parent_of: dict[str, str] = field(default_factory=dict)  # quantizer -> linear
 
 
-#: Scoped to one pure computation rather than global: the index is only valid while nothing
-#: mutates the module tree.
-_CACHED_INDEX: tuple[nn.Module, "_ModelIndex"] | None = None
-
-
-@contextmanager
-def _reusing_model_index(model: nn.Module) -> Iterator[None]:
-    global _CACHED_INDEX
-    previous = _CACHED_INDEX
-    _CACHED_INDEX = (model, _build_model_index(model))
-    try:
-        yield
-    finally:
-        _CACHED_INDEX = previous
-
-
 def _index_model(model: nn.Module) -> _ModelIndex:
-    """Cached structural index; see :func:`_reusing_model_index`."""
-    if _CACHED_INDEX is not None and _CACHED_INDEX[0] is model:
-        return _CACHED_INDEX[1]
-    return _build_model_index(model)
-
-
-def _build_model_index(model: nn.Module) -> _ModelIndex:
+    """Structural index of the quantized model: linears, quantizers, ownership."""
     # Imported lazily: `mode` imports this module while `modelopt.torch.quantization` is
     # still initializing, and `.nn` pulls in the quantized-tensor backends.
     from .nn import SequentialQuantizer, TensorQuantizer
@@ -359,8 +334,8 @@ def _validate_scopes(model: nn.Module, plan: CalibrationPlan, sink: list[str]) -
         modules, quantizers = resolve_targets(model, stage.scope, stage.selector)
         if not modules and not quantizers:
             _report(
-                f"scope {stage.selector}={stage.scope!r} (stage {stage}) matches no target in "
-                "the model. Check the glob against the quantized module/quantizer names.",
+                f"scope {stage.selector}={stage.scope!r} (stage {stage}) matches no target "
+                "in the model.",
                 sink=sink,
             )
             continue
@@ -376,9 +351,7 @@ def _validate_scopes(model: nn.Module, plan: CalibrationPlan, sink: list[str]) -
                 _report(
                     f"{stage.algo!r} does not honour the scoping write-mask, so it cannot be "
                     f"restricted to {stage.selector}={stage.scope!r} ({len(in_scope)} of "
-                    f"{len(everything)} quantizers) -- it would write outside its scope and "
-                    "clobber other stages. Use it at whole-model scope, or add "
-                    "`should_process` support to its calibration function first.",
+                    f"{len(everything)} quantizers). Use it at whole-model scope.",
                     sink=sink,
                 )
                 continue
@@ -391,11 +364,9 @@ def _validate_scopes(model: nn.Module, plan: CalibrationPlan, sink: list[str]) -
             unreachable = {q for m in modules for q in owned.get(m, ()) if q not in quantizers}
             if unreachable:
                 _report(
-                    f"{stage.algo!r} writes whole modules: it touches every quantizer of "
-                    f"the modules it touches, but {stage.selector}={stage.scope!r} leaves "
-                    f"{len(unreachable)} of them out of scope (e.g. "
-                    f"{sorted(unreachable)[0]!r}). It would write them anyway, outside the "
-                    "write-mask. Select the modules instead, with `module_name`.",
+                    f"{stage.algo!r} writes whole modules, but {stage.selector}="
+                    f"{stage.scope!r} leaves {len(unreachable)} of their quantizers out of "
+                    f"scope (e.g. {sorted(unreachable)[0]!r}). Select them with `module_name`.",
                     sink=sink,
                 )
                 continue
@@ -405,8 +376,7 @@ def _validate_scopes(model: nn.Module, plan: CalibrationPlan, sink: list[str]) -
             if caps.optimizes != "both" and roles and caps.optimizes not in roles:
                 _report(
                     f"{stage.algo!r} only improves {caps.optimizes} quantizers but "
-                    f"{stage.selector}={stage.scope!r} matches only {sorted(roles)} quantizers "
-                    "— the stage would be a no-op.",
+                    f"{stage.selector}={stage.scope!r} matches only {sorted(roles)}: a no-op.",
                     sink=sink,
                 )
 
@@ -430,9 +400,8 @@ def _validate_fused_siblings(model: nn.Module, plan: CalibrationPlan, sink: list
             if len(set(members.values())) > 1:
                 _report(
                     f"fusible siblings under {parent!r} got different pipelines "
-                    f"({ {k: list(v) for k, v in members.items()} }). They export to one fused "
-                    "kernel and must share a single weight scale, so they must share one "
-                    "pipeline.",
+                    f"({ {k: list(v) for k, v in members.items()} }): they export to one fused "
+                    "kernel and must share a single pipeline.",
                     sink=sink,
                 )
 
@@ -456,12 +425,9 @@ def _validate_dependencies(model: nn.Module, plan: CalibrationPlan, sink: list[s
             }
             if clash:
                 _report(
-                    f"stage {i} ({stage}) cannot follow stage {j} ({prev}) on overlapping "
-                    f"targets: {stage.algo!r} assumes {sorted(clash)} is not already set, but "
-                    f"{prev.algo!r} produces it. Re-running it folds the scale a second time "
-                    "while keeping only the last activation-side scale. Insert an explicit "
-                    "unfold (disable_pre_quant_scale_and_resmooth) between them, or drop the "
-                    "repeat.",
+                    f"stage {i} ({stage}) cannot follow stage {j} ({prev}): {stage.algo!r} "
+                    f"assumes {sorted(clash)} is unset but {prev.algo!r} produces it. Unfold "
+                    "with disable_pre_quant_scale_and_resmooth between them, or drop the repeat.",
                     sink=sink,
                 )
 
@@ -484,8 +450,7 @@ def _validate_dependencies(model: nn.Module, plan: CalibrationPlan, sink: list[s
             first = next(iter(overwriters.values()))
             _report(
                 f"stage {i} ({stage}) is dead: everything it produces ({sorted(produced)}) is "
-                f"overwritten by a later stage ({first}) on the same quantizers, without being "
-                "read in between. Remove it, or move it after the stage that overwrites it.",
+                f"overwritten unread by a later stage ({first}). Remove or reorder it.",
                 sink=sink,
             )
 
@@ -517,10 +482,9 @@ def compile_algo_cfg(
     _validate_config_only(plan)
     if model is not None:
         violations: list[str] = []
-        with _reusing_model_index(model):
-            _validate_scopes(model, plan, violations)
-            _validate_fused_siblings(model, plan, violations)
-            _validate_dependencies(model, plan, violations)
+        _validate_scopes(model, plan, violations)
+        _validate_fused_siblings(model, plan, violations)
+        _validate_dependencies(model, plan, violations)
         if violations:
             body = "\n".join(f"  {i + 1}. {v}" for i, v in enumerate(violations))
             msg = f"invalid algo_cfg ({len(violations)} problem(s)):\n{body}"
@@ -551,47 +515,24 @@ def derive_handoff(model: nn.Module, plan: CalibrationPlan, i: int) -> dict:
     stage = plan[i]
     if stage.capabilities is None:
         return {}
-    with _reusing_model_index(model):
-        needed = effective_consumes(model, stage)
-        if not needed:
-            return {}
+    needed = effective_consumes(model, stage)
+    if not needed:
+        return {}
 
-        # Coverage, not overlap: skipping init is only safe if *every* target already has the
-        # state. A narrow producer before a wide consumer would leave some with no amax.
-        for token in needed:
-            produced_on: set[str] = set()
-            for j in range(i):
-                if plan[j].capabilities is None:
-                    continue
-                if token in effective_produces(model, plan[j]):
-                    produced_on |= token_targets(model, plan[j], token)
-            if not token_targets(model, stage, token) <= produced_on:
-                return {}
+    # Coverage, not overlap: skipping init is only safe if *every* target already has the
+    # state. A narrow producer before a wide consumer would leave some with no amax.
+    for token in needed:
+        produced_on: set[str] = set()
+        for j in range(i):
+            if plan[j].capabilities is None:
+                continue
+            if token in effective_produces(model, plan[j]):
+                produced_on |= token_targets(model, plan[j], token)
+        if not token_targets(model, stage, token) <= produced_on:
+            return {}
     return {"skip_max_init": True}
 
 
 def _stage_targets(model: nn.Module, stage: AlgoStage) -> set[str]:
     modules, quantizers = stage_targets(model, stage)
     return modules | quantizers
-
-
-def plan_hash(plan: CalibrationPlan) -> str:
-    """A stable hash of the plan."""
-    import hashlib
-
-    payload = "|".join(str(s.key()) for s in plan)
-    return hashlib.sha256(payload.encode()).hexdigest()[:16]
-
-
-def describe_plan(plan: CalibrationPlan, model: nn.Module | None = None) -> str:
-    """Human-readable plan dump, used by the demos and for debugging."""
-    if not plan:
-        return "  (empty plan — no calibration)"
-    lines = []
-    for i, stage in enumerate(plan):
-        suffix = ""
-        if model is not None:
-            modules, quantizers = stage_targets(model, stage)
-            suffix = f"  -> {len(modules)} module(s), {len(quantizers)} quantizer(s)"
-        lines.append(f"  [{i}] {stage}{suffix}")
-    return "\n".join(lines)
