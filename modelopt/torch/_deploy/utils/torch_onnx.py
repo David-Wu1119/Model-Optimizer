@@ -510,10 +510,11 @@ def get_onnx_bytes_and_metadata(
             `torch.onnx.export <https://pytorch.org/docs/stable/onnx.html#torch.onnx.export>`_.
         onnx_opset: The onnx opset version to use for exporting the model.
         dq_only: If True, the exported onnx model is converted to a dq_only model.
-        weights_dtype: Requested high-precision dtype for exported weights. For an FP8 or NVFP4
-            model, ``"bf16"`` is accepted only when every floating parameter is already BF16.
-            This is a weight-focused no-op, not a graph-wide conversion: floating buffers are
-            not considered for eligibility and may preserve higher-precision regions.
+        weights_dtype: Requested high-precision dtype for exported weights. NVFP4 models support
+            conversion to FP16 or BF16, including mixed FP32/BF16 source parameters.
+            For an FP8-only model, ``"bf16"`` is accepted only when every floating
+            parameter is already BF16; this is a weight-focused no-op, not a graph-wide
+            conversion.
 
     Returns:
         bytes: Onnx model in bytes.
@@ -542,11 +543,11 @@ def get_onnx_bytes_and_metadata(
     uses_fp8 = is_fp8_quantized(model)
     uses_int8 = is_int8_quantized(model)
     uses_other_unsupported_quantizer = is_int4_quantized(model) or uses_mxfp8 or uses_int8
+    supports_nvfp4_conversion = uses_fp4 and not uses_other_unsupported_quantizer
     is_bf16_fp4_noop = (
         weights_dtype == "bf16"
         and source_parameter_dtypes == {torch.bfloat16}
-        and uses_fp4
-        and not (uses_fp8 or uses_other_unsupported_quantizer)
+        and supports_nvfp4_conversion
     )
     is_bf16_fp8_noop = (
         weights_dtype == "bf16"
@@ -602,18 +603,19 @@ def get_onnx_bytes_and_metadata(
 
     if (
         weights_dtype == "fp16"
-        and (uses_fp4 or uses_fp8)
+        and uses_fp8
+        and not supports_nvfp4_conversion
         and torch.bfloat16 in source_parameter_dtypes
     ):
-        quantization_format = "NVFP4" if uses_fp4 else "FP8"
         raise ValueError(
-            f"Converting a BF16 {quantization_format} ONNX graph to FP16 is not supported yet "
+            "Converting a BF16 FP8 ONNX graph to FP16 is not supported yet "
             f"(source parameter dtypes: {source_parameter_dtype_names})"
         )
 
     if (
         weights_dtype == "bf16"
-        and (uses_fp4 or uses_fp8 or uses_other_unsupported_quantizer)
+        and (uses_fp8 or uses_other_unsupported_quantizer)
+        and not supports_nvfp4_conversion
         and not is_bf16_quantized_noop
     ):
         raise ValueError(
@@ -683,7 +685,14 @@ def get_onnx_bytes_and_metadata(
         onnx_opt_graph = qdq_to_dq(onnx_opt_graph)
 
     if weights_dtype in ["fp16", "bf16"] and not is_bf16_quantized_noop:
-        if weights_dtype == "fp16" and (uses_fp4 or uses_other_unsupported_quantizer or uses_fp8):
+        convert_nvfp4_with_autocast = supports_nvfp4_conversion and (
+            weights_dtype == "bf16" or torch.bfloat16 in source_parameter_dtypes
+        )
+        if (
+            weights_dtype == "fp16"
+            and (uses_fp4 or uses_other_unsupported_quantizer or uses_fp8)
+            and not convert_nvfp4_with_autocast
+        ):
             onnx_opt_graph = convert_float_to_float16(
                 onnx_opt_graph,
                 keep_io_types=False,
@@ -701,13 +710,15 @@ def get_onnx_bytes_and_metadata(
             onnx_opt_graph = fold_qdq_scale_fp16_to_fp32_casts(onnx_opt_graph)
         else:
             onnx_opt_graph = convert_to_f16(
-                onnx_opt_graph, low_precision_type=weights_dtype, keep_io_types=False
+                onnx_opt_graph,
+                low_precision_type=weights_dtype,
+                keep_io_types=False,
             )
 
     onnx_opt_graph = remove_redundant_casts(onnx_opt_graph)
 
     # Remove Cast nodes around Q/DQ for optimal TRT fusion
-    if uses_fp8:
+    if uses_fp8 and weights_dtype == "fp16":
         onnx_opt_graph = fold_q_fp16_to_fp32_casts(onnx_opt_graph)
         onnx_opt_graph = fold_dq_fp32_to_fp16_casts(onnx_opt_graph)
 

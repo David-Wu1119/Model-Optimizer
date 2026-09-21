@@ -17,6 +17,7 @@
 
 import inspect
 import io
+from copy import deepcopy
 
 import numpy as np
 import pytest
@@ -108,10 +109,12 @@ class _NVFP4LinearWithExplicitBias(torch.nn.Module):
     def __init__(self, dtype):
         super().__init__()
         self.linear = torch.nn.Linear(16, 16, bias=False, dtype=dtype)
+        self.norm = torch.nn.LayerNorm(16, dtype=dtype)
+        self.projection = torch.nn.Linear(16, 16, bias=False, dtype=dtype)
         self.bias = torch.nn.Parameter(torch.ones(16, dtype=dtype))
 
     def forward(self, inputs):
-        return self.linear(inputs) + self.bias
+        return self.projection(self.norm(self.linear(inputs))) + self.bias
 
 
 class _NVFP4MixedPrecisionLinear(torch.nn.Module):
@@ -126,7 +129,9 @@ class _NVFP4MixedPrecisionLinear(torch.nn.Module):
         return fp32_output + bf16_output
 
 
-def _make_cpu_nvfp4_model(monkeypatch, model, sample_input, disable_input_quantizers=False):
+def _make_cpu_nvfp4_model(
+    monkeypatch, model, sample_input, disable_input_quantizers=False, quant_config=None
+):
     def forward_loop(model):
         model(sample_input)
 
@@ -134,7 +139,7 @@ def _make_cpu_nvfp4_model(monkeypatch, model, sample_input, disable_input_quanti
         return inputs
 
     monkeypatch.setattr(tensor_quant, "dynamic_block_quantize_op", cpu_dynamic_block_quantize)
-    model = mtq.quantize(model, mtq.NVFP4_DEFAULT_CFG, forward_loop=forward_loop)
+    model = mtq.quantize(model, quant_config or mtq.NVFP4_DEFAULT_CFG, forward_loop=forward_loop)
 
     for module in model.modules():
         assert not isinstance(module, torch.nn.Linear) or is_quantized_linear(module)
@@ -171,9 +176,11 @@ def test_nvfp4_exported_onnx_is_topologically_sorted(monkeypatch):
     [
         (torch.float32, "fp32", TensorProto.FLOAT),
         (torch.float32, "fp16", TensorProto.FLOAT16),
+        (torch.float32, "bf16", TensorProto.BFLOAT16),
+        (torch.bfloat16, "fp16", TensorProto.FLOAT16),
         (torch.bfloat16, "bf16", TensorProto.BFLOAT16),
     ],
-    ids=["fp32-preserved", "fp32-to-fp16", "bf16-noop"],
+    ids=["fp32-preserved", "fp32-to-fp16", "fp32-to-bf16", "bf16-to-fp16", "bf16-noop"],
 )
 def test_nvfp4_deploy_export_has_consistent_elementwise_types(
     monkeypatch, source_dtype, weights_dtype, expected_dtype
@@ -181,6 +188,8 @@ def test_nvfp4_deploy_export_has_consistent_elementwise_types(
     model = _NVFP4LinearWithExplicitBias(source_dtype).eval()
     sample_input = torch.ones(1, 2, 16, dtype=source_dtype)
     model = _make_cpu_nvfp4_model(monkeypatch, model, sample_input)
+    # Swin leaves LayerNorm input quantizers disabled on its high-rank activation paths.
+    model.norm.input_quantizer.disable()
 
     onnx_bytes, _ = get_onnx_bytes_and_metadata(
         model,
@@ -193,6 +202,8 @@ def test_nvfp4_deploy_export_has_consistent_elementwise_types(
 
     assert utils.get_opset_version(exported_model) >= 23
     onnx.checker.check_model(exported_model, full_check=True)
+    assert exported_model.graph.input[0].type.tensor_type.elem_type == expected_dtype
+    assert exported_model.graph.output[0].type.tensor_type.elem_type == expected_dtype
     assert any(
         node.op_type == "DequantizeLinear"
         and any(attribute.name == "block_size" for attribute in node.attribute)
@@ -211,6 +222,14 @@ def test_nvfp4_deploy_export_has_consistent_elementwise_types(
     ]:
         if value.type.HasField("tensor_type"):
             tensor_types[value.name] = value.type.tensor_type.elem_type
+
+    dynamic_quantize = next(
+        node for node in inferred_model.graph.node if node.op_type == "TRT_FP4DynamicQuantize"
+    )
+    assert [tensor_types[output] for output in dynamic_quantize.output] == [
+        TensorProto.FLOAT4E2M1,
+        TensorProto.FLOAT8E4M3FN,
+    ]
 
     floating_types = {TensorProto.FLOAT, TensorProto.FLOAT16, TensorProto.BFLOAT16}
     elementwise_nodes = [
@@ -233,21 +252,39 @@ def test_nvfp4_deploy_export_has_consistent_elementwise_types(
     ]
 
 
-def test_nvfp4_deploy_export_preserves_mixed_precision_boundaries(monkeypatch):
+@pytest.mark.parametrize(
+    ("weights_dtype", "expected_dtype"),
+    [
+        ("fp32", TensorProto.FLOAT),
+        ("fp16", TensorProto.FLOAT16),
+        ("bf16", TensorProto.BFLOAT16),
+    ],
+)
+@pytest.mark.parametrize("with_fp8_branch", [False, True])
+def test_nvfp4_deploy_export_preserves_mixed_precision_boundaries(
+    monkeypatch, weights_dtype, expected_dtype, with_fp8_branch
+):
     model = _NVFP4MixedPrecisionLinear().eval()
     sample_input = torch.ones(1, 16)
-    model = _make_cpu_nvfp4_model(monkeypatch, model, sample_input)
+    quant_config = deepcopy(mtq.NVFP4_DEFAULT_CFG)
+    if with_fp8_branch:
+        quant_config["quant_cfg"].append(
+            {"quantizer_name": "bf16_linear*quantizer", "cfg": {"num_bits": (4, 3), "axis": None}}
+        )
+    model = _make_cpu_nvfp4_model(monkeypatch, model, sample_input, quant_config=quant_config)
 
     onnx_bytes, _ = get_onnx_bytes_and_metadata(
         model,
         (sample_input,),
-        weights_dtype="fp32",
+        weights_dtype=weights_dtype,
     )
     exported_model = onnx.load_model_from_string(
         OnnxBytes.from_bytes(onnx_bytes).get_onnx_model_file_bytes()
     )
 
     onnx.checker.check_model(exported_model, full_check=True)
+    assert exported_model.graph.input[0].type.tensor_type.elem_type == expected_dtype
+    assert exported_model.graph.output[0].type.tensor_type.elem_type == expected_dtype
     inferred_model = onnx.shape_inference.infer_shapes(exported_model, strict_mode=True)
     tensor_types = {
         initializer.name: initializer.data_type for initializer in inferred_model.graph.initializer
@@ -262,9 +299,16 @@ def test_nvfp4_deploy_export_preserves_mixed_precision_boundaries(monkeypatch):
 
     add_node = next(node for node in inferred_model.graph.node if node.op_type == "Add")
     assert [tensor_types[input_name] for input_name in add_node.input] == [
-        TensorProto.FLOAT,
-        TensorProto.FLOAT,
+        expected_dtype,
+        expected_dtype,
     ]
+    if with_fp8_branch and weights_dtype != "fp32":
+        quantize_nodes = [
+            node for node in inferred_model.graph.node if node.op_type == "QuantizeLinear"
+        ]
+        assert quantize_nodes
+        for node in quantize_nodes:
+            assert tensor_types[node.input[1]] == expected_dtype
 
 
 @pytest.mark.parametrize(
@@ -272,9 +316,11 @@ def test_nvfp4_deploy_export_preserves_mixed_precision_boundaries(monkeypatch):
     [
         (torch.float32, "fp32", TensorProto.FLOAT16, TensorProto.FLOAT),
         (torch.float32, "fp16", TensorProto.FLOAT16, TensorProto.FLOAT16),
+        (torch.float32, "bf16", TensorProto.BFLOAT16, TensorProto.BFLOAT16),
+        (torch.bfloat16, "fp16", TensorProto.FLOAT16, TensorProto.FLOAT16),
         (torch.bfloat16, "bf16", TensorProto.BFLOAT16, TensorProto.BFLOAT16),
     ],
-    ids=["fp32-preserved", "fp32-to-fp16", "bf16-noop"],
+    ids=["fp32-preserved", "fp32-to-fp16", "fp32-to-bf16", "bf16-to-fp16", "bf16-noop"],
 )
 def test_nvfp4_deploy_export_has_consistent_gemm_types(
     monkeypatch, source_dtype, weights_dtype, expected_gemm_dtype, expected_output_dtype

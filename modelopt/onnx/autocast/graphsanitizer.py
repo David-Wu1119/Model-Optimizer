@@ -132,11 +132,33 @@ class GraphSanitizer:
             # Set TensorRT plugin domain info in the graph for ORT compatibility
             self.model = set_trt_plugin_domain(self.model, self.custom_ops)
 
-            # Infer types and shapes in the graph for ORT compatibility
-            _, all_tensor_info = get_custom_layers(self.onnx_path or self.model, self.trt_plugins)
-            self.model = infer_types_shapes_tensorrt(
-                self.model, self.trt_plugins, all_tensor_info=all_tensor_info
+            tensor_types = {
+                value.name: value.type.tensor_type.elem_type
+                for value in [
+                    *self.model.graph.input,
+                    *self.model.graph.value_info,
+                    *self.model.graph.output,
+                ]
+            }
+            custom_output_types = [
+                [tensor_types.get(output, onnx.TensorProto.UNDEFINED) for output in node.output]
+                for node in self.model.graph.node
+                if node.op_type in self.custom_ops
+            ]
+            has_nvfp4_types = self.custom_ops == {"TRT_FP4DynamicQuantize"} and all(
+                output_types == [onnx.TensorProto.FLOAT4E2M1, onnx.TensorProto.FLOAT8E4M3FN]
+                for output_types in custom_output_types
             )
+            # NVFP4 export declares its FP4 data and FP8 scale outputs before dtype conversion.
+            # Avoid parsing that graph in TensorRT until its compute dtypes are normalized.
+            if not has_nvfp4_types:
+                # Infer types and shapes in the graph for ORT compatibility
+                _, all_tensor_info = get_custom_layers(
+                    self.onnx_path or self.model, self.trt_plugins
+                )
+                self.model = infer_types_shapes_tensorrt(
+                    self.model, self.trt_plugins, all_tensor_info=all_tensor_info
+                )
 
     def remove_disconnected_outputs(self) -> None:
         """Remove disconnected outputs from the model."""

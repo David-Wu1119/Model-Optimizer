@@ -331,9 +331,54 @@ class NVFP4QuantExporter(ONNXQuantExporter):
         initializer_indices = {
             initializer.name: idx for idx, initializer in enumerate(graph.initializer)
         }
-        value_info_map = {vi.name: vi for vi in [*graph.value_info, *graph.output]}
+        value_info_map = {vi.name: vi for vi in [*graph.input, *graph.value_info, *graph.output]}
         graph_inputs = {inp.name for inp in graph.input}
         cast_output_cache: dict[tuple[str, str], str] = {}
+
+        def _annotate_dynamic_quantize_outputs(node: onnx.NodeProto):
+            # These fixed quantized output types must survive precision conversion without
+            # invoking TensorRT on the not-yet-normalized graph.
+            input_value_info = value_info_map.get(node.input[0])
+            input_shape = (
+                input_value_info.type.tensor_type.shape
+                if input_value_info is not None
+                and input_value_info.type.tensor_type.HasField("shape")
+                else None
+            )
+
+            attributes = {
+                attribute.name: onnx.helper.get_attribute_value(attribute)
+                for attribute in node.attribute
+            }
+            axis = attributes.get("axis", -1)
+            block_size = attributes["block_size"]
+            scale_shape = None
+            if input_shape is not None:
+                scale_shape = onnx.TensorShapeProto()
+                scale_shape.CopyFrom(input_shape)
+                if axis < 0:
+                    axis += len(scale_shape.dim)
+                if 0 <= axis < len(scale_shape.dim):
+                    axis_dimension = scale_shape.dim[axis]
+                    if axis_dimension.HasField("dim_value"):
+                        axis_dimension.dim_value = (
+                            axis_dimension.dim_value + block_size - 1
+                        ) // block_size
+                    else:
+                        axis_dimension.Clear()
+
+            for output_name, output_dtype, output_shape in (
+                (node.output[0], onnx_dtype_map["Float4"], input_shape),
+                (node.output[1], onnx_dtype_map["Float8"], scale_shape),
+            ):
+                output_value_info = value_info_map.get(output_name)
+                if output_value_info is None:
+                    output_value_info = graph.value_info.add()
+                    value_info_map[output_name] = output_value_info
+                output_value_info.name = output_name
+                output_value_info.type.tensor_type.elem_type = output_dtype
+                if output_shape is not None:
+                    output_value_info.type.tensor_type.shape.CopyFrom(output_shape)
 
         def _get_precision_dtype(weight_initializer: onnx.TensorProto) -> str:
             return (
@@ -405,6 +450,9 @@ class NVFP4QuantExporter(ONNXQuantExporter):
                 )
 
         fp4_qdq_nodes = [node for node in graph.node if node.op_type == "TRT_FP4QDQ"]
+        for node in graph.node:
+            if node.op_type == "TRT_FP4DynamicQuantize":
+                _annotate_dynamic_quantize_outputs(node)
         logger.debug(f"Found {len(fp4_qdq_nodes)} FP4QDQ nodes to convert")
 
         for node in fp4_qdq_nodes:

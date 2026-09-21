@@ -301,36 +301,14 @@ def test_fp8_export_rejects_unsupported_dtype_conversion(
 
 
 @pytest.mark.parametrize(
-    ("source_dtype", "weights_dtype"),
-    [(torch.bfloat16, "fp16"), (torch.float32, "bf16")],
-    ids=["bf16-to-fp16", "fp32-to-bf16"],
-)
-def test_nvfp4_export_rejects_unsupported_dtype_conversion(
-    source_dtype, weights_dtype, monkeypatch, tmp_path
-):
-    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
-    monkeypatch.setattr(torch_onnx, "is_fp4_quantized", lambda _: True)
-    model = nn.Linear(4, 4).eval().to(source_dtype)
-
-    with pytest.raises(
-        ValueError,
-        match=rf"Converting .* to {weights_dtype.upper()}.*source parameter dtypes: {source_dtype}",
-    ):
-        get_onnx_bytes_and_metadata(
-            model,
-            (torch.ones(1, 4, dtype=source_dtype),),
-            weights_dtype=weights_dtype,
-        )
-    assert not any(tmp_path.iterdir())
-
-
-@pytest.mark.parametrize(
     ("source_dtype", "weights_dtype", "expected_calls"),
     [
         (torch.float32, "fp16", ["onnxconverter"]),
+        (torch.float32, "bf16", ["autocast"]),
+        (torch.bfloat16, "fp16", ["autocast"]),
         (torch.bfloat16, "bf16", []),
     ],
-    ids=["fp32-to-fp16", "bf16-noop"],
+    ids=["fp32-to-fp16", "fp32-to-bf16", "bf16-to-fp16", "bf16-noop"],
 )
 def test_nvfp4_export_selects_precision_converter(
     source_dtype, weights_dtype, expected_calls, monkeypatch
