@@ -154,8 +154,12 @@ def test_cuda_checkpoint_preserves_prefill_gradients():
     recomputed = values_and_gradients(
         checkpoint(run, *args, state, use_reentrant=False), args, state
     )
-    for a, b in zip(plain, recomputed):
-        torch.testing.assert_close(a, b, rtol=0, atol=0)
+    with torch.autocast("cuda", dtype=torch.bfloat16):
+        mixed_result = run(*args, state)
+    mixed = values_and_gradients(mixed_result, args, state)
+    for result in (recomputed, mixed):
+        for a, b in zip(plain, result):
+            torch.testing.assert_close(a, b, rtol=0, atol=0)
 
 
 def test_cuda_matmul_baseline_and_fused_gate_gradients():

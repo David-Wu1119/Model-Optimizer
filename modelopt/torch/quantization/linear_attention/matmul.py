@@ -37,18 +37,20 @@ class _MatmulSite(nn.Module):
         self.rhs_quantizer = TensorQuantizer(QuantizerAttributeConfig(enable=False))
 
     def forward(self, lhs, rhs, policy, *, lhs_quantizer=None):
-        # Operands are [sequence-or-chunk, head, row, reduction] before transpose.
-        quantizer = lhs_quantizer if lhs_quantizer is not None else self.lhs_quantizer
-        lhs, rhs = quantizer(lhs), self.rhs_quantizer(rhs)
-        if policy.accumulator_dtype is None:
-            return lhs @ rhs.transpose(-1, -2)
-        acc = lhs.new_zeros(*lhs.shape[:-1], rhs.shape[-2])
-        for lo in range(0, lhs.shape[-1], policy.reduction_block):
-            hi = lo + policy.reduction_block
-            acc = acc + lhs[..., lo:hi] @ rhs[..., lo:hi].transpose(-1, -2)
-            rounded = acc.to(getattr(torch, policy.accumulator_dtype)).to(lhs.dtype)
-            acc = acc + (rounded - acc).detach()
-        return acc
+        # The emulation working dtype must not inherit an outer training autocast.
+        with torch.autocast(device_type=lhs.device.type, enabled=False):
+            # Operands are [sequence-or-chunk, head, row, reduction] before transpose.
+            quantizer = lhs_quantizer if lhs_quantizer is not None else self.lhs_quantizer
+            lhs, rhs = quantizer(lhs), self.rhs_quantizer(rhs)
+            if policy.accumulator_dtype is None:
+                return lhs @ rhs.transpose(-1, -2)
+            acc = lhs.new_zeros(*lhs.shape[:-1], rhs.shape[-2])
+            for lo in range(0, lhs.shape[-1], policy.reduction_block):
+                hi = lo + policy.reduction_block
+                acc = acc + lhs[..., lo:hi] @ rhs[..., lo:hi].transpose(-1, -2)
+                rounded = acc.to(getattr(torch, policy.accumulator_dtype)).to(lhs.dtype)
+                acc = acc + (rounded - acc).detach()
+            return acc
 
 
 class LinearAttentionMatmulSites(nn.ModuleDict):

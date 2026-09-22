@@ -103,3 +103,27 @@ def test_host_packing_metadata_with_unequal_key_value_dimensions():
         values_and_gradients(actual, args, state), values_and_gradients(expected, args, state)
     ):
         torch.testing.assert_close(a, e, rtol=1e-9, atol=1e-10)
+
+
+def test_outer_autocast_preserves_working_precision_and_gradients():
+    args, state = inputs()
+    sites = LinearAttentionMatmulSites()
+    for name in HANDLES:
+        sites.get_submodule(name).set_from_attribute_config(
+            {"num_bits": (4, 3), "type": "dynamic", "axis": (0, 1, 2)}
+        )
+        sites.get_submodule(name).enable()
+    kwargs = {
+        "sites": sites,
+        "policy": LinearAttentionConfig(backend="matmul"),
+        "w_quantizer": TensorQuantizer(QuantizerAttributeConfig(enable=False)),
+        "initial_state": state,
+        "output_final_state": True,
+    }
+    expected = matmul_gdn(*args, **kwargs)
+    with torch.autocast("cpu", dtype=torch.bfloat16):
+        actual = matmul_gdn(*args, **kwargs)
+    for a, e in zip(
+        values_and_gradients(actual, args, state), values_and_gradients(expected, args, state)
+    ):
+        torch.testing.assert_close(a, e, rtol=0, atol=0)

@@ -94,7 +94,8 @@ Elementwise sites are `gate_prefix` (after cumulative summation), `gate_exp`
 `output_add`. Rounding applies only at the named boundary. These operations and
 operand QDQ use identity STE, preserving baseline backward arithmetic.
 
-Working arithmetic is FP32 for FP16/BF16/FP32 input and FP64 for double input.
+Working arithmetic is FP32 for FP16/BF16/FP32 input and FP64 for double input,
+including inside an outer training-autocast context.
 Matmuls respect PyTorch's global precision setting. Set
 `torch.set_float32_matmul_precision("highest")` to exclude TF32 from comparisons;
 the kernel tests and benchmark do this explicitly.
