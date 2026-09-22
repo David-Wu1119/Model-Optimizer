@@ -2,7 +2,7 @@
 <html lang="en" data-accent-color="green" data-content_root="../../">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"><title>quant_aware_conversion - Model Optimizer 0.0.1.dev1+g03aaba3ca</title><link rel="index" title="Index" href="../../genindex.html" /><link rel="search" title="Search" href="../../search.html" /><link rel="next" title="quant_format" href="modelopt.torch.export.quant_format.html" /><link rel="prev" title="plugins" href="modelopt.torch.export.plugins.html" /><script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"><title>quant_aware_conversion - Model Optimizer 0.0.1.dev1+g72fcc4c0c</title><link rel="index" title="Index" href="../../genindex.html" /><link rel="search" title="Search" href="../../search.html" /><link rel="next" title="quant_format" href="modelopt.torch.export.quant_format.html" /><link rel="prev" title="plugins" href="modelopt.torch.export.plugins.html" /><script>
     function setColorMode(t){let e=document.documentElement;e.setAttribute("data-color-mode",t);let a=window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches,s=t;"auto"===t&&(s=a?"dark":"light"),"light"===s?(e.classList.remove("dark"),e.classList.add("light")):(e.classList.remove("light"),e.classList.add("dark"))}
     setColorMode(localStorage._theme||"auto");
   </script><link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=e1a1ceaf" />
@@ -481,7 +481,8 @@ weight and all its scale siblings together with no tensor manipulation.</p></li>
 <code class="docutils literal notranslate"><span class="pre">input_scale</span></code> are duplicated to each part (they are per-tensor and shared).</p></li>
 <li><p><strong>Merge</strong> — re-fuse tensors split by a conversion mapping (e.g. RADIO
 <code class="docutils literal notranslate"><span class="pre">attention.{q,k,v}_proj</span></code> -&gt; <code class="docutils literal notranslate"><span class="pre">attn.qkv</span></code>). Complete tensor groups are concatenated
-in source-pattern order and the conversion’s sub-model scope is preserved.</p></li>
+in source-pattern order and the conversion’s sub-model scope is preserved. A merge
+with per-tensor scalar quantization state is ambiguous and triggers the safe fallback.</p></li>
 </ul>
 <p>MoE experts need only <strong>Rename</strong>: ModelOpt’s export already expands the fused,
 stacked in-memory experts (<code class="docutils literal notranslate"><span class="pre">experts.gate_up_proj</span></code> of shape <code class="docutils literal notranslate"><span class="pre">[E,</span> <span class="pre">2F,</span> <span class="pre">H]</span></code>) into
