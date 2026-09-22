@@ -15,6 +15,7 @@
 
 import pytest
 
+import modelopt.torch.quantization.ggml as ggml
 from modelopt.torch.export.convert_hf_config import convert_hf_quant_config_format
 from modelopt.torch.export.quant_format import IQ_BLOCK_METADATA, IQ_FORMATS
 from modelopt.torch.export.unified_export_hf import _revert_hf_quant_config_names
@@ -153,11 +154,62 @@ def test_iq_config_rejects_mismatched_group_size(fmt):
 @pytest.mark.parametrize("fmt", sorted(IQ_FORMATS))
 def test_iq_block_metadata_matches_the_codec(fmt):
     """The exported geometry is the codec's own, so a checkpoint cannot claim a wrong layout."""
-    import modelopt.torch.quantization.ggml as ggml
-
     block_size, payload_bytes, effective_bits = IQ_BLOCK_METADATA[fmt]
     upper = fmt.upper()
     assert block_size == getattr(ggml, f"{upper}_BLOCK_SIZE")
     assert payload_bytes == getattr(ggml, f"{upper}_BLOCK_BYTES")
     assert effective_bits == pytest.approx(getattr(ggml, f"{upper}_EFFECTIVE_BITS"))
     assert effective_bits == pytest.approx(payload_bytes * 8 / block_size)
+
+
+@pytest.mark.parametrize("fmt", sorted(IQ_FORMATS))
+def test_iq_mixed_precision_config_group_carries_block_metadata(fmt):
+    """A per-layer IQ config must describe its block too, not only a uniform one.
+
+    Mixed exports route each distinct layer config through the same helper, so a format
+    missing there loses its geometry for exactly the layers that use it.
+    """
+    block_size, payload_bytes, effective_bits = IQ_BLOCK_METADATA[fmt]
+    converted = convert_hf_quant_config_format(
+        {
+            "producer": {"name": "modelopt", "version": "test"},
+            "quantization": {
+                "quant_algo": "MIXED_PRECISION",
+                "quantized_layers": {
+                    "model.layers.0.mlp.gate_proj": {"quant_algo": fmt.upper()},
+                    "model.layers.1.mlp.up_proj": {"quant_algo": "FP8"},
+                },
+            },
+        }
+    )
+
+    groups = converted["config_groups"].values()
+    iq_group = next(g for g in groups if g.get("quant_algo") == fmt.upper())
+    assert iq_group["group_size"] == block_size
+    assert iq_group["block_payload_bytes"] == payload_bytes
+    assert iq_group["effective_bits"] == pytest.approx(effective_bits)
+    assert iq_group["packing"] == "ggml"
+    assert iq_group["targets"] == ["model.layers.0.mlp.gate_proj"]
+    # The FP8 layer keeps its own compressed-tensors scheme.
+    assert any("weights" in g for g in groups)
+
+
+@pytest.mark.parametrize("fmt", sorted(IQ_FORMATS))
+def test_iq_mixed_precision_rejects_bad_per_layer_group_size(fmt):
+    """A per-layer group size is validated, not silently rewritten to the block size."""
+    block_size, _, _ = IQ_BLOCK_METADATA[fmt]
+    with pytest.raises(ValueError, match=f"requires group size {block_size}"):
+        convert_hf_quant_config_format(
+            {
+                "producer": {"name": "modelopt", "version": "test"},
+                "quantization": {
+                    "quant_algo": "MIXED_PRECISION",
+                    "quantized_layers": {
+                        "model.layers.0.mlp.gate_proj": {
+                            "quant_algo": fmt.upper(),
+                            "group_size": block_size // 2,
+                        }
+                    },
+                },
+            }
+        )
