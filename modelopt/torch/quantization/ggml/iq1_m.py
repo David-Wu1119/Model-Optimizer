@@ -56,6 +56,7 @@ __all__ = [
     "IQ1_M_EFFECTIVE_BITS",
     "dequantize_iq1_m",
     "iq1_m_fake_quant",
+    "iq1_m_grid",
     "quantize_iq1_m",
 ]
 
@@ -77,6 +78,15 @@ _IQ1_M_SUBBLOCKS = 8
 _DEFAULT_BLOCK_CHUNK_SIZE = 1024
 _DEFAULT_DECODE_CHUNK_SIZE = 4096
 _SCALE_BLOCK_CHUNK_SIZE = 4096
+
+
+def iq1_m_grid(device: torch.device | str | None = None) -> torch.Tensor:
+    """Return the canonical IQ1_M ternary grid as float32.
+
+    IQ1_M indexes the same 2048-entry table as IQ1_S; this alias exists so every format
+    exposes a grid accessor under its own name.
+    """
+    return iq1_s_grid(device)
 
 
 def _predict_iq1_m_scales(blocks: torch.Tensor) -> torch.Tensor:
