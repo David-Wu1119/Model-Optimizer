@@ -34,6 +34,9 @@ from modelopt.torch.quantization.ggml import (
     IQ2_XS_BLOCK_BYTES,
     IQ2_XS_BLOCK_SIZE,
     IQ2_XS_EFFECTIVE_BITS,
+    Q8_0_BLOCK_BYTES,
+    Q8_0_BLOCK_SIZE,
+    Q8_0_EFFECTIVE_BITS,
 )
 from modelopt.torch.quantization.model_calib import (
     enable_stats_collection,
@@ -59,6 +62,7 @@ from modelopt.torch.utils import clear_cuda_cache
 from ..quantization.nn import NVFP4StaticQuantizer, SequentialQuantizer, TensorQuantizer
 from .model_utils import TiedWeightMap, get_language_model_from_vl
 from .quant_format import (
+    GGML_QUANTIZATION_FORMATS,
     KV_CACHE_FP8,
     KV_CACHE_FP8_K_NVFP4_V,
     KV_CACHE_INT8,
@@ -79,6 +83,7 @@ from .quant_format import (
     QUANTIZATION_NVFP4,
     QUANTIZATION_NVFP4_AWQ,
     QUANTIZATION_NVFP4_SVDQUANT,
+    QUANTIZATION_Q8_0,
     QUANTIZATION_W4A8_AWQ,
     QUANTIZATION_W4A8_MXFP4_FP8,
     QUANTIZATION_W4A8_NVFP4_FP8,
@@ -86,6 +91,12 @@ from .quant_format import (
 )
 
 logger = logging.getLogger(__name__)
+
+_GGML_FORMAT_METADATA = {
+    QUANTIZATION_IQ1_S: (IQ1_S_BLOCK_SIZE, IQ1_S_BLOCK_BYTES, IQ1_S_EFFECTIVE_BITS),
+    QUANTIZATION_IQ2_XS: (IQ2_XS_BLOCK_SIZE, IQ2_XS_BLOCK_BYTES, IQ2_XS_EFFECTIVE_BITS),
+    QUANTIZATION_Q8_0: (Q8_0_BLOCK_SIZE, Q8_0_BLOCK_BYTES, Q8_0_EFFECTIVE_BITS),
+}
 
 
 def _has_large_fp8_scale(value: torch.Tensor) -> bool:
@@ -452,11 +463,11 @@ def get_weight_block_size(module: nn.Module, weight_name: str = "weight") -> int
 
 
 def uses_iq_quantization(module) -> bool:
-    """Whether any weight quantizer in ``module`` or its children targets an IQ format.
+    """Whether any weight quantizer in ``module`` or its children targets a GGML format.
 
     ``get_quantization_format`` returns the *first* non-``NONE`` format it finds, so in a
-    mixed-format model IQ layers sitting behind, say, an FP8 layer are invisible to it. Callers
-    that must reject IQ specifically need to see every layer.
+    mixed-format model GGML layers sitting behind, say, an FP8 layer are invisible to it. Callers
+    that must reject GGML specifically need to see every layer.
 
     This reads ``num_bits`` directly rather than resolving each layer's full format, so an
     unrelated unsupported quantizer elsewhere in the model cannot turn the check into an error.
@@ -464,18 +475,17 @@ def uses_iq_quantization(module) -> bool:
     Known gap, shared with ``get_quantization_format``: ``weight_attr_names`` yields nothing for
     a TEGroupedLinear, whose parameters are ``weight0..N`` while its quantizer is a single
     ``GroupedQuantizer`` under ``weight_quantizer``. Neither function sees such a module, so an
-    experts-only IQ model reports no format at all -- not just here. Closing it belongs in
+    experts-only GGML model reports no format at all -- not just here. Closing it belongs in
     ``weight_attr_names``, where it affects every format, rather than in this helper.
     """
     for weight_name in weight_attr_names(module):
         weight_quantizer = representative_weight_quantizer(module, weight_name)
-        # getattr: a SequentialQuantizer has is_enabled but no num_bits, and is never IQ --
-        # IQ is a single quantizer with backend="ggml".
+        # getattr: a SequentialQuantizer has is_enabled but no num_bits, and is never GGML --
+        # GGML is a single quantizer with backend="ggml".
         if (
             weight_quantizer is not None
             and weight_quantizer.is_enabled
-            and getattr(weight_quantizer, "num_bits", None)
-            in (QUANTIZATION_IQ1_S, QUANTIZATION_IQ2_XS)
+            and getattr(weight_quantizer, "num_bits", None) in GGML_QUANTIZATION_FORMATS
         ):
             return True
     return any(uses_iq_quantization(child) for _, child in module.named_children())
@@ -515,21 +525,21 @@ def get_quantization_format(module) -> str | None:
             return QUANTIZATION_W4A8_AWQ
 
         # Handle individual num_bits cases
-        if weight_quantizer.num_bits in (QUANTIZATION_IQ1_S, QUANTIZATION_IQ2_XS):
+        if weight_quantizer.num_bits in GGML_QUANTIZATION_FORMATS:
             if weight_quantizer.backend != "ggml":
-                raise ValueError("IQ formats require the built-in 'ggml' quantization backend")
+                raise ValueError("GGML formats require the built-in 'ggml' quantization backend")
             # Both exporters return before collecting input_scale and before the pre_quant_scale
             # handling below, so an enabled activation quantizer would be dropped without a trace
             # and the checkpoint would load as weight-only. Refuse instead.
             if input_quantizer is not None and input_quantizer.is_enabled:
                 raise NotImplementedError(
-                    "IQ1_S/IQ2_XS export is weight-only, but this layer has an enabled input "
+                    "GGML export is weight-only, but this layer has an enabled input "
                     "quantizer. The GGML block payload carries no activation scale, so the "
                     "activation quantization would be silently lost."
                 )
             if input_quantizer is not None and hasattr(input_quantizer, "_pre_quant_scale"):
                 raise NotImplementedError(
-                    "IQ1_S/IQ2_XS export does not support an AWQ-style pre_quant_scale."
+                    "GGML export does not support an AWQ-style pre_quant_scale."
                 )
             return weight_quantizer.num_bits
 
@@ -781,15 +791,8 @@ def process_layer_quant_config(layer_config_dict):
                 "quant_algo": "MXFP8",
                 "group_size": block_size_value,
             }
-        elif v in (QUANTIZATION_IQ1_S, QUANTIZATION_IQ2_XS):
-            if v == QUANTIZATION_IQ1_S:
-                block_size = IQ1_S_BLOCK_SIZE
-                payload_bytes = IQ1_S_BLOCK_BYTES
-                effective_bits = IQ1_S_EFFECTIVE_BITS
-            else:
-                block_size = IQ2_XS_BLOCK_SIZE
-                payload_bytes = IQ2_XS_BLOCK_BYTES
-                effective_bits = IQ2_XS_EFFECTIVE_BITS
+        elif v in GGML_QUANTIZATION_FORMATS:
+            block_size, payload_bytes, effective_bits = _GGML_FORMAT_METADATA[v]
             if block_size_value != block_size:
                 raise ValueError(
                     f"{v.upper()} requires block size {block_size}, got {block_size_value}"

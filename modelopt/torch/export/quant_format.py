@@ -38,6 +38,9 @@ QUANTIZATION_FP8_PB_WO = "fp8_pb_wo"
 QUANTIZATION_FP8_PC_PT = "fp8_pc_pt"
 QUANTIZATION_IQ1_S = "iq1_s"
 QUANTIZATION_IQ2_XS = "iq2_xs"
+QUANTIZATION_Q8_0 = "q8_0"
+
+GGML_QUANTIZATION_FORMATS = frozenset({QUANTIZATION_IQ1_S, QUANTIZATION_IQ2_XS, QUANTIZATION_Q8_0})
 
 # Formats whose scales are purely per-module, so export never merges them across the q/k/v
 # and gate/up groups that share an input. Every other format unifies input_amax (and, for
@@ -45,8 +48,7 @@ QUANTIZATION_IQ2_XS = "iq2_xs"
 FUSION_FREE_FORMATS = frozenset(
     {
         QUANTIZATION_FP8,
-        QUANTIZATION_IQ1_S,
-        QUANTIZATION_IQ2_XS,
+        *GGML_QUANTIZATION_FORMATS,
         QUANTIZATION_NONE,
         QUANTIZATION_FP8_PB_REAL,
     }

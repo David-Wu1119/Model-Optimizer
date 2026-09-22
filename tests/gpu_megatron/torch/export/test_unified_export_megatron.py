@@ -47,7 +47,12 @@ import modelopt.torch.speculative as mtsp
 from modelopt.torch.export import KV_CACHE_FP8, export_mcore_gpt_to_hf, import_mcore_gpt_from_hf
 from modelopt.torch.export.unified_export_megatron import GPTModelExporter
 from modelopt.torch.quantization.config import QuantizerAttributeConfig
-from modelopt.torch.quantization.ggml import dequantize_iq1_s, dequantize_iq2_xs, quantize_iq2_xs
+from modelopt.torch.quantization.ggml import (
+    dequantize_iq1_s,
+    dequantize_iq2_xs,
+    dequantize_q8_0,
+    quantize_iq2_xs,
+)
 from modelopt.torch.quantization.nn import TensorQuantizer
 from modelopt.torch.speculative.eagle.default_config import default_eagle_config
 from modelopt.torch.speculative.plugins.megatron_eagle import _DynamicEagleGPTModel
@@ -90,16 +95,20 @@ def _verify_model_quant_config(
 
 
 @pytest.mark.parametrize(
-    ("qformat", "payload_bytes", "dequantize"),
-    [("iq1_s", 50, dequantize_iq1_s), ("iq2_xs", 74, dequantize_iq2_xs)],
+    ("qformat", "block_size", "payload_bytes", "dequantize"),
+    [
+        ("iq1_s", 256, 50, dequantize_iq1_s),
+        ("iq2_xs", 256, 74, dequantize_iq2_xs),
+        ("q8_0", 32, 34, dequantize_q8_0),
+    ],
 )
-def test_megatron_name_remapping_exports_iq_payload(qformat, payload_bytes, dequantize):
-    """Megatron export writes the same scale-free IQ representation as HF export."""
+def test_megatron_name_remapping_exports_iq_payload(qformat, block_size, payload_bytes, dequantize):
+    """Megatron export writes the same self-contained GGML representation as HF export."""
     linear = torch.nn.Linear(256, 2, bias=False, dtype=torch.bfloat16)
     linear.weight_quantizer = TensorQuantizer(
         QuantizerAttributeConfig(
             num_bits=qformat,
-            block_sizes={-1: 256},
+            block_sizes={-1: block_size},
             backend="ggml",
         )
     )
@@ -112,12 +121,12 @@ def test_megatron_name_remapping_exports_iq_payload(qformat, payload_bytes, dequ
     exporter._name_remapping(linear, "model.layers.0.mlp.down_proj.")
 
     packed_key = "model.layers.0.mlp.down_proj.weight"
-    assert exporter._state_dict[packed_key].shape == (2, 1, payload_bytes)
+    assert exporter._state_dict[packed_key].shape == (2, 256 // block_size, payload_bytes)
     assert exporter._state_dict[packed_key].dtype == torch.uint8
     logical_shape = torch.tensor(
         [
             *exporter._state_dict[packed_key].shape[:-2],
-            exporter._state_dict[packed_key].shape[-2] * 256,
+            exporter._state_dict[packed_key].shape[-2] * block_size,
         ]
     )
     reconstructed = dequantize(
@@ -128,13 +137,14 @@ def test_megatron_name_remapping_exports_iq_payload(qformat, payload_bytes, dequ
     torch.testing.assert_close(reconstructed, linear.weight_quantizer(linear.weight))
     assert exporter.layer_config_dict == {
         "model.layers.0.mlp.down_proj.quantization": qformat,
-        "model.layers.0.mlp.down_proj.awq_block_size": 256,
+        "model.layers.0.mlp.down_proj.awq_block_size": block_size,
     }
 
 
 def _make_iq_experts(qformat, layer_type, *, bias=False):
     experts = torch.nn.ModuleList()
     generator = torch.Generator().manual_seed(1234)
+    block_size = 32 if qformat == "q8_0" else 256
     for _ in range(2):
         expert = torch.nn.Module()
         linear = torch.nn.Linear(256, 4, bias=bias, dtype=torch.bfloat16)
@@ -145,7 +155,7 @@ def _make_iq_experts(qformat, layer_type, *, bias=False):
         linear.weight_quantizer = TensorQuantizer(
             QuantizerAttributeConfig(
                 num_bits=qformat,
-                block_sizes={-1: 256},
+                block_sizes={-1: block_size},
                 backend="ggml",
             )
         )
@@ -273,12 +283,12 @@ def test_megatron_gated_delta_net_slicing_exports_iq_payloads():
     )
 
 
-@pytest.mark.parametrize("qformat", ["iq1_s", "iq2_xs"])
+@pytest.mark.parametrize("qformat", ["iq1_s", "iq2_xs", "q8_0"])
 def test_megatron_packed_experts_reject_iq_without_deployment_loader(qformat):
     experts = _make_iq_experts(qformat, "linear_fc2")
     exporter = _make_iq_exporter()
 
-    with pytest.raises(NotImplementedError, match="Fused-MoE IQ export requires"):
+    with pytest.raises(NotImplementedError, match="Fused-MoE GGML export requires"):
         exporter._pack_name_remapping(
             experts,
             "model.layers.0.mlp.experts.down_proj",
@@ -291,7 +301,7 @@ def test_megatron_gpt_oss_packed_experts_reject_iq_without_deployment_loader():
     experts = _make_iq_experts("iq2_xs", "linear_fc1", bias=True)
     exporter = _make_iq_exporter()
 
-    with pytest.raises(NotImplementedError, match="Fused-MoE IQ export requires"):
+    with pytest.raises(NotImplementedError, match="Fused-MoE GGML export requires"):
         exporter._pack_name_remapping_gpt_oss(
             experts,
             "model.layers.0.mlp.experts.gate_up_proj",
