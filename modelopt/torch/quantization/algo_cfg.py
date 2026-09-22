@@ -327,7 +327,14 @@ def _validate_config_only(plan: CalibrationPlan) -> None:
             )
 
 
-def _validate_scopes(model: nn.Module, plan: CalibrationPlan, sink: list[str]) -> None:
+def _scope_is_empty(model: nn.Module, stage: AlgoStage) -> bool:
+    """An unmatched scope is reported by its own rule; the rest stay quiet about it."""
+    modules, quantizers = resolve_targets(model, stage.scope, stage.selector)
+    return not modules and not quantizers
+
+
+def _reject_empty_scope(model: nn.Module, plan: CalibrationPlan, sink: list[str]) -> None:
+    """A glob that matches nothing is almost always a typo, and silently does no work."""
     for stage in plan:
         modules, quantizers = resolve_targets(model, stage.scope, stage.selector)
         if not modules and not quantizers:
@@ -336,50 +343,64 @@ def _validate_scopes(model: nn.Module, plan: CalibrationPlan, sink: list[str]) -
                 "in the model.",
                 sink=sink,
             )
-            continue
 
+
+def _reject_unscopable_with_scope(model: nn.Module, plan: CalibrationPlan, sink: list[str]) -> None:
+    """An algorithm that ignores the write-mask would write outside its scope."""
+    for stage in plan:
         caps = stage.capabilities
-        if caps is None:
+        if caps is None or caps.scopable or _scope_is_empty(model, stage):
             continue
-
-        if not caps.scopable:
-            everything = set(_index_model(model).quantizers)
-            _, in_scope = stage_targets(model, stage)
-            if in_scope != everything:
-                _report(
-                    f"{stage.algo!r} does not honour the scoping write-mask, so it cannot be "
-                    f"restricted to {stage.selector}={stage.scope!r} ({len(in_scope)} of "
-                    f"{len(everything)} quantizers). Use it at whole-model scope.",
-                    sink=sink,
-                )
-                continue
-        # A whole-module algorithm writes every quantizer of its linears, so its scope must be
-        # closed under module ownership -- otherwise it writes outside the mask and
-        # `effective_writes` understates it, hiding real conflicts.
-        if caps.writes_whole_module:
-            modules, quantizers = stage_targets(model, stage)
-            owned = _index_model(model).quantizers_of
-            unreachable = {q for m in modules for q in owned.get(m, ()) if q not in quantizers}
-            if unreachable:
-                _report(
-                    f"{stage.algo!r} writes whole modules, but {stage.selector}="
-                    f"{stage.scope!r} leaves {len(unreachable)} of their quantizers out of "
-                    f"scope (e.g. {sorted(unreachable)[0]!r}). Select them with `module_name`.",
-                    sink=sink,
-                )
-                continue
-
-        if stage.selector == "quantizer_name":
-            roles = {"weight" if "weight_quantizer" in q else "input" for q in quantizers}
-            if caps.refines != "both" and roles and caps.refines not in roles:
-                _report(
-                    f"{stage.algo!r} only improves {caps.refines} quantizers but "
-                    f"{stage.selector}={stage.scope!r} matches only {sorted(roles)}: a no-op.",
-                    sink=sink,
-                )
+        everything = set(_index_model(model).quantizers)
+        _, in_scope = stage_targets(model, stage)
+        if in_scope != everything:
+            _report(
+                f"{stage.algo!r} does not honour the scoping write-mask, so it cannot be "
+                f"restricted to {stage.selector}={stage.scope!r} ({len(in_scope)} of "
+                f"{len(everything)} quantizers). Use it at whole-model scope.",
+                sink=sink,
+            )
 
 
-def _validate_grid(model: nn.Module, plan: CalibrationPlan, sink: list[str]) -> None:
+def _reject_partial_module_scope(model: nn.Module, plan: CalibrationPlan, sink: list[str]) -> None:
+    """A whole-module algorithm needs a scope closed under module ownership.
+
+    Otherwise it writes the quantizers left out anyway, and ``effective_writes`` understates
+    what the stage touched, hiding real conflicts with later stages.
+    """
+    for stage in plan:
+        caps = stage.capabilities
+        if caps is None or not caps.writes_whole_module or _scope_is_empty(model, stage):
+            continue
+        modules, quantizers = stage_targets(model, stage)
+        owned = _index_model(model).quantizers_of
+        unreachable = {q for m in modules for q in owned.get(m, ()) if q not in quantizers}
+        if unreachable:
+            _report(
+                f"{stage.algo!r} writes whole modules, but {stage.selector}="
+                f"{stage.scope!r} leaves {len(unreachable)} of their quantizers out of "
+                f"scope (e.g. {sorted(unreachable)[0]!r}). Select them with `module_name`.",
+                sink=sink,
+            )
+
+
+def _reject_role_mismatch(model: nn.Module, plan: CalibrationPlan, sink: list[str]) -> None:
+    """A weight-refining algorithm aimed only at input quantizers refines nothing."""
+    for stage in plan:
+        caps = stage.capabilities
+        if caps is None or stage.selector != "quantizer_name" or caps.refines == "both":
+            continue
+        _, quantizers = stage_targets(model, stage)
+        roles = {"weight" if "weight_quantizer" in q else "input" for q in quantizers}
+        if roles and caps.refines not in roles:
+            _report(
+                f"{stage.algo!r} only improves {caps.refines} quantizers but "
+                f"{stage.selector}={stage.scope!r} matches only {sorted(roles)}: a no-op.",
+                sink=sink,
+            )
+
+
+def _reject_wrong_weight_scales(model: nn.Module, plan: CalibrationPlan, sink: list[str]) -> None:
     for stage in plan:
         caps = stage.capabilities
         if caps is None or caps.requires_weight_scales != "dynamic":
@@ -397,7 +418,7 @@ def _validate_grid(model: nn.Module, plan: CalibrationPlan, sink: list[str]) -> 
             )
 
 
-def _validate_fused_siblings(model: nn.Module, plan: CalibrationPlan, sink: list[str]) -> None:
+def _reject_split_fused_siblings(model: nn.Module, plan: CalibrationPlan, sink: list[str]) -> None:
     pipeline_of: dict[str, tuple[str | None, ...]] = {}
     for stage in plan:
         modules, _ = stage_targets(model, stage)
@@ -422,14 +443,12 @@ def _validate_fused_siblings(model: nn.Module, plan: CalibrationPlan, sink: list
                 )
 
 
-def _validate_stage_interactions(model: nn.Module, plan: CalibrationPlan, sink: list[str]) -> None:
+def _reject_noncomposable_repeat(model: nn.Module, plan: CalibrationPlan, sink: list[str]) -> None:
+    """An earlier stage wrote a token this algorithm needs absent to be correct."""
     for i, stage in enumerate(plan):
         caps = stage.capabilities
         if caps is None:
             continue
-
-        # (1) Non-composable repeat: an earlier stage produced a token this algorithm needs
-        #     absent to be correct.
         for j in range(i):
             prev = plan[j]
             if prev.capabilities is None:
@@ -447,7 +466,12 @@ def _validate_stage_interactions(model: nn.Module, plan: CalibrationPlan, sink: 
                     sink=sink,
                 )
 
-        # (2) Dead stage: everything it writes is overwritten before being read.
+
+def _reject_dead_stage(model: nn.Module, plan: CalibrationPlan, sink: list[str]) -> None:
+    """Everything the stage writes is overwritten by a later stage before anyone reads it."""
+    for i, stage in enumerate(plan):
+        if stage.capabilities is None:
+            continue
         produced = effective_writes(model, stage)
         if not produced:
             continue
@@ -469,6 +493,20 @@ def _validate_stage_interactions(model: nn.Module, plan: CalibrationPlan, sink: 
                 f"overwritten unread by a later stage ({first}). Remove or reorder it.",
                 sink=sink,
             )
+
+
+#: Every rule the compiler enforces against the model structure, in the order they run.
+#: Adding a rule is one function plus one entry here; this tuple is the list of what is checked.
+_MODEL_RULES = (
+    _reject_empty_scope,
+    _reject_unscopable_with_scope,
+    _reject_partial_module_scope,
+    _reject_role_mismatch,
+    _reject_wrong_weight_scales,
+    _reject_split_fused_siblings,
+    _reject_noncomposable_repeat,
+    _reject_dead_stage,
+)
 
 
 # --- Entry point ---
@@ -498,10 +536,8 @@ def compile_algo_cfg(
     _validate_config_only(plan)
     if model is not None:
         violations: list[str] = []
-        _validate_scopes(model, plan, violations)
-        _validate_grid(model, plan, violations)
-        _validate_fused_siblings(model, plan, violations)
-        _validate_stage_interactions(model, plan, violations)
+        for rule in _MODEL_RULES:
+            rule(model, plan, violations)
         if violations:
             body = "\n".join(f"  {i + 1}. {v}" for i, v in enumerate(violations))
             msg = f"invalid algo_cfg ({len(violations)} problem(s)):\n{body}"
