@@ -60,11 +60,22 @@ come from `modelopttools:eval-config` (run it first) + the workspace `.env`.
 
 **Sharding.** `max_concurrent`/`sandbox.concurrency` are **per shard**, and each shard runs
 its own vLLM on its own node — `shards: N` multiplies both serving capacity and live Fargate
-sandboxes (`N × concurrency`). Trials are partitioned and merged, so the score is unaffected;
-it is purely a wall-clock lever. `shards: 4` suits 89 × r8 = 712 trials. Check
+sandboxes (`N × concurrency`). Trials are partitioned and merged, preserving the
+intended trial set. Sharding or concurrency changes can still affect scores when
+serving speed or queueing changes timeout rates. `shards: 4` suits 89 × r8 = 712 trials. Check
 `N × concurrency` against the Fargate quota and `N × gpus_per_node` against your allocation.
 
 ## Score Extraction
+
+Before reporting `pass@1`, complete the evaluation skill's
+`references/run-validation.md` **Timeout and Output-Limit Accounting** using
+the actual run's trial results and agent/request artifacts. For the full recipe,
+expect 89 × 8 = 712 trials; report both terminal timeouts and trials affected by
+recovered request timeouts. Separate the two-hour agent limit from request/proxy,
+sandbox/verifier, and SLURM walltime limits. Keep timed-out trials in the metric
+as required by the benchmark protocol; do not report a success-only subset as
+the full benchmark score. Missing request telemetry remains unknown even if
+trial-level timeout counts are available.
 
 Report **`pass@1`** only — benchmark `terminal-bench@2.1`, scorer `pass@1` (0–1):
 the resolved rate over the 2.1 task set, **already averaged over repeats** (a single

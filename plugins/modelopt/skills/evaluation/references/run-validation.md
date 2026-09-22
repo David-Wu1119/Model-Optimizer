@@ -12,8 +12,9 @@ resumes from those caches if the first job times out, then queues another
 follow-on job so long-running evals can continue across walltime windows.
 
 Do not assume a timeout means the evaluation failed or produced invalid results.
-Treat timeouts as expected resume events until `nel status`/`nel info`,
-artifacts, and logs show a terminal failure or invalid run.
+Treat SLURM walltime timeouts as expected resume events until `nel status`/`nel
+info`, artifacts, and logs show a terminal failure or invalid run. Request or
+task/trial timeouts require separate accounting below, even when the job succeeds.
 
 ## Verify Completed Evaluation Run
 
@@ -29,11 +30,57 @@ single-model run:
 4. For code-execution tasks, inspect executor/sandbox/container logs for setup failures, package install failures, timeouts, thread/process exhaustion, permission errors, harness crashes, or skipped tests that would make scores non-comparable.
 5. Confirm sample accounting: expected samples/repeats match completed, scored samples; no unexpected dropped/skipped/failed samples, `unknown_agent_error`, `failed_samples_policy` aborts, empty outputs, or partial result files.
 6. If reasoning traces are present, confirm they are parsed/stripped/ignored before scoring consistently. Check for parser errors, unmatched reasoning delimiters, `finish_reason: length`, reasoning text leaked into answers, answers stripped with the reasoning, or reasoning disabled when the config intended it to be active.
+7. Complete the **Timeout and Output-Limit Accounting** below for every task,
+   including non-reasoning models and successful runs.
 
 Report the run-validation summary before any score: log scan status, sample
 accounting, reasoning/answer parsing status, and any errors or warnings found.
 If any validation item fails, either rerun/fix it or label the result as
 incomplete or invalid.
+
+## Timeout and Output-Limit Accounting
+
+Before reporting a score, inspect structured per-response and per-trial artifacts,
+plus relevant logs and the resolved config. A successful job or MLflow export does
+not establish that every sample finished without hitting a limit.
+
+For each benchmark and each baseline/candidate run, report:
+
+| Check | Required evidence |
+|---|---|
+| Coverage | Expected trials (including repeats), completed/scored trials, failed/skipped/missing trials, and the score denominator. State whether failures receive zero credit or are excluded. |
+| Timeouts | Timed-out request attempts / all request attempts; unique trials affected / expected trials; and trials ending in timeout / expected trials. Separate recovered retries from terminal failures and identify the layer: client/proxy, agent/task, judge, or sandbox/verifier. |
+| Output limits | Responses stopped by a generation limit / observed responses; unique affected trials / expected trials. Use explicit termination metadata such as `finish_reason: length`, and distinguish output-token caps from context exhaustion or agent step/total-token limits where evidence permits. |
+| Effective limits | Request/proxy and task/agent/judge/verifier timeouts, timeout strategy, output-token and context limits, and any task overrides. Record concurrency, sharding, and serving setup alongside these limits. |
+
+Show counts and percentages with explicit denominators and artifact paths. Count
+unique sample/trial IDs including repeat IDs; deduplicate resumed artifacts and
+keep request retries separate from trials. Categories can overlap, so do not sum
+them as disjoint failures. Log keyword matches alone are not sample counts.
+Token usage near a configured cap is a diagnostic clue, not proof of truncation;
+inspect termination metadata and the effective per-request limit.
+
+If artifacts omit termination reasons, cover only sampled responses, or exclude
+failed requests, report that coverage and mark the full-run rate **unknown**.
+Do not infer zero from missing telemetry or extrapolate a sampled rate to the
+whole run. Identify the missing artifacts or instrumentation needed to resolve it.
+
+Interpret the score under its actual protocol:
+
+- Benchmark-defined time/token limits can legitimately produce failures; retain
+  them in the official metric according to that protocol. Report the limit-hit
+  rates rather than automatically declaring every nonzero rate invalid.
+- Infrastructure failures, unexpected exclusions, or mismatched limits require
+  investigation before a model-quality verdict. Unknown accounting makes this
+  validation incomplete; a score may be shown as provisional, not validated.
+- Matching wall-clock limits alone does not isolate model quality: serving speed,
+  queueing, concurrency, and verbosity can change how much work fits in the limit.
+  Compare limit-hit rates on both sides before attributing a delta to quantization;
+  unresolved timeout effects make that attribution inconclusive.
+- Do not silently drop timed-out trials or increase limits for only one model.
+  If a controlled rerun is needed, use matched settings for both sides, preserve
+  the original results, and label changes to the benchmark protocol explicitly.
+  A longer-timeout diagnostic is not automatically a leaderboard-comparable score.
 
 ## External Baseline Sanity Check
 

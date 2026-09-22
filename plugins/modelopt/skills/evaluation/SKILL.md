@@ -539,7 +539,7 @@ Remove `limit_samples` overrides; keep canary-validated parallelism. If the cana
 
 ### Step 9 — Verify completed run
 
-Before pulling/reporting scores, validate the run. Read `references/run-validation.md` for NEL timeout/resume behavior, completed-run validation, diagnostics, and score harvesting. For a baseline that will be compared with a candidate, also perform its **External Baseline Sanity Check** before a success verdict, then hand the validated runs to `compare-results` for baseline-vs-candidate deltas.
+Before pulling/reporting scores, validate the run. Read `references/run-validation.md` for NEL timeout/resume behavior, completed-run validation, diagnostics, and score harvesting. Its **Timeout and Output-Limit Accounting** is required for every task: report counts, rates, denominators, and telemetry coverage before the score; missing telemetry is unknown, not zero. For a baseline that will be compared with a candidate, also perform its **External Baseline Sanity Check** before a success verdict, then hand the validated runs to `compare-results` for baseline-vs-candidate deltas.
 
 ---
 
