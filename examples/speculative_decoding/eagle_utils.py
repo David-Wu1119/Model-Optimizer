@@ -202,7 +202,14 @@ class EagleTrainerWithAccLog(Trainer):
             # draft, and that lives in the optimizer. `create_optimizer` below wraps its own
             # work in `if self.optimizer is None`, so setting it here skips that entirely --
             # including the decay/no-decay grouping, which is why this reproduces it.
-            cls, kwargs = self.get_optimizer_cls_and_kwargs(self.args, model)
+            # `Trainer.create_optimizer` prefers an explicitly supplied class over
+            # `args.optim`, and so must this: `optimizer_cls_and_kwargs` is the supported way
+            # to pass one without subclassing, and `ModelOptHFTrainer` uses it. Reading
+            # `args.optim` unconditionally would discard it silently.
+            if self.optimizer_cls_and_kwargs is not None:
+                cls, kwargs = self.optimizer_cls_and_kwargs
+            else:
+                cls, kwargs = self.get_optimizer_cls_and_kwargs(self.args, model)
             if not issubclass(cls, torch.optim.AdamW):
                 raise ValueError(
                     f"dflash_fp32_master_weights needs an AdamW-family optimizer to hold the "

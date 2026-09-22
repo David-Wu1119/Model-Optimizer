@@ -1139,6 +1139,71 @@ class TestDFlashFp32MasterWeights:
         resumed.load_state_dict(source.state_dict())
         assert all("master" not in state for state in resumed.state.values())
 
+    def test_a_restore_that_skipped_load_state_dict_heals_the_master_too(self):
+        """Not every restore reaches ``load_state_dict`` -- DeepSpeed never calls it.
+
+        On those paths the base class's cast to the parameter's dtype stands, and a bf16
+        master reads as present, so it survives the per-key creation and is then updated in
+        bf16. That is the loss this optimizer exists to prevent, arrived at from the other
+        side, and the functional update promotes rather than raising, so nothing says so.
+        """
+        bf16 = torch.nn.Linear(16, 16, bias=False).to(torch.bfloat16)
+        optimizer = MasterWeightAdamW(bf16.parameters(), lr=1e-2)
+        bf16(torch.randn(4, 16, dtype=torch.bfloat16)).pow(2).mean().backward()
+        optimizer.step()
+        for state in optimizer.state.values():
+            for key in ("master", "exp_avg", "exp_avg_sq"):
+                state[key] = state[key].to(torch.bfloat16)
+
+        bf16.zero_grad(set_to_none=True)
+        bf16(torch.randn(4, 16, dtype=torch.bfloat16)).pow(2).mean().backward()
+        optimizer.step()
+        for key in ("master", "exp_avg", "exp_avg_sq"):
+            seen = {state[key].dtype for state in optimizer.state.values()}
+            assert seen == {torch.float32}, f"{key}: {seen}"
+
+    def test_a_closure_may_call_backward(self):
+        """``step(closure)`` is documented to re-evaluate the loss, which means ``backward()``."""
+        model = torch.nn.Linear(16, 16, bias=False).to(torch.bfloat16)
+        optimizer = MasterWeightAdamW(model.parameters(), lr=1e-2)
+
+        def closure():
+            optimizer.zero_grad()
+            loss = model(torch.randn(4, 16, dtype=torch.bfloat16)).pow(2).mean()
+            loss.backward()
+            return loss
+
+        assert optimizer.step(closure) is not None
+
+    def test_differentiable_is_refused_rather_than_ignored(self):
+        """The update runs on a master and is copied back, so a graph would stop at the copy."""
+        model = torch.nn.Linear(16, 16, bias=False)
+        optimizer = MasterWeightAdamW(model.parameters(), lr=1e-2, differentiable=True)
+        model(torch.randn(4, 16)).pow(2).mean().backward()
+        with pytest.raises(ValueError, match="differentiable"):
+            optimizer.step()
+
+    def test_the_callback_stays_armed_when_no_step_landed(self):
+        """An empty optimizer state means nothing happened, not that everything is fine.
+
+        A ``GradScaler`` can skip the first step on a non-finite gradient; consuming the
+        tripwire there would pass the whole run on a check that examined nothing.
+        """
+        model = _converted(fp32_master_weights=True)
+        model.train()
+        trainable = [p for p in model.dflash_module.parameters() if p.requires_grad]
+        plain = torch.optim.AdamW(trainable, lr=1e-4)
+
+        callback = VerifyMasterWeightsCallback()
+        callback.on_train_begin(None, SimpleNamespace(global_step=0), None)
+        callback.on_step_end(None, SimpleNamespace(global_step=1), None, optimizer=plain)
+        assert not callback._checked
+
+        model(**_dflash_batch(model.dflash_config.vocab_size)).loss.backward()
+        plain.step()
+        with pytest.raises(RuntimeError, match="dflash_fp32_master_weights"):
+            callback.on_step_end(None, SimpleNamespace(global_step=2), None, optimizer=plain)
+
     def test_an_fp32_model_is_plain_adamw(self):
         """No master copy where there is no precision to recover, and identical arithmetic."""
         torch.manual_seed(3)

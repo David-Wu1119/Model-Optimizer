@@ -278,9 +278,9 @@ def train():
 
     # On the HF-format restore path above, DFlash's modify() ran with the base model still on
     # meta, so the draft has no device, dtype or rotary buffer yet. Re-apply them here, before
-    # the Trainer is built: create_optimizer freezes the Adam moment dtype off the parameters,
-    # so a draft still sitting at the checkpoint's loaded dtype would silently spend the rest
-    # of the run without fp32 master weights. A no-op on a fresh convert.
+    # the Trainer is built: DDP's broadcast_buffers hangs on a draft whose rotary buffer is
+    # missing, and the forward only avoids reconciling dtypes because the draft matches the
+    # base. A no-op on a fresh convert.
     if isinstance(model, HFDFlashModel):
         model.restore_draft_precision()
 

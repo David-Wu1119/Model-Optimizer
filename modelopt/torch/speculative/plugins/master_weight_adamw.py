@@ -63,13 +63,25 @@ class MasterWeightAdamW(torch.optim.AdamW):
         updates the wrapper's reported dtype while the local shard stays in the model's, so
         ``zeros_like(p)`` allocates the moments in bf16 after all.
         """
-        loss = closure() if closure is not None else None
+        loss = None
+        if closure is not None:
+            # `step(closure)` is documented to re-evaluate the loss, which means calling
+            # `backward()`; the `no_grad` above would make any such closure raise instead.
+            with torch.enable_grad():
+                loss = closure()
 
         for group in self.param_groups:
             if group.get("fused"):
                 raise ValueError(
                     "fused AdamW writes through to the parameters it is given, which is not "
                     "compatible with fp32 master weights. Use foreach instead."
+                )
+            if group.get("differentiable"):
+                raise ValueError(
+                    "differentiable AdamW builds a graph through the update, but this "
+                    "optimizer applies the update to a master copy and then copies the result "
+                    "into the parameter, so the graph would stop at that copy. Accepting the "
+                    "option would leave it silently inert."
                 )
             amsgrad = group.get("amsgrad", False)
             capturable = group.get("capturable", False)
@@ -86,6 +98,16 @@ class MasterWeightAdamW(torch.optim.AdamW):
                 if p.grad is None:
                     continue
                 state = self.state[p]
+                # Repair first, so that everything below reads fp32. A restore that never
+                # reaches `load_state_dict` -- DeepSpeed replaces the optimizer outright and
+                # never calls it -- leaves the base class's cast to the parameter's dtype in
+                # place, and a bf16 master reads as present, so it would survive the creation
+                # below and then be updated in bf16. Keyed off `_FP32_STATE_KEYS` rather than
+                # a list written out here, so it cannot go back out of step with it.
+                for key in _FP32_STATE_KEYS:
+                    value = state.get(key)
+                    if value is not None and value.dtype != torch.float32:
+                        state[key] = value.float()
                 needs_master = p.dtype != torch.float32
                 # Per key rather than `if not state`: a resume restores the moments without a
                 # master -- from plain AdamW, or from the fp32-draft implementation this
@@ -96,12 +118,7 @@ class MasterWeightAdamW(torch.optim.AdamW):
                 reference = state.get("master", p)
                 for key in ("exp_avg", "exp_avg_sq", *(("max_exp_avg_sq",) if amsgrad else ())):
                     if key not in state:
-                        state[key] = torch.zeros_like(reference, dtype=torch.float32)
-                    elif state[key].dtype != torch.float32:
-                        # Restored by a path that does not go through `load_state_dict` below;
-                        # DeepSpeed, for one, never calls it. An fp32 master with bf16 moments
-                        # is not a mixture the functional `adamw()` accepts.
-                        state[key] = state[key].float()
+                        state[key] = torch.zeros_like(reference)
                 if "step" not in state:
                     # torch keeps this on the parameter's device under `capturable`, and the
                     # multi-tensor update asserts on it; everywhere else a CPU scalar is the
@@ -142,7 +159,6 @@ class MasterWeightAdamW(torch.optim.AdamW):
                 maximize=group.get("maximize", False),
                 foreach=group.get("foreach"),
                 capturable=capturable,
-                differentiable=group.get("differentiable", False),
             )
             for param, master in downcast:
                 param.copy_(master)
@@ -206,6 +222,8 @@ class VerifyMasterWeightsCallback(TrainerCallback):
     process takes, which is when the moments exist.
     """
 
+    _checked = False
+
     def on_train_begin(self, args, state, control, **kwargs):
         """Arm the check for this ``train()`` call."""
         self._checked = False
@@ -220,9 +238,8 @@ class VerifyMasterWeightsCallback(TrainerCallback):
         restored through anything that does not go through ``MasterWeightAdamW``'s own
         ``load_state_dict`` comes back at the parameter's dtype.
         """
-        if getattr(self, "_checked", False) or optimizer is None:
+        if self._checked or optimizer is None:
             return control
-        self._checked = True
         inner = getattr(optimizer, "optimizer", optimizer)  # unwrap accelerate
         dtypes = {
             value.dtype
@@ -230,7 +247,12 @@ class VerifyMasterWeightsCallback(TrainerCallback):
             for key, value in param_state.items()
             if key in _FP32_STATE_KEYS and isinstance(value, torch.Tensor)
         }
-        if dtypes and dtypes != {torch.float32}:
+        if not dtypes:
+            # Nothing allocated, so no step landed -- a ``GradScaler`` can skip the first one
+            # on a non-finite gradient. Disarming here would pass the run on an empty check.
+            return control
+        self._checked = True
+        if dtypes != {torch.float32}:
             raise RuntimeError(
                 f"dflash_fp32_master_weights is set, but the optimizer's Adam moments are "
                 f"{dtypes} rather than fp32, so the flag is doing nothing. The training loop "
