@@ -45,6 +45,7 @@ import yaml
 import modelopt.torch.quantization as mtq
 from modelopt.recipe import load_recipe
 from modelopt.torch.utils.mlflow import (
+    TRACKING_URI_ENV,
     MlflowRunLogger,
     command_text,
     default_experiment_name,
@@ -54,9 +55,9 @@ from modelopt.torch.utils.mlflow import add_mlflow_args as _add_mlflow_args
 
 TOOL_NAME = "vllm_serve_fakequant"
 
-# Written by the launcher, read by the workers. The two MLflow-owned names are MLflow's own,
-# so a shell that already exports them opts in without touching the command line.
-TRACKING_URI_ENV = "MLFLOW_TRACKING_URI"
+# Written by the launcher, read by the workers. TRACKING_URI_ENV (imported, so the handover
+# cannot drift from what resolve_tracking_uri reads) and EXPERIMENT_ENV are MLflow's own
+# names, so a shell that already exports them opts in without touching the command line.
 EXPERIMENT_ENV = "MLFLOW_EXPERIMENT_NAME"
 RUN_NAME_ENV = "MODELOPT_MLFLOW_RUN_NAME"
 REQUIRED_ENV = "MODELOPT_MLFLOW_REQUIRED"

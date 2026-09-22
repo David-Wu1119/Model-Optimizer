@@ -832,6 +832,15 @@ def test_a_bad_uri_is_fatal_only_when_it_was_asked_for(monkeypatch):
         _resolved(["--mlflow", "file:///local/mlruns"])
 
 
+def test_an_explicit_empty_uri_is_rejected_rather_than_falling_back(monkeypatch):
+    """``--mlflow "$UNSET_VAR"`` asked for tracking and cannot have it; silently using the
+    environment's server instead would send the run somewhere the flag did not name."""
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", URI)
+
+    with pytest.raises(SystemExit):
+        _resolved(["--mlflow", ""])
+
+
 # --- the provenance pointer a checkpoint carries ---------------------------------------
 
 
@@ -862,10 +871,41 @@ def test_experiment_json_uploads_without_claiming_a_checkpoint(fake_mlflow, tmp_
     assert not (tmp_path / EXPERIMENT_JSON).exists()
 
 
-def test_experiment_json_is_inert_when_the_run_never_opened(tmp_path):
+def test_a_run_that_never_opened_clears_the_pointer_instead_of_writing_one(tmp_path):
+    """After a completed export the pointer is this run's or absent -- never a previous
+    run's, which would name a run that did not write these weights."""
+    stale = tmp_path / EXPERIMENT_JSON
+    stale.write_text('{"run_id": "an-earlier-run"}')
+
     MlflowRunLogger(URI, "e", enabled=False).log_experiment_json(tmp_path)
 
-    assert not (tmp_path / EXPERIMENT_JSON).exists()
+    assert not stale.exists()
+
+
+def test_a_run_that_never_opened_leaves_an_unexported_checkpoint_alone(tmp_path):
+    """No checkpoint_dir means nothing was exported, so whatever is there keeps its own."""
+    stale = tmp_path / EXPERIMENT_JSON
+    stale.write_text('{"run_id": "an-earlier-run"}')
+
+    MlflowRunLogger(URI, "e", enabled=False).log_experiment_json(None)
+
+    assert stale.exists()
+
+
+def test_optional_tracking_that_dies_mid_flight_clears_the_pointer(monkeypatch, tmp_path):
+    """The reachable-looking URI took the caller down the tracked path, so its untracked
+    cleanup never ran; start() then disabled itself. The pointer still has to go."""
+    monkeypatch.setitem(sys.modules, "mlflow", _unreachable(FakeMlflow()))
+    stale = tmp_path / EXPERIMENT_JSON
+    stale.write_text('{"run_id": "an-earlier-run"}')
+    logger = _logger(required=False)
+
+    logger.start()  # disables itself rather than raising
+    logger.log_experiment_json(tmp_path)
+    logger.finish("FINISHED")
+
+    assert logger.enabled is False
+    assert not stale.exists()
 
 
 def test_an_unwritable_checkpoint_dir_warns_instead_of_failing_the_run(

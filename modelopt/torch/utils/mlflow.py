@@ -47,6 +47,7 @@ from modelopt.torch.utils.logging import TeeStream
 
 __all__ = [
     "EXPERIMENT_JSON",
+    "TRACKING_URI_ENV",
     "MlflowRunLogger",
     "add_mlflow_args",
     "command_text",
@@ -76,8 +77,9 @@ _MASK = "***"
 # of the model.
 EXPERIMENT_JSON = ".experiment.json"
 
-# MLflow's own variable, so a shell that already exports it opts in without a flag.
-_TRACKING_URI_ENV = "MLFLOW_TRACKING_URI"
+# MLflow's own variable, so a shell that already exports it opts in without a flag. Public
+# because the vLLM example republishes the resolved URI under it for its worker processes.
+TRACKING_URI_ENV = "MLFLOW_TRACKING_URI"
 
 
 def _stat_key(path: Path) -> tuple[int, int] | None:
@@ -416,12 +418,18 @@ class MlflowRunLogger:
         *checkpoint_dir* also writes the JSON there as :data:`EXPERIMENT_JSON`. Pass it only
         once the checkpoint is really on disk, since the file claims authorship of the weights
         sitting next to it: an output directory existing proves nothing, as it may hold a
-        checkpoint from an earlier attempt whose weights this run never touched. Nothing is
-        recorded at all when the run never opened, which a URI taken from the environment
-        reaches by design.
+        checkpoint from an earlier attempt whose weights this run never touched.
+
+        After the checkpoint is written, the pointer beside it is this run's or absent --
+        never a previous run's. So a run that never opened *removes* the pointer rather than
+        leaving one: tracking can disable itself mid-flight (an unreachable server or an
+        uninstalled client, which a URI inherited from the environment tolerates by design),
+        and the caller's untracked cleanup was skipped because tracking looked configured.
         """
         info = self.run_info
         if not info:
+            if checkpoint_dir is not None:
+                drop_experiment_json(checkpoint_dir)
             return
         text = json.dumps(info, indent=2) + "\n"
         self.log_text(EXPERIMENT_JSON.removeprefix("."), text)
@@ -619,7 +627,7 @@ class MlflowRunLogger:
 # configured the same way and named by the same convention whichever script opened it.
 
 _ENV_HELP = (
-    f"MLflow's own ${_TRACKING_URI_ENV} enables tracking without this flag, which overrides "
+    f"MLflow's own ${TRACKING_URI_ENV} enables tracking without this flag, which overrides "
     "it. A URI taken from the environment is best-effort: if it is unusable the run warns and "
     "continues untracked."
 )
@@ -675,15 +683,19 @@ def resolve_tracking_uri(
     job that would otherwise have worked.
     """
     required = uri is not None
-    uri = uri or os.environ.get(_TRACKING_URI_ENV) or None
-    if not uri:
-        return None, required
+    if uri is None:
+        # Only when the flag is absent: an explicit empty value (``--mlflow "$UNSET_VAR"``)
+        # is a request for tracking that cannot be honoured, and must fail rather than
+        # silently reach whatever server the environment names.
+        uri = os.environ.get(TRACKING_URI_ENV) or None
+        if uri is None:
+            return None, required
     try:
         return validate_tracking_uri(uri), required
     except ValueError as e:
         if required:
             parser.error(f"--mlflow: {e}")  # exits
-        warnings.warn(f"Ignoring {_TRACKING_URI_ENV}, continuing untracked: {e}")
+        warnings.warn(f"Ignoring {TRACKING_URI_ENV}, continuing untracked: {e}")
         return None, required
 
 

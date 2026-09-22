@@ -316,6 +316,29 @@ def test_an_untracked_export_drops_an_inherited_pointer(monkeypatch, tmp_path):
     assert not inherited.exists()
 
 
+def test_a_completed_export_clears_the_pointer_when_optional_tracking_fails(
+    monkeypatch, fake_mlflow, tmp_path
+):
+    """$MLFLOW_TRACKING_URI is best-effort, so an unreachable server disables tracking from
+    inside the block -- after the tracked path already skipped the untracked cleanup. The
+    fresh checkpoint must still not keep the previous run's pointer."""
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", URI)
+
+    def explode(name):
+        raise ConnectionError("no route to host")
+
+    fake_mlflow.set_experiment = explode
+    inherited = tmp_path / ".experiment.json"
+    inherited.write_text('{"run_id": "from-an-earlier-run"}')
+    args = _parse(monkeypatch, "--export_megatron_path", str(tmp_path), "--quant_cfg", "nvfp4")
+
+    with mlflow_utils.mlflow_run(args):
+        args.checkpoint_exported = True
+
+    assert args.mlflow_required is False
+    assert not inherited.exists()
+
+
 def test_a_failed_untracked_run_leaves_the_directory_alone(monkeypatch, tmp_path):
     """Nothing was exported, so whatever checkpoint is already there keeps its pointer."""
     inherited = tmp_path / ".experiment.json"
