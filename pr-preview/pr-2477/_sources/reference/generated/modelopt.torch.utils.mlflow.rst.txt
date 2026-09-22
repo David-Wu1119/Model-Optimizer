@@ -49,6 +49,7 @@ mlflow
       current_user
       default_experiment_name
       drop_experiment_json
+      mask_tracking_uri
       resolve_mlflow_args
       resolve_tracking_uri
       validate_tracking_uri
