@@ -39,6 +39,7 @@ QUANTIZATION_FP8_PC_PT = "fp8_pc_pt"
 QUANTIZATION_IQ1_S = "iq1_s"
 QUANTIZATION_IQ2_XXS = "iq2_xxs"
 QUANTIZATION_IQ2_XS = "iq2_xs"
+QUANTIZATION_IQ2_S = "iq2_s"
 
 # Every GGML IQ format. They share the weight-only, 256-value-block, per-module-scale
 # shape, so export treats them as one family; adding a format means adding it here
@@ -48,6 +49,7 @@ IQ_FORMATS = frozenset(
         QUANTIZATION_IQ1_S,
         QUANTIZATION_IQ2_XXS,
         QUANTIZATION_IQ2_XS,
+        QUANTIZATION_IQ2_S,
     }
 )
 
