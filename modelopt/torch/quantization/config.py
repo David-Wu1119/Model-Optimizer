@@ -630,7 +630,7 @@ class QuantizerAttributeConfig(ModeloptBaseConfig):
         description="""
         Gradient computation where fake quantization is pass through is called
         'Straight-Through Estimator (STE)'. STE does not require saving of the input tensor for
-        performing backward pass and hence consumes less memory.
+        performing backward pass and hence requires less memory.
 
         If set to False, we will use STE with zeroed outlier gradients. This setting may
         yield better QAT accuracy depending on the quantization format. However, this setting
@@ -847,7 +847,7 @@ class QuantizeAlgorithmConfig(ModeloptBaseConfig):
             from .algo_cfg import WEIGHT, capabilities_for
 
             caps = capabilities_for(self.method)
-            if caps is not None and WEIGHT in caps.produces:
+            if caps is not None and WEIGHT in caps.may_write:
                 raise ValueError(
                     f"Algorithm '{self.method}' mutates layer weights in-place; "
                     "calib_mutates_weights=False would lose those updates on resume. "

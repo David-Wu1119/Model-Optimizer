@@ -182,7 +182,7 @@ def test_entry_wraps_a_bare_cfg_in_a_list():
 def test_algorithm_and_equivalent_algo_cfg_compile_to_the_same_plan(quantized):
     legacy = _compile(quantized, algorithm="max")
     explicit = _compile(quantized, {"quantizer_name": "*", "cfg": ["max"]})
-    assert [x.key() for x in legacy] == [x.key() for x in explicit]
+    assert legacy == explicit
 
 
 def test_pipeline_lowers_in_order_with_kwargs(quantized):
@@ -210,7 +210,7 @@ def test_fallback_algorithm_excludes_scopes_claimed_by_entries(quantized):
 REJECTIONS = [
     ("unknown algorithm", [{"module_name": "*", "cfg": ["awq_supreme"]}]),
     ("matches no target", [{"module_name": "*cross_attn*", "cfg": ["max"]}]),
-    # `optimizes` is what an algorithm *improves*: mse seeds input amax via its max
+    # `refines` is what an algorithm *improves*: mse seeds input amax via its max
     # bootstrap, but refines nothing on the input side, which is what was asked for.
     ("only improves weight quantizers", [{"quantizer_name": "*input_quantizer", "cfg": ["mse"]}]),
     # awq_lite writes the input quantizer too, so a weight-only scope cannot hold it.
@@ -317,12 +317,12 @@ def test_declared_produces_is_an_upper_bound_on_what_the_algorithm_writes(algo):
         if old is None or new is None or old.shape != new.shape or not torch.equal(old, new):
             written.add(key[0])
 
-    declared = set(capabilities_for(algo).produces)
+    declared = set(capabilities_for(algo).may_write)
     assert written <= declared, f"{algo} writes {sorted(written - declared)}, undeclared"
 
 
 def test_a_custom_algorithm_inherits_conservative_capabilities():
-    from modelopt.torch.quantization.algo_cfg import ALL_WRITABLE_TOKENS, capabilities_for
+    from modelopt.torch.quantization.algo_cfg import WRITABLE_TOKENS, capabilities_for
     from modelopt.torch.quantization.config import QuantizeAlgorithmConfig
     from modelopt.torch.quantization.mode import BaseCalibrateModeDescriptor, CalibrateModeRegistry
 
@@ -340,8 +340,8 @@ def test_a_custom_algorithm_inherits_conservative_capabilities():
     try:
         caps = capabilities_for("my_custom_algo")
         assert caps is not None, "a registered algorithm must have capabilities"
-        assert caps.produces == ALL_WRITABLE_TOKENS, "assume it writes everything"
-        assert not caps.honors_write_mask, "assume it cannot be scoped"
+        assert caps.may_write == WRITABLE_TOKENS, "assume it writes everything"
+        assert not caps.scopable, "assume it cannot be scoped"
     finally:
         CalibrateModeRegistry.remove_mode("my_custom_algo_calibrate")
 
@@ -353,7 +353,7 @@ def test_calib_mutates_weights_false_is_rejected_for_every_weight_writing_algori
     checked = []
     for algo in known_algorithms():
         caps = capabilities_for(algo)
-        if WEIGHT not in caps.produces:
+        if WEIGHT not in caps.may_write:
             continue
         config_class = CalibrateModeRegistry[
             BaseCalibrateModeDescriptor._get_mode_name(algo)
@@ -422,7 +422,7 @@ def test_gptq_preserves_a_preceding_range_search():
     probe = "layers.0.mlp.gate_proj.weight_quantizer"
     # GPTQ kept MSE's amax instead of re-deriving it from max ...
     assert torch.equal(chained[probe], only_mse[probe])
-    # ... and the resulting model is not the one plain GPTQ produces.
+    # ... and the resulting model is not the one plain GPTQ may_write.
     assert not torch.equal(chained[probe], only_gptq[probe])
 
 
@@ -703,8 +703,8 @@ def test_fp8_scale_sweep_requires_static_and_a_dynamic_grid_is_upgraded():
     from modelopt.torch.quantization.algo_cfg import capabilities_for, stage_targets
     from modelopt.torch.quantization.mode import BaseCalibrateModeDescriptor, CalibrateModeRegistry
 
-    assert capabilities_for("mse", {"fp8_scale_sweep": True}).requires_grid == "static"
-    assert capabilities_for("mse").requires_grid is None
+    assert capabilities_for("mse", {"fp8_scale_sweep": True}).requires_weight_scales == "static"
+    assert capabilities_for("mse").requires_weight_scales is None
 
     model = _nvfp4_model(NVFP4_DYN)
     stage = _compile(

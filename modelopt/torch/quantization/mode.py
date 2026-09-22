@@ -38,11 +38,12 @@ from modelopt.torch.opt.mode import (
 from modelopt.torch.opt.searcher import ForwardLoop
 
 from .algo_cfg import (
-    ALL_WRITABLE_TOKENS,
+    ACTS,
     INPUT_AMAX,
     PRE_QUANT_SCALE,
     WEIGHT,
     WEIGHT_AMAX,
+    WRITABLE_TOKENS,
     AlgoCapabilities,
     capabilities_for,
 )
@@ -230,12 +231,12 @@ class AutoQuantizeModeDescriptor(QuantizeModeDescriptor):
 def _writes_weights(method: str | None, cfg: dict) -> bool:
     """Does ``method``, configured this way, update layer weights in place?
 
-    One derivation, read off the algorithm's declared ``produces``. An unrecognized method
+    One derivation, read off the algorithm's declared ``may_write``. An unrecognized method
     is assumed to write weights, matching the conservative default the capability model uses
     everywhere else: over-declaring costs a weight write-back, under-declaring loses results.
     """
     caps = capabilities_for(method, cfg)
-    return caps is None or WEIGHT in caps.produces
+    return caps is None or WEIGHT in caps.may_write
 
 
 def wrapped_calib_func(
@@ -360,9 +361,9 @@ class BaseCalibrateModeDescriptor(ModeDescriptor):
     # is over-constrained rather than silently exempt from every check. Override to be accurate.
     _capabilities: AlgoCapabilities = AlgoCapabilities(
         writes_whole_module=True,
-        optimizes="both",
-        produces=ALL_WRITABLE_TOKENS,
-        honors_write_mask=False,
+        refines="both",
+        may_write=WRITABLE_TOKENS,
+        scopable=False,
     )
 
     @classmethod
@@ -371,11 +372,11 @@ class BaseCalibrateModeDescriptor(ModeDescriptor):
 
         Runs at the start of the stage that needs it rather than the end of the one before: the
         requirement belongs to the consumer, and a standalone run must not be dragged into a
-        state it never asked for. The default implements ``requires_grid``; override for
+        state it never asked for. The default implements ``requires_weight_scales``; override for
         anything an algorithm needs beyond that.
         """
         caps = cls.capabilities_for_cfg(cfg)
-        if caps.requires_grid != "static":
+        if caps.requires_weight_scales != "static":
             return False
         upgrade = [
             name
@@ -537,8 +538,8 @@ class MaxCalibrateModeDescriptor(BaseCalibrateModeDescriptor):
 
     _capabilities = AlgoCapabilities(
         writes_whole_module=False,
-        optimizes="both",
-        produces=frozenset({WEIGHT_AMAX, INPUT_AMAX}),
+        refines="both",
+        may_write=frozenset({WEIGHT_AMAX, INPUT_AMAX}),
     )
 
 
@@ -560,11 +561,11 @@ class NVFP4ActHeadroomCalibrateModeDescriptor(BaseCalibrateModeDescriptor):
 
     _capabilities = AlgoCapabilities(
         writes_whole_module=False,
-        optimizes="input",
-        consumes=frozenset({"acts"}),
+        refines="input",
+        requires=frozenset({ACTS}),
         # Headroom-aware for NVFP4 activations, plain max elsewhere -- hence `weight_amax`.
-        produces=frozenset({INPUT_AMAX, WEIGHT_AMAX}),
-        honors_write_mask=False,
+        may_write=frozenset({INPUT_AMAX, WEIGHT_AMAX}),
+        scopable=False,
     )
 
 
@@ -582,9 +583,9 @@ class MseCalibrateModeDescriptor(BaseCalibrateModeDescriptor):
     # Runs `max_calibrate` first unless told to skip, so it seeds `input_amax` too.
     _capabilities = AlgoCapabilities(
         writes_whole_module=False,
-        optimizes="weight",
-        consumes=frozenset({WEIGHT, WEIGHT_AMAX}),
-        produces=frozenset({WEIGHT_AMAX, INPUT_AMAX}),
+        refines="weight",
+        requires=frozenset({WEIGHT, WEIGHT_AMAX}),
+        may_write=frozenset({WEIGHT_AMAX, INPUT_AMAX}),
     )
 
     @classmethod
@@ -592,7 +593,7 @@ class MseCalibrateModeDescriptor(BaseCalibrateModeDescriptor):
         """The fp8 scale sweep searches stored per-block scales, so it needs a static grid."""
         caps = super().capabilities_for_cfg(cfg)
         if cfg.get("fp8_scale_sweep"):
-            caps = replace(caps, requires_grid="static")
+            caps = replace(caps, requires_weight_scales="static")
         return caps
 
 
@@ -613,9 +614,9 @@ class LocalHessianModeDescriptor(BaseCalibrateModeDescriptor):
 
     _capabilities = AlgoCapabilities(
         writes_whole_module=True,
-        optimizes="weight",
-        consumes=frozenset({WEIGHT, WEIGHT_AMAX, "acts"}),
-        produces=frozenset({WEIGHT_AMAX, INPUT_AMAX}),
+        refines="weight",
+        requires=frozenset({WEIGHT, WEIGHT_AMAX, ACTS}),
+        may_write=frozenset({WEIGHT_AMAX, INPUT_AMAX}),
     )
 
     @classmethod
@@ -623,7 +624,7 @@ class LocalHessianModeDescriptor(BaseCalibrateModeDescriptor):
         """The fp8 scale sweep searches stored per-block scales, so it needs a static grid."""
         caps = super().capabilities_for_cfg(cfg)
         if cfg.get("fp8_scale_sweep"):
-            caps = replace(caps, requires_grid="static")
+            caps = replace(caps, requires_weight_scales="static")
         return caps
 
 
@@ -642,10 +643,10 @@ class SmoothQuantModeDescriptor(BaseCalibrateModeDescriptor):
     # side. None can follow another: `apply_pre_quant_scale_and_smooth` requires a clean slate.
     _capabilities = AlgoCapabilities(
         writes_whole_module=True,
-        optimizes="both",
-        consumes=frozenset({"acts"}),
-        produces=frozenset({PRE_QUANT_SCALE, INPUT_AMAX, WEIGHT, WEIGHT_AMAX}),
-        conflicts_with=frozenset({PRE_QUANT_SCALE}),
+        refines="both",
+        requires=frozenset({ACTS}),
+        may_write=frozenset({PRE_QUANT_SCALE, INPUT_AMAX, WEIGHT, WEIGHT_AMAX}),
+        invalid_if_present=frozenset({PRE_QUANT_SCALE}),
     )
 
 
@@ -662,11 +663,11 @@ class AWQLiteModeDescriptor(BaseCalibrateModeDescriptor):
 
     _capabilities = AlgoCapabilities(
         writes_whole_module=True,
-        optimizes="both",
-        consumes=frozenset({"acts", WEIGHT}),
-        produces=frozenset({PRE_QUANT_SCALE, WEIGHT_AMAX, INPUT_AMAX, WEIGHT}),
-        conflicts_with=frozenset({PRE_QUANT_SCALE}),
-        requires_grid="dynamic",
+        refines="both",
+        requires=frozenset({ACTS, WEIGHT}),
+        may_write=frozenset({PRE_QUANT_SCALE, WEIGHT_AMAX, INPUT_AMAX, WEIGHT}),
+        invalid_if_present=frozenset({PRE_QUANT_SCALE}),
+        requires_weight_scales="dynamic",
     )
 
 
@@ -684,10 +685,10 @@ class AWQClipModeDescriptor(BaseCalibrateModeDescriptor):
     # Clipping only moves `weight_quantizer.amax`; it folds nothing into the weight.
     _capabilities = AlgoCapabilities(
         writes_whole_module=True,
-        optimizes="weight",
-        consumes=frozenset({"acts", WEIGHT, WEIGHT_AMAX}),
-        produces=frozenset({WEIGHT_AMAX, INPUT_AMAX}),
-        requires_grid="dynamic",
+        refines="weight",
+        requires=frozenset({ACTS, WEIGHT, WEIGHT_AMAX}),
+        may_write=frozenset({WEIGHT_AMAX, INPUT_AMAX}),
+        requires_weight_scales="dynamic",
     )
 
 
@@ -704,11 +705,11 @@ class AWQFullModeDescriptor(BaseCalibrateModeDescriptor):
 
     _capabilities = AlgoCapabilities(
         writes_whole_module=True,
-        optimizes="both",
-        consumes=frozenset({"acts", WEIGHT}),
-        produces=frozenset({PRE_QUANT_SCALE, WEIGHT_AMAX, INPUT_AMAX, WEIGHT}),
-        conflicts_with=frozenset({PRE_QUANT_SCALE}),
-        requires_grid="dynamic",
+        refines="both",
+        requires=frozenset({ACTS, WEIGHT}),
+        may_write=frozenset({PRE_QUANT_SCALE, WEIGHT_AMAX, INPUT_AMAX, WEIGHT}),
+        invalid_if_present=frozenset({PRE_QUANT_SCALE}),
+        requires_weight_scales="dynamic",
     )
 
 
@@ -725,11 +726,11 @@ class SVDQuantModeDescriptor(BaseCalibrateModeDescriptor):
 
     _capabilities = AlgoCapabilities(
         writes_whole_module=True,
-        optimizes="both",
-        consumes=frozenset({"acts", WEIGHT}),
-        produces=frozenset({PRE_QUANT_SCALE, WEIGHT, WEIGHT_AMAX, INPUT_AMAX}),
-        conflicts_with=frozenset({PRE_QUANT_SCALE}),
-        honors_write_mask=False,
+        refines="both",
+        requires=frozenset({ACTS, WEIGHT}),
+        may_write=frozenset({PRE_QUANT_SCALE, WEIGHT, WEIGHT_AMAX, INPUT_AMAX}),
+        invalid_if_present=frozenset({PRE_QUANT_SCALE}),
+        scopable=False,
     )
     # create_and_replace_svdquant_linear_on_the_fly reads ModeloptStateManager from the
     # root model, which is not present when layerwise_calibrate dispatches per decoder layer.
@@ -756,9 +757,9 @@ class GPTQModeDescriptor(BaseCalibrateModeDescriptor):
     # amax itself when nothing produced one, hence `weight_amax` may go unsatisfied.
     _capabilities = AlgoCapabilities(
         writes_whole_module=True,
-        optimizes="weight",
-        consumes=frozenset({WEIGHT, "acts", WEIGHT_AMAX}),
-        produces=frozenset({WEIGHT, WEIGHT_AMAX, INPUT_AMAX}),
+        refines="weight",
+        requires=frozenset({WEIGHT, ACTS, WEIGHT_AMAX}),
+        may_write=frozenset({WEIGHT, WEIGHT_AMAX, INPUT_AMAX}),
     )
 
 
@@ -779,10 +780,10 @@ class LSQModeDescriptor(BaseCalibrateModeDescriptor):
     # hook below narrows it when the plan says which sub-algorithm is actually configured.
     _capabilities = AlgoCapabilities(
         writes_whole_module=False,
-        optimizes="weight",
-        consumes=frozenset({WEIGHT, WEIGHT_AMAX}),
-        produces=frozenset({WEIGHT_AMAX, INPUT_AMAX, WEIGHT}),
-        honors_write_mask=False,
+        refines="weight",
+        requires=frozenset({WEIGHT, WEIGHT_AMAX}),
+        may_write=frozenset({WEIGHT_AMAX, INPUT_AMAX, WEIGHT}),
+        scopable=False,
     )
 
     @classmethod
@@ -793,5 +794,5 @@ class LSQModeDescriptor(BaseCalibrateModeDescriptor):
         own = frozenset({WEIGHT_AMAX, INPUT_AMAX})
         return replace(
             cls._capabilities,
-            produces=own | (sub_caps.produces if sub_caps else frozenset({WEIGHT})),
+            may_write=own | (sub_caps.may_write if sub_caps else frozenset({WEIGHT})),
         )

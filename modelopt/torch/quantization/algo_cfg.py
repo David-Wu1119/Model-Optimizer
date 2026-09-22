@@ -19,13 +19,14 @@ import fnmatch
 import warnings
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
+from typing import Literal
 
 import torch.nn as nn
 
 from .config import AlgoCfgEntry, QuantizeAlgorithmConfig, QuantizeConfig
 
 __all__ = [
-    "ALL_WRITABLE_TOKENS",
+    "WRITABLE_TOKENS",
     "AlgoCapabilities",
     "AlgoCfgValidationError",
     "AlgoStage",
@@ -50,31 +51,36 @@ class AlgoCapabilities:
     #: Writes *every* quantizer of each linear it touches, not one quantizer at a time.
     writes_whole_module: bool
     #: Role this algorithm *improves*. Narrower than what it writes: weight-side algorithms
-    #: also seed input amax via an internal `max_calibrate`, which `produces` records.
-    optimizes: str
-    #: Tokens read. ``weight`` and ``acts`` are always available.
-    consumes: frozenset[str] = frozenset()
-    #: Tokens written. An upper bound: may write less on a given model, never more.
-    produces: frozenset[str] = frozenset()
+    #: also seed input amax via an internal `max_calibrate`, which `may_write` records.
+    refines: Literal["weight", "input", "both"]
+    #: Tokens that must already exist. ``weight`` and ``acts`` are ambient, so never counted.
+    #: A hard requirement -- unlike ``may_write``, which is only an upper bound.
+    requires: frozenset[str] = frozenset()
+    #: Tokens this may write. An *upper* bound: it may write fewer on a given model (smoothquant
+    #: only touches INT8 layers), never more. Over-declaring is safe for conflict detection and
+    #: unsafe for the hand-off, which is why the hand-off also checks coverage.
+    may_write: frozenset[str] = frozenset()
     #: Tokens whose presence makes this algorithm incorrect: ``awq_lite`` folds a scale into
     #: the weight assuming an unsmoothed start, so it conflicts with ``pre_quant_scale``.
-    conflicts_with: frozenset[str] = frozenset()
-    #: Honours the ``should_process`` write-mask. One that does not must never be scoped.
-    honors_write_mask: bool = True
-    #: NVFP4 weight grid this algorithm needs: ``"static"`` (a stored per-block amax it can
-    #: search) or ``"dynamic"`` (scales derived in-kernel). ``None`` = works on either.
-    #: Dynamic upgrades to static as a prep step; static never downgrades.
-    requires_grid: str | None = None
+    invalid_if_present: frozenset[str] = frozenset()
+    #: Can be restricted to a scope, i.e. threads the ``should_process`` write-mask through
+    #: everything it writes. ``False`` forces whole-model scope; the compiler rejects the rest.
+    scopable: bool = True
+    #: NVFP4 weight block scales this algorithm needs: ``"static"`` (stored per-block amax it
+    #: can search) or ``"dynamic"`` (derived in-kernel). ``None`` = works on either. Dynamic
+    #: upgrades to static as a prep step; static never downgrades, since that discards a search.
+    requires_weight_scales: Literal["static", "dynamic"] | None = None
 
 
 WEIGHT_AMAX = "weight_amax"
 INPUT_AMAX = "input_amax"
 PRE_QUANT_SCALE = "pre_quant_scale"
 WEIGHT = "weight"
+ACTS = "acts"
 
 #: Conservative default for an algorithm that declares nothing: over-reporting conflicts is
 #: the safe direction.
-ALL_WRITABLE_TOKENS = frozenset({WEIGHT, WEIGHT_AMAX, INPUT_AMAX, PRE_QUANT_SCALE})
+WRITABLE_TOKENS = frozenset({WEIGHT, WEIGHT_AMAX, INPUT_AMAX, PRE_QUANT_SCALE})
 
 
 def capabilities_for(algo: str | None, cfg: dict | None = None) -> AlgoCapabilities | None:
@@ -102,7 +108,6 @@ class AlgoStage:
     scope: str  # the glob
     selector: str  # "module_name" | "quantizer_name"
     order: int  # position within its entry's pipeline
-    entry: int  # which algo_cfg entry it came from (-1 = the `algorithm` fallback)
     # Scopes this stage must NOT touch. The fallback's coverage is a complement, so it cannot
     # be a glob; globs-minus-globs keeps the plan a pure function of the config (rank-identical).
     exclude: tuple[tuple[str, str], ...] = ()
@@ -111,17 +116,6 @@ class AlgoStage:
     def capabilities(self) -> AlgoCapabilities | None:
         """Declared capabilities of this stage's algorithm, or ``None`` if undeclared."""
         return capabilities_for(self.algo, self.cfg)
-
-    def key(self) -> tuple:
-        """Execution-relevant identity, used for the plan hash."""
-        return (
-            self.algo,
-            tuple(sorted(self.cfg.items(), key=str)),
-            self.scope,
-            self.selector,
-            self.order,
-            tuple(sorted(self.exclude)),
-        )
 
     def __str__(self) -> str:
         extra = {k: v for k, v in self.cfg.items() if k != "method"}
@@ -217,22 +211,22 @@ def role_quantizers(model: nn.Module, stage: AlgoStage) -> dict[str, set[str]]:
     return {"weight": weight, "input": quantizers - weight}
 
 
-def effective_produces(model: nn.Module, stage: AlgoStage) -> set[str]:
-    """Tokens a stage actually writes here — declared ``produces`` minus roles it cannot reach."""
+def effective_writes(model: nn.Module, stage: AlgoStage) -> set[str]:
+    """Tokens a stage actually writes here — declared ``may_write`` minus roles it cannot reach."""
     caps = stage.capabilities
     if caps is None:
         return set()
     by_role = role_quantizers(model, stage)
-    return {t for t in caps.produces if by_role[TOKEN_ROLE.get(t, "weight")]}
+    return {t for t in caps.may_write if by_role[TOKEN_ROLE.get(t, "weight")]}
 
 
-def effective_consumes(model: nn.Module, stage: AlgoStage) -> set[str]:
+def effective_requires(model: nn.Module, stage: AlgoStage) -> set[str]:
     """Non-ambient tokens a stage reads here."""
     caps = stage.capabilities
     if caps is None:
         return set()
     by_role = role_quantizers(model, stage)
-    return {t for t in caps.consumes - ALWAYS_AVAILABLE if by_role[TOKEN_ROLE.get(t, "weight")]}
+    return {t for t in caps.requires - AMBIENT_TOKENS if by_role[TOKEN_ROLE.get(t, "weight")]}
 
 
 def token_targets(model: nn.Module, stage: AlgoStage, token: str) -> set[str]:
@@ -276,7 +270,7 @@ def _lower(entries: Iterable[AlgoCfgEntry], algorithm) -> CalibrationPlan:
         selector, scope = entry.selector
         for order, algo in enumerate(entry.cfg):
             name, cfg = _algo_to_name_and_cfg(algo)
-            plan.append(AlgoStage(name, cfg, scope, selector, order, e_idx))
+            plan.append(AlgoStage(name, cfg, scope, selector, order))
 
     # `algorithm` is the same thing at scope "*", as a fallback: it must not re-run over
     # targets an entry already claimed.
@@ -287,7 +281,7 @@ def _lower(entries: Iterable[AlgoCfgEntry], algorithm) -> CalibrationPlan:
             name, cfg = _algo_to_name_and_cfg(algo)
             if name is None:
                 continue
-            plan.append(AlgoStage(name, cfg, "*", "quantizer_name", order, -1, exclude=claimed))
+            plan.append(AlgoStage(name, cfg, "*", "quantizer_name", order, exclude=claimed))
     return plan
 
 
@@ -348,7 +342,7 @@ def _validate_scopes(model: nn.Module, plan: CalibrationPlan, sink: list[str]) -
         if caps is None:
             continue
 
-        if not caps.honors_write_mask:
+        if not caps.scopable:
             everything = set(_index_model(model).quantizers)
             _, in_scope = stage_targets(model, stage)
             if in_scope != everything:
@@ -361,7 +355,7 @@ def _validate_scopes(model: nn.Module, plan: CalibrationPlan, sink: list[str]) -
                 continue
         # A whole-module algorithm writes every quantizer of its linears, so its scope must be
         # closed under module ownership -- otherwise it writes outside the mask and
-        # `effective_produces` understates it, hiding real conflicts.
+        # `effective_writes` understates it, hiding real conflicts.
         if caps.writes_whole_module:
             modules, quantizers = stage_targets(model, stage)
             owned = _index_model(model).quantizers_of
@@ -377,9 +371,9 @@ def _validate_scopes(model: nn.Module, plan: CalibrationPlan, sink: list[str]) -
 
         if stage.selector == "quantizer_name":
             roles = {"weight" if "weight_quantizer" in q else "input" for q in quantizers}
-            if caps.optimizes != "both" and roles and caps.optimizes not in roles:
+            if caps.refines != "both" and roles and caps.refines not in roles:
                 _report(
-                    f"{stage.algo!r} only improves {caps.optimizes} quantizers but "
+                    f"{stage.algo!r} only improves {caps.refines} quantizers but "
                     f"{stage.selector}={stage.scope!r} matches only {sorted(roles)}: a no-op.",
                     sink=sink,
                 )
@@ -388,7 +382,7 @@ def _validate_scopes(model: nn.Module, plan: CalibrationPlan, sink: list[str]) -
 def _validate_grid(model: nn.Module, plan: CalibrationPlan, sink: list[str]) -> None:
     for stage in plan:
         caps = stage.capabilities
-        if caps is None or caps.requires_grid != "dynamic":
+        if caps is None or caps.requires_weight_scales != "dynamic":
             continue
         _, quantizers = stage_targets(model, stage)
         static = sorted(
@@ -428,7 +422,7 @@ def _validate_fused_siblings(model: nn.Module, plan: CalibrationPlan, sink: list
                 )
 
 
-def _validate_dependencies(model: nn.Module, plan: CalibrationPlan, sink: list[str]) -> None:
+def _validate_stage_interactions(model: nn.Module, plan: CalibrationPlan, sink: list[str]) -> None:
     for i, stage in enumerate(plan):
         caps = stage.capabilities
         if caps is None:
@@ -442,19 +436,19 @@ def _validate_dependencies(model: nn.Module, plan: CalibrationPlan, sink: list[s
                 continue
             clash = {
                 t
-                for t in caps.conflicts_with & effective_produces(model, prev)
+                for t in caps.invalid_if_present & effective_writes(model, prev)
                 if _token_overlap(model, stage, prev, t)
             }
             if clash:
                 _report(
                     f"stage {i} ({stage}) cannot follow stage {j} ({prev}): {stage.algo!r} "
-                    f"assumes {sorted(clash)} is unset but {prev.algo!r} produces it. Unfold "
+                    f"assumes {sorted(clash)} is unset but {prev.algo!r} writes it. Unfold "
                     "with disable_pre_quant_scale_and_resmooth between them, or drop the repeat.",
                     sink=sink,
                 )
 
         # (2) Dead stage: everything it writes is overwritten before being read.
-        produced = effective_produces(model, stage)
+        produced = effective_writes(model, stage)
         if not produced:
             continue
         overwriters: dict[str, AlgoStage] = {}
@@ -463,15 +457,15 @@ def _validate_dependencies(model: nn.Module, plan: CalibrationPlan, sink: list[s
                 later = plan[j]
                 if later.capabilities is None or not _token_overlap(model, stage, later, token):
                     continue
-                if token in effective_consumes(model, later):
+                if token in effective_requires(model, later):
                     break  # somebody read it -- not dead
-                if token in effective_produces(model, later):
+                if token in effective_writes(model, later):
                     overwriters[token] = later
                     break
         if set(overwriters) == produced:
             first = next(iter(overwriters.values()))
             _report(
-                f"stage {i} ({stage}) is dead: everything it produces ({sorted(produced)}) is "
+                f"stage {i} ({stage}) is dead: everything it writes ({sorted(produced)}) is "
                 f"overwritten unread by a later stage ({first}). Remove or reorder it.",
                 sink=sink,
             )
@@ -507,7 +501,7 @@ def compile_algo_cfg(
         _validate_scopes(model, plan, violations)
         _validate_grid(model, plan, violations)
         _validate_fused_siblings(model, plan, violations)
-        _validate_dependencies(model, plan, violations)
+        _validate_stage_interactions(model, plan, violations)
         if violations:
             body = "\n".join(f"  {i + 1}. {v}" for i, v in enumerate(violations))
             msg = f"invalid algo_cfg ({len(violations)} problem(s)):\n{body}"
@@ -530,7 +524,7 @@ def _coverage_is_total(model: nn.Module, entries: list[AlgoCfgEntry]) -> bool:
 
 #: Tokens that never need producing: the weight is part of the model, acts come from the
 #: forward loop.
-ALWAYS_AVAILABLE = frozenset({"weight", "acts"})
+AMBIENT_TOKENS = frozenset({WEIGHT, ACTS})
 
 
 def derive_handoff(model: nn.Module, plan: CalibrationPlan, i: int) -> dict:
@@ -538,7 +532,7 @@ def derive_handoff(model: nn.Module, plan: CalibrationPlan, i: int) -> dict:
     stage = plan[i]
     if stage.capabilities is None:
         return {}
-    needed = effective_consumes(model, stage)
+    needed = effective_requires(model, stage)
     if not needed:
         return {}
 
@@ -549,7 +543,7 @@ def derive_handoff(model: nn.Module, plan: CalibrationPlan, i: int) -> dict:
         for j in range(i):
             if plan[j].capabilities is None:
                 continue
-            if token in effective_produces(model, plan[j]):
+            if token in effective_writes(model, plan[j]):
                 produced_on |= token_targets(model, plan[j], token)
         if not token_targets(model, stage, token) <= produced_on:
             return {}
