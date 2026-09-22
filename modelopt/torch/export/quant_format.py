@@ -19,6 +19,21 @@ Backend-specific names live with their backend: the TensorRT-LLM checkpoint layo
 constants, for example, are in :mod:`modelopt.torch.export.trtllm.model_config`.
 """
 
+from modelopt.torch.quantization.ggml import (
+    IQ1_S_BLOCK_BYTES,
+    IQ1_S_BLOCK_SIZE,
+    IQ1_S_EFFECTIVE_BITS,
+    IQ2_XS_BLOCK_BYTES,
+    IQ2_XS_BLOCK_SIZE,
+    IQ2_XS_EFFECTIVE_BITS,
+    IQ2_XXS_BLOCK_BYTES,
+    IQ2_XXS_BLOCK_SIZE,
+    IQ2_XXS_EFFECTIVE_BITS,
+    quantize_iq1_s,
+    quantize_iq2_xs,
+    quantize_iq2_xxs,
+)
+
 QUANTIZATION_NONE = None
 QUANTIZATION_FP8 = "fp8"
 QUANTIZATION_INT8_SQ = "int8_sq"
@@ -50,6 +65,25 @@ IQ_FORMATS = frozenset(
         QUANTIZATION_IQ2_XS,
     }
 )
+
+# Block geometry per IQ format: (block size, packed bytes per block, bits per weight). Checkpoint
+# metadata spells the algorithm in upper case, so consumers look up
+# ``IQ_BLOCK_METADATA[algo.lower()]`` rather than carrying a second spelling of the family.
+IQ_BLOCK_METADATA = {
+    QUANTIZATION_IQ1_S: (IQ1_S_BLOCK_SIZE, IQ1_S_BLOCK_BYTES, IQ1_S_EFFECTIVE_BITS),
+    QUANTIZATION_IQ2_XXS: (IQ2_XXS_BLOCK_SIZE, IQ2_XXS_BLOCK_BYTES, IQ2_XXS_EFFECTIVE_BITS),
+    QUANTIZATION_IQ2_XS: (IQ2_XS_BLOCK_SIZE, IQ2_XS_BLOCK_BYTES, IQ2_XS_EFFECTIVE_BITS),
+}
+
+
+# The packer each format's checkpoint weights are written with. Both exporters resolve through
+# this one mapping so they cannot drift apart.
+IQ_PACKERS = {
+    QUANTIZATION_IQ1_S: quantize_iq1_s,
+    QUANTIZATION_IQ2_XXS: quantize_iq2_xxs,
+    QUANTIZATION_IQ2_XS: quantize_iq2_xs,
+}
+
 
 # Formats whose scales are purely per-module, so export never merges them across the q/k/v
 # and gate/up groups that share an input. Every other format unifies input_amax (and, for

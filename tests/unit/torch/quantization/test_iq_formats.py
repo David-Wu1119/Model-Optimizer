@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Behaviour every GGML IQ format shares, exercised identically for all five.
+"""Behaviour every GGML IQ format shares, exercised identically for each of them.
 
 The formats differ only in codebook size, payload layout and bits per weight. Anything that
 should hold for one should hold for all, so the contract lives here once and is parametrized

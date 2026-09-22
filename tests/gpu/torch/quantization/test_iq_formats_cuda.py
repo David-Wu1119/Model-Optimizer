@@ -15,9 +15,9 @@
 
 """CUDA encoders for every GGML IQ format.
 
-Parametrized over all five rather than per format, so a behaviour asserted for one is
-asserted for all. IQ1_S is the odd one out only in its entry point: it derives the block
-scale in its own kernel instead of taking a precomputed one.
+Parametrized over the family rather than written per format, so a behaviour asserted
+for one is asserted for all. IQ1_S is the odd one out only in its entry point: it
+derives the block scale in its own kernel instead of taking a precomputed one.
 """
 
 import pytest

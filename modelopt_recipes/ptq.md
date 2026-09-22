@@ -141,8 +141,8 @@ activations and tensor-core math are what deliver the throughput.
   GPT-OSS family (see `examples/gpt-oss`).
 - **`iq1_s` / `iq2_xxs` / `iq2_xs`** — GGML-compatible IQ weights
   on the eligible linear layers, with BF16 activations; `lm_head`, MoE routers,
-  `conv1d` and the vision branch stay in BF16 like every other preset. The five
-  formats trade size against accuracy in order: 1.56, 2.06 and 2.31 bits per weight. No calibration data is
+  `conv1d` and the vision branch stay in BF16 like every other preset. The formats
+  trade size against accuracy in order: 1.56, 2.06 and 2.31 bits per weight. No calibration data is
   required. Quantized weights must have a final dimension divisible by 256.
   Unified HF export writes the packed GGML blocks; Megatron export additionally
   requires tensor and pipeline parallel sizes of 1, and does not support

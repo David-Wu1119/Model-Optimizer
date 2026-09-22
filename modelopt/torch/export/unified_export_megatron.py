@@ -35,7 +35,6 @@ from safetensors import safe_open
 from safetensors.torch import save_file
 
 from modelopt import __version__
-from modelopt.torch.quantization.ggml import quantize_iq1_s, quantize_iq2_xs, quantize_iq2_xxs
 from modelopt.torch.quantization.nn.modules.tensor_quantizer import GroupedQuantizer
 from modelopt.torch.utils import import_plugin, warn_rank_0
 from modelopt.torch.utils.plugins.hf_checkpoint_utils import (
@@ -58,14 +57,12 @@ from .plugins.mcore_custom import (
 from .plugins.megatron_importer import GPTModelImporter, _get_mamba_conv1d
 from .quant_format import (
     IQ_FORMATS,
+    IQ_PACKERS,
     KV_CACHE_FP8,
     KV_CACHE_NVFP4,
     QUANTIZATION_FP8,
     QUANTIZATION_FP8_PB_REAL,
     QUANTIZATION_FP8_PB_WO,
-    QUANTIZATION_IQ1_S,
-    QUANTIZATION_IQ2_XS,
-    QUANTIZATION_IQ2_XXS,
     QUANTIZATION_NONE,
     QUANTIZATION_NVFP4,
     QUANTIZATION_W4A16_NVFP4,
@@ -86,13 +83,6 @@ from .quant_utils import (
 with import_plugin("transformers", verbose=False):
     import transformers
     from transformers import AutoProcessor
-
-# One packer per GGML IQ format, mirroring the HF exporter's table.
-_IQ_PACKERS = {
-    QUANTIZATION_IQ1_S: quantize_iq1_s,
-    QUANTIZATION_IQ2_XXS: quantize_iq2_xxs,
-    QUANTIZATION_IQ2_XS: quantize_iq2_xs,
-}
 
 
 has_mcore = False
@@ -1195,7 +1185,7 @@ class GPTModelExporter:
     @staticmethod
     def _pack_iq_weight(weight: torch.Tensor, qformat: str) -> torch.Tensor:
         """Pack one ``[out, in]`` weight and return its CPU payload."""
-        quantize_iq = _IQ_PACKERS[qformat]
+        quantize_iq = IQ_PACKERS[qformat]
         packed_weight, _ = quantize_iq(weight)
         return packed_weight.detach().cpu()
 
