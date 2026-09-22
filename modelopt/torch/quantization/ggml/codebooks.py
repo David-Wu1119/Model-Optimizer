@@ -166,6 +166,19 @@ _IQ2_XS_GRID_B64 = (
 )
 
 
+# Compact byte representation of the canonical [256, 8] IQ2_XXS grid. Same
+# 8/25/43 magnitude alphabet as IQ2_XS, so it compresses well.
+_IQ2_XXS_GRID_ZLIB_B64 = (
+    "eNqFVVuS5CAM++UKOoPuf78ZLMmYLLXT1SkSYvyQZGct/egVuDfoFQtPA34M6RXLB74HqRW/N9rm5ZBZmWc5hK+vY+ATII55Oz4X"
+    "c1+OMZ2PANgWtccrIBOYqYzwEdoH7cfP5EyQSZRJmNpHlbLNMZHCBghKgy/kfh/pOLPgxOgrwUkXoRKrCjo7OpsJlGOXAY+LMhvQ"
+    "fIGM8/OST2CBvwAWw4JlAk5ZIEC/AZZ7Gz0A54Z5AJ4rkTr1hYuAijSIEEdlXMqryIOQ7paoHJEMMaVPr5LNJGRq90isoTxEVbGC"
+    "6xCHFaiptZQ2CXVH7Jcidiuqkf2HaGMR8XTsdXUBrOaA1wwdgeAjFOca+ZsFwOu65FtxRlUllEtQfAsLlCKiobobAotS+sSnwyXK"
+    "0elKQHnT7Wo7wXjB2T3XGr/hOQJmhKxuiaqLvuNeOMKh91qGAl9aAOZkESSOW4KnIS9sJL3/NQJ5NYRiUX9pGrNBgEysAb4ahXru"
+    "STY/O/mcdAJRbDOSXlzd1WuOymbMktGQnRrkNQF7LBgFz106e/rDkjZmRpFm1KMx3WvRuqemoa19esbHuBgw7VKggELYclb7VH91"
+    "Xf5hzoD21KEk6CpbkT/vBJbU"
+)
+
+
 @cache
 def iq1_s_grid_bytes() -> bytes:
     """Decoded little-endian int8 bytes of the [2048, 8] IQ1_S ternary table."""
@@ -176,3 +189,9 @@ def iq1_s_grid_bytes() -> bytes:
 def iq2_xs_grid_bytes() -> bytes:
     """Decoded bytes of the [512, 8] IQ2_XS magnitude table."""
     return base64.b64decode(_IQ2_XS_GRID_B64)
+
+
+@cache
+def iq2_xxs_grid_bytes() -> bytes:
+    """Decoded bytes of the [256, 8] IQ2_XXS magnitude table."""
+    return zlib.decompress(base64.b64decode(_IQ2_XXS_GRID_ZLIB_B64))
