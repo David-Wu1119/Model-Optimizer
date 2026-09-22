@@ -59,6 +59,7 @@ quant\_utils
       postprocess_state_dict
       preprocess_linear_fusion
       process_layer_quant_config
+      seed_carried_over_exclusions
       sync_tied_input_amax
       to_quantized_weight
       uses_iq_quantization
