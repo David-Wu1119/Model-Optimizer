@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Measure GDN prefill numerical-emulation overhead against the exact FLA path."""
+"""Measure GDN/KDA prefill numerical-emulation overhead against the exact FLA path."""
 
 import argparse
 import hashlib
@@ -28,12 +28,17 @@ from typing import Any
 
 import torch
 import torch.nn.functional as F
+from fla.ops.kda import chunk_kda
 
 from modelopt.torch.kernels.quantization.linear_attention.fla_chunk_gated_delta_rule import (
     chunk_gated_delta_rule,
 )
 from modelopt.torch.quantization.config import QuantizerAttributeConfig
-from modelopt.torch.quantization.linear_attention import LinearAttentionConfig, matmul_gdn
+from modelopt.torch.quantization.linear_attention import (
+    LinearAttentionConfig,
+    matmul_gdn,
+    matmul_kda,
+)
 from modelopt.torch.quantization.linear_attention.matmul import LinearAttentionMatmulSites
 from modelopt.torch.quantization.nn import TensorQuantizer
 
@@ -42,6 +47,7 @@ def main():
     """Run interleaved fixed-workload forward/backward trials and write a JSON receipt."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--attention", choices=["gdn", "kda"], default="gdn")
     parser.add_argument("--batch", type=int, default=1)
     parser.add_argument("--length", type=int, default=1024)
     parser.add_argument("--heads", type=int, default=4)
@@ -57,16 +63,17 @@ def main():
         for _ in range(2)
     ]
     v = torch.randn(shape, device="cuda", dtype=torch.bfloat16, requires_grad=True)
-    g = (-torch.rand(shape[:-1], device="cuda") * 0.03).requires_grad_()
-    beta = torch.rand_like(g, requires_grad=True)
+    gate_shape = shape if options.attention == "kda" else shape[:-1]
+    g = (-torch.rand(gate_shape, device="cuda") * 0.03).requires_grad_()
+    beta = torch.rand(shape[:-1], device="cuda", requires_grad=True)
     state = (
         torch.randn(options.batch, options.heads, options.dim, options.dim, device="cuda") * 0.1
     ).requires_grad_()
     inputs = (q, k, v, g, beta)
+    baseline = chunk_kda if options.attention == "kda" else chunk_gated_delta_rule
+    materialized = matmul_kda if options.attention == "kda" else matmul_gdn
     variants = {
-        "exact_fla": lambda: chunk_gated_delta_rule(
-            *inputs, initial_state=state, output_final_state=True
-        )
+        "exact_fla": lambda: baseline(*inputs, initial_state=state, output_final_state=True)
     }
     for mode in (
         "exact_matmul",
@@ -104,7 +111,7 @@ def main():
             )
 
         def run(sites=sites, w=w, policy=policy, mode=mode):
-            return matmul_gdn(
+            return materialized(
                 *inputs,
                 initial_state=state,
                 output_final_state=True,
@@ -161,9 +168,10 @@ def main():
         revision = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
     sources = [
         Path("modelopt/torch/quantization/linear_attention") / name
-        for name in ("prefill.py", "matmul.py", "reference.py", "config.py")
+        for name in ("prefill.py", "kda.py", "matmul.py", "reference.py", "config.py")
     ]
     result = {
+        "attention": options.attention,
         "git_head": revision,
         "source_sha256": {
             str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in sources

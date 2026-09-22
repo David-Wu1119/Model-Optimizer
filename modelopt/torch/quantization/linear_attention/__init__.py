@@ -16,6 +16,7 @@
 """Numerical policies and differentiable references for linear attention."""
 
 from .config import *
+from .kda import *
 from .matmul import *
 from .prefill import *
 from .reference import *

@@ -25,7 +25,12 @@ from itertools import pairwise
 
 import torch
 
-__all__ = ["chunk_gdn_reference", "recurrent_delta_rule_reference", "state_fp8_qdq_reference"]
+__all__ = [
+    "chunk_gdn_reference",
+    "chunk_kda_reference",
+    "recurrent_delta_rule_reference",
+    "state_fp8_qdq_reference",
+]
 
 
 def state_fp8_qdq_reference(state: torch.Tensor, block_v: int = 64) -> torch.Tensor:
@@ -226,5 +231,89 @@ def chunk_gdn_reference(
         else:
             finals[n] = state
     output = torch.cat(outputs).reshape(*v.shape)
+    final = torch.stack(finals)
+    return output, final.transpose(-1, -2) if state_v_first else final
+
+
+def chunk_kda_reference(
+    q,
+    k,
+    v,
+    g,
+    beta,
+    *,
+    chunk_size=64,
+    scale=None,
+    initial_state=None,
+    cu_seqlens=None,
+    state_v_first=False,
+    state_qdq=False,
+    state_qdq_block_v=64,
+    w_quantizer=None,
+    matmul=None,
+):
+    """KDA chunk oracle with causal per-channel decays and optional operand QDQ.
+
+    The eight-site callback receives conventional three-dimensional matmul
+    operands. Interaction sites are invoked one query row at a time with decay
+    already applied to the right-hand keys. This avoids inverse-prefix factors.
+    """
+    if g.ndim != 4 or chunk_size <= 0:
+        raise ValueError("chunk_kda_reference requires per-key gates and positive chunk_size")
+    q, k, states, sequences = _prepare(q, k, v, g, beta, initial_state, cu_seqlens, state_v_first)
+    scale = q.shape[-1] ** -0.5 if scale is None else scale
+    mm = matmul if matmul is not None else lambda name, lhs, rhs: lhs @ rhs
+    outputs, finals = [], []
+    for n, (b, start, end) in enumerate(sequences):
+        state = states[n]
+        if state_qdq:
+            state = state_fp8_qdq_reference(state, state_qdq_block_v)
+        pieces = []
+        for lo in range(start, end, chunk_size):
+            hi = min(lo + chunk_size, end)
+            qc, kc, vc = (x[b, lo:hi].transpose(0, 1) for x in (q, k, v))
+            prefix = g[b, lo:hi].transpose(0, 1).cumsum(-2)
+            bc = beta[b, lo:hi].transpose(0, 1).unsqueeze(-1)
+            gate = prefix.exp()
+            lower_rows, score_rows = [], []
+            for row in range(hi - lo):
+                decayed_keys = (
+                    kc[..., : row + 1, :]
+                    * (prefix[..., row : row + 1, :] - prefix[..., : row + 1, :]).exp()
+                )
+                right = decayed_keys.transpose(-1, -2)
+                left = kc[..., row : row + 1, :] * bc[..., row : row + 1, :]
+                interaction = mm("key_interaction", left, right)
+                score = mm("output_score", qc[..., row : row + 1, :] * scale, right)
+                # Zero padding follows the computation and never contributes a scale statistic.
+                padding = hi - lo - row - 1
+                lower_rows.append(torch.nn.functional.pad(interaction, (0, padding)))
+                score_rows.append(torch.nn.functional.pad(score, (0, padding)))
+            lower = torch.cat(lower_rows, dim=-2).tril(-1)
+            scores = torch.cat(score_rows, dim=-2)
+            identity = torch.eye(hi - lo, device=q.device, dtype=q.dtype).expand_as(lower)
+            inverse = torch.linalg.solve_triangular(
+                identity + lower, identity, upper=False, unitriangular=True
+            )
+            u = mm("wy_value", inverse, bc * vc)
+            w = mm("wy_key", inverse, bc * kc * gate)
+            if w_quantizer is not None:
+                w = w_quantizer(w)
+            updated = u - mm("state_read", w, state)
+            pieces.append(
+                (
+                    mm("output_state", qc * scale * gate, state)
+                    + mm("output_value", scores, updated)
+                ).transpose(0, 1)
+            )
+            weighted_keys = kc * (prefix[..., -1:, :] - prefix).exp()
+            state = state * gate[..., -1, :, None] + mm(
+                "state_update", weighted_keys.transpose(-1, -2), updated
+            )
+            if state_qdq:
+                state = state_fp8_qdq_reference(state, state_qdq_block_v)
+        outputs.append(torch.cat(pieces))
+        finals.append(state)
+    output = torch.stack(outputs) if cu_seqlens is None else torch.cat(outputs).unsqueeze(0)
     final = torch.stack(finals)
     return output, final.transpose(-1, -2) if state_v_first else final

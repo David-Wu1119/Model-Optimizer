@@ -72,11 +72,11 @@ class _SolveConfig(ModeloptBaseConfig):
 
 
 class LinearAttentionConfig(ModeloptBaseConfig):
-    """GDN chunk-64 policy; unsupported numerical modes fail config validation.
+    """GDN/KDA chunk-64 policy; unsupported numerical modes fail config validation.
 
     ``state.block_v`` defines one dynamic scale per ``[Dk, block_v]`` tile of each
     sequence/head. The initial state and every chunk's final state are rounded when
-    ``gdn_state_quantizer`` is enabled. Outputs use the incoming rounded state.
+    the module's state quantizer is enabled. Outputs use the incoming rounded state.
     """
 
     schema_version: Literal[1] = ModeloptField(default=1)

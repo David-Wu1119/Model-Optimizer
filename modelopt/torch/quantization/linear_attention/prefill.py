@@ -77,6 +77,49 @@ def matmul_gdn(
         beta = beta.sigmoid() * (2.0 if allow_neg_eigval else 1.0)
     if g.ndim != 3:
         raise ValueError("matmul_gdn requires scalar GDN log gates")
+    return _matmul_prefill(
+        q,
+        k,
+        v,
+        g,
+        beta,
+        sites=sites,
+        policy=policy,
+        w_quantizer=w_quantizer,
+        state_qdq=state_qdq,
+        scale=scale,
+        initial_state=initial_state,
+        output_final_state=output_final_state,
+        cu_seqlens=cu_seqlens,
+        cu_seqlens_cpu=cu_seqlens_cpu,
+        state_v_first=state_v_first,
+        chunk_size=chunk_size,
+        output_dtype=output_dtype,
+    )
+
+
+def _matmul_prefill(
+    q,
+    k,
+    v,
+    g,
+    beta,
+    *,
+    sites,
+    policy,
+    w_quantizer,
+    state_qdq,
+    scale,
+    initial_state,
+    output_final_state,
+    cu_seqlens,
+    cu_seqlens_cpu,
+    state_v_first,
+    chunk_size,
+    output_dtype,
+):
+    dtype = q.dtype
+    channel_gate = g.ndim == 4
     initial_state = initial_state.to(dtype) if initial_state is not None else None
     boundaries = cu_seqlens_cpu if cu_seqlens_cpu is not None else cu_seqlens
     q, k, state, sequences = _prepare(
@@ -116,27 +159,35 @@ def matmul_gdn(
         return sites.matmul(name, lhs, rhs, policy, w_quantizer=w_quantizer)
 
     qc, kc, vc = (chunks(x) for x in (q, k, v))
-    gc = arithmetic("gate_prefix", chunks(g).cumsum(-1))
+    gc = arithmetic("gate_prefix", chunks(g).cumsum(-2 if channel_gate else -1))
     bc = chunks(beta).unsqueeze(-1)
-    causal = torch.ones(chunk_size, chunk_size, dtype=torch.bool, device=q.device).tril()
-    relative = (gc.unsqueeze(-1) - gc.unsqueeze(-2)).masked_fill(~causal, 0)
-    decay = arithmetic("gate_exp", relative.exp())
-    gate = arithmetic("gate_exp", gc.exp()).unsqueeze(-1)
-    lower = (mm("key_interaction", bc * kc, kc) * decay).tril(-1)
+    gate = arithmetic("gate_exp", gc.exp())
+    if channel_gate:
+        lower = _kda_interaction("key_interaction", bc * kc, kc, gc, mm, arithmetic).tril(-1)
+        scores = _kda_interaction("output_score", qc * scale, kc, gc, mm, arithmetic).tril()
+        weighted_keys = kc * arithmetic("gate_exp", (gc[..., -1:, :] - gc).exp())
+        final_decay = arithmetic("gate_exp", gc[..., -1, :].exp()).unsqueeze(-1)
+    else:
+        causal = torch.ones(chunk_size, chunk_size, dtype=torch.bool, device=q.device).tril()
+        relative = (gc.unsqueeze(-1) - gc.unsqueeze(-2)).masked_fill(~causal, 0)
+        decay = arithmetic("gate_exp", relative.exp())
+        gate = gate.unsqueeze(-1)
+        lower = (mm("key_interaction", bc * kc, kc) * decay).tril(-1)
+        scores = (mm("output_score", qc * scale, kc) * decay).tril()
+        weighted_keys = kc * arithmetic("gate_exp", (gc[..., -1:] - gc).exp()).unsqueeze(-1)
+        final_decay = arithmetic("gate_exp", gc[..., -1].exp())[..., None, None]
     identity = torch.eye(chunk_size, device=q.device, dtype=dtype).expand_as(lower)
     inverse = torch.linalg.solve_triangular(
         identity + lower, identity, upper=False, unitriangular=True
     )
     u = mm("wy_value", inverse, (bc * vc).transpose(-1, -2))
     w = mm("wy_key", inverse, (bc * kc * gate).transpose(-1, -2))
-    scores = (mm("output_score", qc * scale, kc) * decay).tril()
-    weighted_keys = kc * arithmetic("gate_exp", (gc[..., -1:] - gc).exp()).unsqueeze(-1)
 
     def unbatch(x):
         return x.reshape(len(sequences), count, *x.shape[1:])
 
-    qc, gate, gc, u, w, scores, weighted_keys = map(
-        unbatch, (qc, gate, gc, u, w, scores, weighted_keys)
+    qc, gate, final_decay, u, w, scores, weighted_keys = map(
+        unbatch, (qc, gate, final_decay, u, w, scores, weighted_keys)
     )
     if state_qdq:
         state = state_fp8_qdq_reference(state, policy.state.block_v)
@@ -149,9 +200,7 @@ def matmul_gdn(
         memory = mm("output_state", qc[:, c] * scale * gate[:, c], state.transpose(-1, -2))
         local = mm("output_value", scores[:, c], updated.transpose(-1, -2))
         outputs.append(arithmetic("output_add", memory + local))
-        decayed = arithmetic(
-            "state_decay", state * arithmetic("gate_exp", gc[:, c, :, -1].exp())[..., None, None]
-        )
+        decayed = arithmetic("state_decay", state * final_decay[:, c])
         update = mm(
             "state_update", weighted_keys[:, c].transpose(-1, -2), updated.transpose(-1, -2)
         )
@@ -168,3 +217,23 @@ def matmul_gdn(
     output = torch.stack(pieces) if boundaries is None else torch.cat(pieces).unsqueeze(0)
     final = state.transpose(-1, -2) if state_v_first else state
     return output.to(output_dtype), final if output_final_state else None
+
+
+def _kda_interaction(name, lhs, keys, prefix, mm, arithmetic):
+    # Causal pairwise decays avoid exp(-prefix), which overflows for strong forgetting.
+    batch, heads, length, width = keys.shape
+    result = []
+    columns = torch.arange(length, device=keys.device)
+    for lo in range(0, length, 8):
+        hi = min(lo + 8, length)
+        rows = torch.arange(lo, hi, device=keys.device)
+        causal = (rows[:, None] >= columns[None, :])[None, None, ..., None]
+        relative = prefix[:, :, lo:hi, None] - prefix[:, :, None]
+        relative = relative.masked_fill(~causal, 0)
+        decay = arithmetic("gate_exp", relative.exp()).masked_fill(~causal, 0)
+        rhs = (keys[:, :, None] * decay).permute(0, 2, 1, 3, 4)
+        right = rhs.reshape(batch * (hi - lo), heads, length, width)
+        left = lhs[:, :, lo:hi].permute(0, 2, 1, 3).reshape(batch * (hi - lo), heads, 1, width)
+        product = mm(name, left, right).reshape(batch, hi - lo, heads, length)
+        result.append(product.permute(0, 2, 1, 3))
+    return torch.cat(result, dim=-2)

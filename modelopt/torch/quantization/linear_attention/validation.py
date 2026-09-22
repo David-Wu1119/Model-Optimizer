@@ -20,8 +20,10 @@ from ..nn import TensorQuantizer
 __all__ = []
 
 
-def validate_gdn_quantizer(quantizer: TensorQuantizer, *, state: bool) -> None:
-    name = "gdn_state_quantizer" if state else "gdn_w_quantizer"
+def validate_gdn_quantizer(
+    quantizer: TensorQuantizer, *, state: bool, name: str | None = None
+) -> None:
+    name = name or ("gdn_state_quantizer" if state else "gdn_w_quantizer")
     axis = (0, 1) if state else (0, 1, 2)
     if not isinstance(quantizer, TensorQuantizer):
         raise ValueError(f"{name} requires a single TensorQuantizer")

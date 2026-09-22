@@ -57,8 +57,8 @@ class LinearAttentionMatmulSites(nn.ModuleDict):
     """The eight prefill matmuls, with independent QDQ on their actual operands.
 
     Inputs to each handle are four-dimensional, with reduction on the last axis.
-    The state-read LHS uses the parent's legacy ``gdn_w_quantizer``; no second W
-    quantizer is registered here. New handles start disabled.
+    The state-read LHS uses the parent's ``gdn_w_quantizer`` or ``kda_w_quantizer``;
+    no second W quantizer is registered here. New handles start disabled.
     """
 
     def __init__(self):

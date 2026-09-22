@@ -31,12 +31,8 @@ from typing import Any
 
 import torch
 
-from ..config import QuantizerAttributeConfig
-from ..linear_attention.config import LinearAttentionConfig
-from ..linear_attention.matmul import LinearAttentionMatmulSites, _validate_operand_quantizer
 from ..linear_attention.prefill import matmul_gdn
-from ..linear_attention.validation import validate_gdn_quantizer
-from ..nn import QuantModule, TensorQuantizer
+from .linear_attention import _LinearAttentionQuantMixin
 
 __all__ = ["GatedDeltaNetStateQuantMixin"]
 
@@ -58,7 +54,7 @@ def _state_qdq_chunk_gated_delta_rule() -> GatedDeltaRuleFn:
     return chunk_gated_delta_rule
 
 
-class GatedDeltaNetStateQuantMixin(QuantModule):
+class GatedDeltaNetStateQuantMixin(_LinearAttentionQuantMixin):
     """Adds ``gdn_state_quantizer`` and ``gdn_w_quantizer`` to a GatedDeltaNet module.
 
     Subclasses route the module's chunked gated-delta-rule call through
@@ -69,43 +65,10 @@ class GatedDeltaNetStateQuantMixin(QuantModule):
     E4M3 and identity STE. The execution policy is saved in ModelOpt metadata.
     """
 
-    def _setup(self):
-        self.gdn_state_quantizer = TensorQuantizer(QuantizerAttributeConfig(enable=False))
-        self.gdn_w_quantizer = TensorQuantizer(QuantizerAttributeConfig(enable=False))
-        self.linear_attn_sites = LinearAttentionMatmulSites()
-        self.linear_attention_config = LinearAttentionConfig()
-
-    @property
-    def linear_attention_is_enabled(self) -> bool:
-        """Whether any operand, state, or arithmetic policy changes the computation."""
-        return (
-            self.gdn_state_quantizer.is_enabled
-            or self.gdn_w_quantizer.is_enabled
-            or self.linear_attn_sites.is_enabled
-            or bool(self.linear_attention_config.matmul or self.linear_attention_config.elementwise)
-        )
-
     @property
     def gdn_state_qdq_block_v(self) -> int:
         """Value-column scale grouping from the saved execution policy."""
         return self.linear_attention_config.state.block_v
-
-    def validate_linear_attention(self) -> None:
-        """Reject numerical settings that the fused training path cannot implement."""
-        for state, quantizer in ((True, self.gdn_state_quantizer), (False, self.gdn_w_quantizer)):
-            if quantizer.is_enabled:
-                if not state and self.linear_attention_config.backend == "matmul":
-                    _validate_operand_quantizer(quantizer, "gdn_w_quantizer")
-                else:
-                    validate_gdn_quantizer(quantizer, state=state)
-        self.linear_attn_sites.validate()
-        if self.linear_attn_sites.is_enabled and self.linear_attention_config.backend != "matmul":
-            raise ValueError("Additional GDN operand sites require backend='matmul'")
-
-    def modelopt_post_restore(self, prefix: str = ""):
-        """Validate restored quantizers before using the saved execution policy."""
-        super().modelopt_post_restore(prefix)
-        self.validate_linear_attention()
 
     def _state_quantized_chunk_gated_delta_rule(
         self, gated_delta_rule: GatedDeltaRuleFn, *args: Any, **kwargs: Any
