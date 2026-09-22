@@ -194,14 +194,27 @@ class VerifyMasterWeightsCallback(TrainerCallback):
 
     Wiring the optimizer is the caller's job, so a training loop that builds its own
     ``AdamW`` gets bf16 moments and no error -- the feature is simply absent, and the only
-    symptom is a drafter that trains a little worse. Checked after the first step, which is
-    when the moments exist.
+    symptom is a drafter that trains a little worse. Checked after the first step this
+    process takes, which is when the moments exist.
     """
 
+    def on_train_begin(self, args, state, control, **kwargs):
+        """Arm the check for this ``train()`` call."""
+        self._checked = False
+        return control
+
     def on_step_end(self, args, state, control, optimizer=None, **kwargs):
-        """Check the optimizer's moment dtypes once, at the end of the first step."""
-        if state.global_step != 1 or optimizer is None:
+        """Check the optimizer's moment dtypes once, at the end of the first step taken.
+
+        The first step *taken*, not ``global_step == 1``: a resume restores ``global_step``
+        from the checkpoint, so an exact step number never matches again and the check is
+        dead on precisely the path that can silently lose the fp32 state -- a checkpoint
+        restored through anything that does not go through ``MasterWeightAdamW``'s own
+        ``load_state_dict`` comes back at the parameter's dtype.
+        """
+        if getattr(self, "_checked", False) or optimizer is None:
             return control
+        self._checked = True
         inner = getattr(optimizer, "optimizer", optimizer)  # unwrap accelerate
         dtypes = {
             value.dtype

@@ -1176,6 +1176,45 @@ class TestDFlashFp32MasterWeights:
         correct.step()
         VerifyMasterWeightsCallback().on_step_end(None, state, None, optimizer=correct)
 
+    def test_the_callback_still_checks_after_a_resume(self):
+        """A resume restores ``global_step``, so an exact step number never matches again.
+
+        That would leave the check dead on the one path where the fp32 state can be lost
+        without anything else noticing -- a restore that does not go through
+        ``MasterWeightAdamW.load_state_dict`` comes back at the parameter's dtype.
+        """
+        model = _converted(fp32_master_weights=True)
+        model.train()
+        trainable = [p for p in model.dflash_module.parameters() if p.requires_grad]
+        plain = torch.optim.AdamW(trainable, lr=1e-4)
+        model(**_dflash_batch(model.dflash_config.vocab_size)).loss.backward()
+        plain.step()
+
+        callback = VerifyMasterWeightsCallback()
+        callback.on_train_begin(None, SimpleNamespace(global_step=4210), None)
+        with pytest.raises(RuntimeError, match="dflash_fp32_master_weights"):
+            callback.on_step_end(None, SimpleNamespace(global_step=4211), None, optimizer=plain)
+
+    def test_the_callback_checks_once_and_then_stays_out_of_the_way(self):
+        """It runs per ``train()`` call, not per step -- the state cannot change mid-run."""
+        model = _converted(fp32_master_weights=True)
+        model.train()
+        trainable = [p for p in model.dflash_module.parameters() if p.requires_grad]
+        correct = MasterWeightAdamW(trainable, lr=1e-4)
+        model(**_dflash_batch(model.dflash_config.vocab_size)).loss.backward()
+        correct.step()
+
+        callback = VerifyMasterWeightsCallback()
+        callback.on_train_begin(None, SimpleNamespace(global_step=0), None)
+        callback.on_step_end(None, SimpleNamespace(global_step=1), None, optimizer=correct)
+        assert callback._checked
+        # a second step must not re-check, so a bf16 optimizer handed over later is ignored
+        plain = torch.optim.AdamW(trainable, lr=1e-4)
+        model.zero_grad(set_to_none=True)
+        model(**_dflash_batch(model.dflash_config.vocab_size)).loss.backward()
+        plain.step()
+        callback.on_step_end(None, SimpleNamespace(global_step=2), None, optimizer=plain)
+
 
 class TestDFlashDraftActivationCheckpointing:
     """``training.gradient_checkpointing`` has to reach the draft, and be inert when it does.
