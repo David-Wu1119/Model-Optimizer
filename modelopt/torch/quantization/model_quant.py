@@ -66,7 +66,6 @@ def calibrate(
     algorithm: QuantizeAlgoCfgType = "max",
     forward_loop: ForwardLoop | None = None,
     algo_cfg: list | None = None,
-    strict: bool = True,
 ) -> nn.Module:
     """Adjusts weights and scaling factors based on selected algorithms.
 
@@ -94,8 +93,6 @@ def calibrate(
             ``[{"module_name": "*mlp*", "cfg": ["awq_lite", "mse"]}]``. When given, the config is
             compiled into an ordered list of scoped stages run by the ``"calibration_plan"`` mode,
             and ``algorithm`` becomes the fallback for targets no entry matches.
-        strict: Fail on plan-validation errors instead of warning. Only relevant with
-            ``algo_cfg``.
 
     Returns: The calibrated pytorch model.
     """
@@ -124,7 +121,7 @@ def calibrate(
     # the plan is the all-"*" single-stage case, which is exactly what the legacy per-algorithm
     # modes already do -- so that path is left alone and its recorded state stays byte-identical.
     mode = (
-        [("calibration_plan", {"algo_cfg": algo_cfg, "algorithm": algorithm, "strict": strict})]
+        [("calibration_plan", {"algo_cfg": algo_cfg, "algorithm": algorithm})]
         if algo_cfg
         else get_modelike_from_algo_cfg(algorithm)
     )
@@ -272,7 +269,6 @@ def quantize(
         config.get("algorithm"),
         forward_loop=forward_loop,
         algo_cfg=config.get("algo_cfg"),
-        strict=config.get("strict", True),
     )
 
 

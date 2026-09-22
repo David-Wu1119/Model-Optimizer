@@ -1660,13 +1660,6 @@ class CalibrationPlanConfig(QuantizeAlgorithmConfig):
         title="Model-wide fallback algorithm for targets no ``algo_cfg`` entry matches.",
     )
 
-    strict: bool = ModeloptField(
-        default=True,
-        title="Fail on validation errors instead of warning.",
-        description="``False`` downgrades plan-validation errors to warnings, so a config the "
-        "compiler considers wrong can still be executed (used to demonstrate *why* a rule "
-        "exists). Leave at ``True`` outside experiments.",
-    )
 
 
 class QuantizeConfig(ModeloptBaseConfig):
@@ -1694,13 +1687,6 @@ class QuantizeConfig(ModeloptBaseConfig):
         "omitted, ``algorithm`` alone is used and behaviour is unchanged.",
     )
 
-    strict: bool = ModeloptField(
-        default=True,
-        title="Fail on ``algo_cfg`` validation errors instead of warning.",
-        description="Only affects configs that use ``algo_cfg``. ``False`` downgrades plan "
-        "validation errors to warnings so a pipeline the compiler considers wrong can still be "
-        "run -- useful for checking whether a rule is justified, not for production recipes.",
-    )
 
     effective_bits: float | None = ModeloptField(
         default=None,

@@ -765,7 +765,6 @@ def calibration_plan_convert(
     plan = compile_algo_cfg(
         {"algo_cfg": config.algo_cfg, "algorithm": config.algorithm},
         model,
-        strict=config.strict,
     )
     print_rank_0(f"calibration_plan: {' -> '.join(str(s.algo) for s in plan)}")
 

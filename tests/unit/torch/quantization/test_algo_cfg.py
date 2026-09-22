@@ -642,17 +642,15 @@ def test_scoped_plan_records_a_single_calibration_mode():
     assert modes == ["quantize", "calibration_plan"]
 
 
-def test_a_stage_can_follow_mse(quantized):
-    model = mtq.quantize(
-        _model(),
-        {
-            "quant_cfg": QUANT_CFG,
-            "algorithm": None,
-            "algo_cfg": [{"module_name": "*mlp*", "cfg": ["max", "mse", "max"]}],
-            "strict": False,
-        },
-        _forward_loop,
-    )
+def test_a_max_collect_after_mse_does_not_reenter_the_spent_calibrator():
+    from modelopt.torch.quantization.model_calib import max_calibrate, mse_calibrate
+
+    # mse installs a search calibrator for the duration of its amax search. Leaving it
+    # installed makes any later stats collection re-enter a spent calibrator and fail on its
+    # cleared `_initial_amax` -- which only a pipeline can reach.
+    model = mtq.quantize(_model(), {"quant_cfg": QUANT_CFG, "algorithm": None}, _forward_loop)
+    mse_calibrate(model, _forward_loop)
+    max_calibrate(model, _forward_loop)
     assert _weight_amax(model)
 
 
