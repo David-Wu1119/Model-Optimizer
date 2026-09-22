@@ -63,7 +63,7 @@ import gc
 
 import torch
 from megatron.bridge.models.hf_pretrained.utils import is_safe_repo
-from mlflow_utils import add_mlflow_args, mlflow_run, resolve_mlflow_args
+from mlflow_utils import add_mlflow_args, masked_for_print, mlflow_run, resolve_mlflow_args
 from transformers import AutoProcessor
 
 import modelopt.torch.quantization as mtq
@@ -228,7 +228,7 @@ def get_args() -> argparse.Namespace:
     args = parser.parse_args()
     resolve_mlflow_args(args, parser)
 
-    print_args(args)
+    print_args(masked_for_print(args))
 
     # Flipped by main() once the Megatron checkpoint is on disk. The MLflow provenance
     # pointer is gated on it rather than on --export_megatron_path existing, which proves

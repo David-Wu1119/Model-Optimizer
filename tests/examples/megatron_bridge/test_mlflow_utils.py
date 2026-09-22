@@ -175,6 +175,21 @@ def test_a_bad_uri_is_fatal_only_when_it_was_asked_for(monkeypatch):
         _parse(monkeypatch, "--mlflow", "file:///local/mlruns")
 
 
+def test_the_printed_arguments_mask_tracking_credentials(monkeypatch):
+    """quantize.py hands the namespace to print_args, which dumps it verbatim; a torchrun
+    job log is routinely archived, so the URI's credentials must not reach it."""
+    # Fake credentials: TruffleHog flags any scheme://user:pass@host, and this test exists
+    # precisely to prove they are masked.
+    creds = "https://svc:s3cret@mlflow.example.com"  # trufflehog:ignore
+    args = _parse(monkeypatch, "--mlflow", creds, "--quant_cfg", "nvfp4")
+
+    printed = mlflow_utils.masked_for_print(args)
+
+    assert args.mlflow == creds  # the live namespace still reaches the client
+    assert printed.mlflow == "https://***@mlflow.example.com"
+    assert printed.quant_cfg == "nvfp4"  # every other argument survives the copy
+
+
 # --- what a run records ---------------------------------------------------------------
 
 
@@ -359,10 +374,14 @@ def test_quantize_script_wires_the_tracking():
     flag or a dropped call would otherwise only surface in the Megatron example lane."""
     source = _SCRIPT.read_text()
 
-    assert "from mlflow_utils import add_mlflow_args, mlflow_run, resolve_mlflow_args" in source
+    imported = next(line for line in source.splitlines() if line.startswith("from mlflow_utils "))
+    for name in ("add_mlflow_args", "masked_for_print", "mlflow_run", "resolve_mlflow_args"):
+        assert name in imported
     assert "add_mlflow_args(parser)" in source
     assert "resolve_mlflow_args(args, parser)" in source
     assert "with mlflow_run(args):" in source
+    # The namespace reaches print_args masked, so a user:token@ URI stays out of the job log.
+    assert "print_args(masked_for_print(args))" in source
     # The provenance pointer is gated on the save having happened.
     assert "args.checkpoint_exported = False" in source
     assert "args.checkpoint_exported = True" in source

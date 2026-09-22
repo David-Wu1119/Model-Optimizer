@@ -131,8 +131,8 @@ def resolve_mlflow_args(args: argparse.Namespace, parser: argparse.ArgumentParse
 def _without_credentials(uri: str) -> str:
     """Strip any ``user:token@`` from *uri*, for printing.
 
-    ``MlflowRunLogger`` masks the same thing in every URI it prints or uploads, and this
-    line ends up in the worker log that the run itself uploads, so it has to match.
+    Kept rather than folded into :func:`mask_tracking_uri`: this line ends up in the worker
+    log that the run itself uploads, and stripping is what it has always printed.
     """
     parsed = urlparse(uri)
     return parsed._replace(netloc=parsed.netloc.rpartition("@")[2]).geturl()

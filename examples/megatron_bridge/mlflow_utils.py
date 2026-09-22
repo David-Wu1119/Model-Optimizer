@@ -31,7 +31,7 @@ import yaml
 
 import modelopt.torch.utils.distributed as dist
 from modelopt.recipe import load_recipe
-from modelopt.torch.utils.mlflow import MlflowRunLogger, drop_experiment_json
+from modelopt.torch.utils.mlflow import MlflowRunLogger, drop_experiment_json, mask_tracking_uri
 from modelopt.torch.utils.mlflow import add_mlflow_args as _add_mlflow_args
 from modelopt.torch.utils.mlflow import resolve_mlflow_args as _resolve_mlflow_args
 
@@ -76,6 +76,17 @@ def resolve_mlflow_args(args: argparse.Namespace, parser: argparse.ArgumentParse
         # get_quant_config without one fails there rather than while being named.
         variant=Path(args.recipe).stem if args.recipe else (args.quant_cfg or "none"),
     )
+
+
+def masked_for_print(args: argparse.Namespace) -> argparse.Namespace:
+    """A copy of *args* whose tracking URI cannot leak credentials into the console log.
+
+    ``print_args`` dumps the namespace verbatim, and a ``user:token@`` in ``--mlflow`` is a
+    supported form that the rest of this module masks wherever it prints or uploads the URI.
+    The uploaded artifacts are unaffected -- ``command_text`` redacts, and ``mlflow`` is not
+    logged as a param -- but a torchrun job log is routinely archived and shared.
+    """
+    return argparse.Namespace(**{**vars(args), "mlflow": mask_tracking_uri(args.mlflow)})
 
 
 def _run_inputs(args: argparse.Namespace) -> tuple[dict, dict]:

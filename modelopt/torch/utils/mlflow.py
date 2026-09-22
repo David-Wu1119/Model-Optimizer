@@ -54,6 +54,7 @@ __all__ = [
     "current_user",
     "default_experiment_name",
     "drop_experiment_json",
+    "mask_tracking_uri",
     "resolve_mlflow_args",
     "resolve_tracking_uri",
     "validate_tracking_uri",
@@ -672,6 +673,17 @@ def add_mlflow_args(
     )
 
 
+def mask_tracking_uri(uri: str | None) -> str | None:
+    """Mask any ``user:token@`` a tracking URI carries, for printing.
+
+    Credentials in the URI are a supported form, so everything this module prints or uploads
+    masks them -- ``command.txt``, the logged params, :attr:`MlflowRunLogger.run_url`. A
+    caller that prints the URI itself (a script echoing its parsed arguments, say) has to do
+    the same, or the secret reaches a console log that is routinely archived.
+    """
+    return _redact(uri)
+
+
 def resolve_tracking_uri(
     uri: str | None, parser: argparse.ArgumentParser
 ) -> tuple[str | None, bool]:
@@ -682,11 +694,17 @@ def resolve_tracking_uri(
     the environment variable is commonly exported for unrelated tooling and must not fail a
     job that would otherwise have worked.
     """
-    required = uri is not None
-    if uri is None:
-        # Only when the flag is absent: an explicit empty value (``--mlflow "$UNSET_VAR"``)
-        # is a request for tracking that cannot be honoured, and must fail rather than
-        # silently reach whatever server the environment names.
+    # An empty value is not a deliberate request: ``--mlflow "$UNSET_VAR"`` is a wrapper
+    # script whose variable did not resolve, so it neither names a server nor should take a
+    # job down. It falls back like an absent flag -- but loudly, since the caller did ask
+    # for tracking and what it gets is whatever the environment names, or nothing.
+    required = bool(uri)
+    if not uri:
+        if uri is not None:
+            warnings.warn(
+                f"--mlflow was given an empty value; falling back to ${TRACKING_URI_ENV} "
+                "if it is set, and running untracked otherwise."
+            )
         uri = os.environ.get(TRACKING_URI_ENV) or None
         if uri is None:
             return None, required

@@ -35,6 +35,7 @@ from modelopt.torch.utils.mlflow import (
     command_text,
     default_experiment_name,
     drop_experiment_json,
+    mask_tracking_uri,
     resolve_mlflow_args,
     validate_tracking_uri,
 )
@@ -832,13 +833,40 @@ def test_a_bad_uri_is_fatal_only_when_it_was_asked_for(monkeypatch):
         _resolved(["--mlflow", "file:///local/mlruns"])
 
 
-def test_an_explicit_empty_uri_is_rejected_rather_than_falling_back(monkeypatch):
-    """``--mlflow "$UNSET_VAR"`` asked for tracking and cannot have it; silently using the
-    environment's server instead would send the run somewhere the flag did not name."""
+def test_an_explicit_empty_uri_warns_and_falls_back(monkeypatch):
+    """``--mlflow "$UNSET_VAR"`` is a wrapper script whose variable did not resolve. It names
+    no server, so it must not be treated as a deliberate request that can fail the job --
+    but it must not pass silently either."""
     monkeypatch.setenv("MLFLOW_TRACKING_URI", URI)
 
-    with pytest.raises(SystemExit):
-        _resolved(["--mlflow", ""])
+    with pytest.warns(UserWarning, match="empty value"):
+        args = _resolved(["--mlflow", ""])
+
+    assert args.mlflow == URI
+    assert args.mlflow_required is False  # so an unusable environment URI still cannot fail it
+
+
+def test_an_explicit_empty_uri_runs_untracked_with_no_environment(monkeypatch):
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+
+    with pytest.warns(UserWarning, match="empty value"):
+        args = _resolved(["--mlflow", ""])
+
+    assert args.mlflow is None
+
+
+@pytest.mark.parametrize(
+    ("uri", "expected"),
+    [
+        (CREDS_URI, "https://***@mlflow.example.com"),
+        (URI, URI),
+        (None, None),
+    ],
+    ids=["credentials", "plain", "unset"],
+)
+def test_mask_tracking_uri_hides_credentials_for_printing(uri, expected):
+    """A caller that prints the URI itself has to mask what command.txt and run_url mask."""
+    assert mask_tracking_uri(uri) == expected
 
 
 # --- the provenance pointer a checkpoint carries ---------------------------------------
