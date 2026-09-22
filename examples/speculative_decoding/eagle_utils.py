@@ -193,13 +193,18 @@ class EagleTrainerWithAccLog(Trainer):
         """Override to give LoRA parameters a higher learning rate."""
         if self.optimizer is None and getattr(self.model, "dflash_fp32_master_weights", False):
             # Built here rather than left to HF: the flag asks for an fp32 master copy of the
-            # draft, and that lives in the optimizer. `create_optimizer` below sees
-            # `self.optimizer` already set and keeps its own param-group work.
+            # draft, and that lives in the optimizer. `create_optimizer` below wraps its own
+            # work in `if self.optimizer is None`, so setting it here skips that entirely --
+            # including the decay/no-decay grouping, which is why this reproduces it.
             cls, kwargs = self.get_optimizer_cls_and_kwargs(self.args, self.model)
             if not issubclass(cls, torch.optim.AdamW):
                 raise ValueError(
                     f"dflash_fp32_master_weights needs an AdamW-family optimizer to hold the "
-                    f"master weights, but training.optim resolved to {cls.__name__}."
+                    f"master weights, but training.optim resolved to {cls.__name__}. Either "
+                    f"set training.optim to an adamw_torch variant, or set "
+                    f"dflash_fp32_master_weights=false to train the draft without an fp32 "
+                    f"master -- which costs acceptance length, but is the only option if the "
+                    f"optimizer is the point (adamw_8bit and adafactor both land here)."
                 )
             # `optim` defaults to adamw_torch_fused, and the fused kernel writes the update
             # straight into the parameter it was handed -- which for us is the bf16 model
