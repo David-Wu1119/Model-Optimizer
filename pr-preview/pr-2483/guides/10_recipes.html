@@ -2,7 +2,7 @@
 <html lang="en" data-accent-color="green" data-content_root="../">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Recipes - Model Optimizer 0.0.1.dev1+g508659801</title><link rel="index" title="Index" href="../genindex.html" /><link rel="search" title="Search" href="../search.html" /><link rel="next" title="ModelOpt Config System" href="11_config_system.html" /><link rel="prev" title="Autotune (ONNX)" href="9_autotune.html" /><script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Recipes - Model Optimizer 0.0.1.dev1+g05dc6dd6a</title><link rel="index" title="Index" href="../genindex.html" /><link rel="search" title="Search" href="../search.html" /><link rel="next" title="ModelOpt Config System" href="11_config_system.html" /><link rel="prev" title="Autotune (ONNX)" href="9_autotune.html" /><script>
     function setColorMode(t){let e=document.documentElement;e.setAttribute("data-color-mode",t);let a=window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches,s=t;"auto"===t&&(s=a?"dark":"light"),"light"===s?(e.classList.remove("dark"),e.classList.add("light")):(e.classList.remove("light"),e.classList.add("dark"))}
     setColorMode(localStorage._theme||"auto");
   </script><link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=e1a1ceaf" />
@@ -408,6 +408,7 @@ data-aria-dark="Switch to auto color mode">
 <li><a class="reference internal" href="#built-in-recipes">Built-in recipes</a><ul>
 <li><a class="reference internal" href="#ptq-recipes">PTQ recipes</a></li>
 <li><a class="reference internal" href="#model-specific-recipes">Model-specific recipes</a></li>
+<li><a class="reference internal" href="#delegating-to-another-recipe">Delegating to another recipe</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#loading-recipes">Loading recipes</a><ul>
@@ -464,44 +465,45 @@ system is designed to support any optimization technique.</p>
 <nav class="contents local" id="on-this-page">
 <p class="topic-title">On this page</p>
 <ul class="simple">
-<li><p><a class="reference internal" href="#motivation" id="id3">Motivation</a></p></li>
-<li><p><a class="reference internal" href="#design-overview" id="id4">Design overview</a></p></li>
-<li><p><a class="reference internal" href="#recipe-format" id="id5">Recipe format</a></p>
+<li><p><a class="reference internal" href="#motivation" id="id4">Motivation</a></p></li>
+<li><p><a class="reference internal" href="#design-overview" id="id5">Design overview</a></p></li>
+<li><p><a class="reference internal" href="#recipe-format" id="id6">Recipe format</a></p>
 <ul>
-<li><p><a class="reference internal" href="#single-file-format" id="id6">Single-file format</a></p></li>
-<li><p><a class="reference internal" href="#directory-format" id="id7">Directory format</a></p></li>
-<li><p><a class="reference internal" href="#composable-imports" id="id8">Composable imports</a></p></li>
+<li><p><a class="reference internal" href="#single-file-format" id="id7">Single-file format</a></p></li>
+<li><p><a class="reference internal" href="#directory-format" id="id8">Directory format</a></p></li>
+<li><p><a class="reference internal" href="#composable-imports" id="id9">Composable imports</a></p></li>
 </ul>
 </li>
-<li><p><a class="reference internal" href="#metadata-section" id="id9">Metadata section</a></p></li>
-<li><p><a class="reference internal" href="#type-specific-configuration-sections" id="id10">Type-specific configuration sections</a></p>
+<li><p><a class="reference internal" href="#metadata-section" id="id10">Metadata section</a></p></li>
+<li><p><a class="reference internal" href="#type-specific-configuration-sections" id="id11">Type-specific configuration sections</a></p>
 <ul>
-<li><p><a class="reference internal" href="#ptq-recipe-type-ptq" id="id11">PTQ (<code class="docutils literal notranslate"><span class="pre">recipe_type:</span> <span class="pre">ptq</span></code>)</a></p></li>
+<li><p><a class="reference internal" href="#ptq-recipe-type-ptq" id="id12">PTQ (<code class="docutils literal notranslate"><span class="pre">recipe_type:</span> <span class="pre">ptq</span></code>)</a></p></li>
 </ul>
 </li>
-<li><p><a class="reference internal" href="#exmy-floating-point-notation" id="id12">ExMy floating-point notation</a></p></li>
-<li><p><a class="reference internal" href="#built-in-recipes" id="id13">Built-in recipes</a></p>
+<li><p><a class="reference internal" href="#exmy-floating-point-notation" id="id13">ExMy floating-point notation</a></p></li>
+<li><p><a class="reference internal" href="#built-in-recipes" id="id14">Built-in recipes</a></p>
 <ul>
-<li><p><a class="reference internal" href="#ptq-recipes" id="id14">PTQ recipes</a></p></li>
-<li><p><a class="reference internal" href="#model-specific-recipes" id="id15">Model-specific recipes</a></p></li>
+<li><p><a class="reference internal" href="#ptq-recipes" id="id15">PTQ recipes</a></p></li>
+<li><p><a class="reference internal" href="#model-specific-recipes" id="id16">Model-specific recipes</a></p></li>
+<li><p><a class="reference internal" href="#delegating-to-another-recipe" id="id17">Delegating to another recipe</a></p></li>
 </ul>
 </li>
-<li><p><a class="reference internal" href="#loading-recipes" id="id16">Loading recipes</a></p>
+<li><p><a class="reference internal" href="#loading-recipes" id="id18">Loading recipes</a></p>
 <ul>
-<li><p><a class="reference internal" href="#python-api" id="id17">Python API</a></p></li>
-<li><p><a class="reference internal" href="#command-line-usage" id="id18">Command-line usage</a></p></li>
-<li><p><a class="reference internal" href="#loading-standalone-configs" id="id19">Loading standalone configs</a></p></li>
+<li><p><a class="reference internal" href="#python-api" id="id19">Python API</a></p></li>
+<li><p><a class="reference internal" href="#command-line-usage" id="id20">Command-line usage</a></p></li>
+<li><p><a class="reference internal" href="#loading-standalone-configs" id="id21">Loading standalone configs</a></p></li>
 </ul>
 </li>
-<li><p><a class="reference internal" href="#path-resolution" id="id20">Path resolution</a></p></li>
-<li><p><a class="reference internal" href="#writing-a-custom-recipe" id="id21">Writing a custom recipe</a></p></li>
-<li><p><a class="reference internal" href="#recipe-repository-layout" id="id22">Recipe repository layout</a></p></li>
-<li><p><a class="reference internal" href="#recipe-data-model" id="id23">Recipe data model</a></p></li>
-<li><p><a class="reference internal" href="#future-directions" id="id24">Future directions</a></p></li>
+<li><p><a class="reference internal" href="#path-resolution" id="id22">Path resolution</a></p></li>
+<li><p><a class="reference internal" href="#writing-a-custom-recipe" id="id23">Writing a custom recipe</a></p></li>
+<li><p><a class="reference internal" href="#recipe-repository-layout" id="id24">Recipe repository layout</a></p></li>
+<li><p><a class="reference internal" href="#recipe-data-model" id="id25">Recipe data model</a></p></li>
+<li><p><a class="reference internal" href="#future-directions" id="id26">Future directions</a></p></li>
 </ul>
 </nav>
 <section id="motivation">
-<h2><a class="toc-backref" href="#id3" role="doc-backlink">Motivation</a><a class="headerlink" href="#motivation" title="Link to this heading">#</a></h2>
+<h2><a class="toc-backref" href="#id4" role="doc-backlink">Motivation</a><a class="headerlink" href="#motivation" title="Link to this heading">#</a></h2>
 <p>Without recipes, optimization settings are scattered across command-line arguments, Python
 constants, and ad-hoc code edits.  This makes it difficult to:</p>
 <ul class="simple">
@@ -515,7 +517,7 @@ settings to tweak.</p></li>
 model in a single, portable artifact – either a YAML file or a directory of files.</p>
 </section>
 <section id="design-overview">
-<h2><a class="toc-backref" href="#id4" role="doc-backlink">Design overview</a><a class="headerlink" href="#design-overview" title="Link to this heading">#</a></h2>
+<h2><a class="toc-backref" href="#id5" role="doc-backlink">Design overview</a><a class="headerlink" href="#design-overview" title="Link to this heading">#</a></h2>
 <p>The recipe system is part of the <code class="xref py py-mod docutils literal notranslate"><span class="pre">modelopt.recipe</span></code> package and consists of three
 layers:</p>
 <ol class="arabic simple">
@@ -528,7 +530,7 @@ configuration against Pydantic models and returns a typed recipe object ready fo
 </ol>
 </section>
 <section id="recipe-format">
-<h2><a class="toc-backref" href="#id5" role="doc-backlink">Recipe format</a><a class="headerlink" href="#recipe-format" title="Link to this heading">#</a></h2>
+<h2><a class="toc-backref" href="#id6" role="doc-backlink">Recipe format</a><a class="headerlink" href="#recipe-format" title="Link to this heading">#</a></h2>
 <p>A recipe contains two top-level sections: <code class="docutils literal notranslate"><span class="pre">metadata</span></code> and a type-specific
 configuration section (for example, <code class="docutils literal notranslate"><span class="pre">quantize</span></code> for PTQ recipes).  These can live
 in a single YAML file or be split across files in a directory.</p>
@@ -536,7 +538,7 @@ in a single YAML file or be split across files in a directory.</p>
 and <strong>import-based</strong> (reusable snippets referenced via <code class="docutils literal notranslate"><span class="pre">$import</span></code>).  Both
 styles can be used in a single-file or directory layout.</p>
 <section id="single-file-format">
-<h3><a class="toc-backref" href="#id6" role="doc-backlink">Single-file format</a><a class="headerlink" href="#single-file-format" title="Link to this heading">#</a></h3>
+<h3><a class="toc-backref" href="#id7" role="doc-backlink">Single-file format</a><a class="headerlink" href="#single-file-format" title="Link to this heading">#</a></h3>
 <p>The simplest form is a single <code class="docutils literal notranslate"><span class="pre">.yaml</span></code> file.</p>
 <p><strong>Inline style</strong> — all config values are written directly:</p>
 <div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span data-line="1"><span class="nt">metadata</span><span class="p">:</span>
@@ -593,7 +595,7 @@ duplication when multiple recipes share the same numeric formats or exclusion
 lists.  See <a class="reference internal" href="#composable-imports"><span class="std std-ref">Composable imports</span></a> below for the full <code class="docutils literal notranslate"><span class="pre">$import</span></code> specification.</p>
 </section>
 <section id="directory-format">
-<h3><a class="toc-backref" href="#id7" role="doc-backlink">Directory format</a><a class="headerlink" href="#directory-format" title="Link to this heading">#</a></h3>
+<h3><a class="toc-backref" href="#id8" role="doc-backlink">Directory format</a><a class="headerlink" href="#directory-format" title="Link to this heading">#</a></h3>
 <p>For larger recipes or when you want to keep metadata separate from the
 optimization configuration, use a directory with multiple files.  Here is a PTQ
 example:</p>
@@ -627,7 +629,7 @@ scoped to the file that declares them; for PTQ quantization snippets, declare
 the relevant <code class="docutils literal notranslate"><span class="pre">imports</span></code> section in <code class="docutils literal notranslate"><span class="pre">quantize.yaml</span></code>.</p>
 </section>
 <section id="composable-imports">
-<span id="id2"></span><h3><a class="toc-backref" href="#id8" role="doc-backlink">Composable imports</a><a class="headerlink" href="#composable-imports" title="Link to this heading">#</a></h3>
+<span id="id2"></span><h3><a class="toc-backref" href="#id9" role="doc-backlink">Composable imports</a><a class="headerlink" href="#composable-imports" title="Link to this heading">#</a></h3>
 <p>Recipes can import <strong>reusable config snippets</strong> via the <code class="docutils literal notranslate"><span class="pre">imports</span></code> section.
 This eliminates duplication — numeric format definitions and standard exclusion
 lists are authored once and referenced by name across recipes.</p>
@@ -840,8 +842,10 @@ schema is neither the list type nor the element type, loading raises
 </section>
 </section>
 <section id="metadata-section">
-<h2><a class="toc-backref" href="#id9" role="doc-backlink">Metadata section</a><a class="headerlink" href="#metadata-section" title="Link to this heading">#</a></h2>
-<p>Every recipe must contain a <code class="docutils literal notranslate"><span class="pre">metadata</span></code> mapping with at least a <code class="docutils literal notranslate"><span class="pre">recipe_type</span></code> field:</p>
+<h2><a class="toc-backref" href="#id10" role="doc-backlink">Metadata section</a><a class="headerlink" href="#metadata-section" title="Link to this heading">#</a></h2>
+<p>Every recipe contains a <code class="docutils literal notranslate"><span class="pre">metadata</span></code> mapping.  <code class="docutils literal notranslate"><span class="pre">recipe_type</span></code> is optional and
+<strong>deprecated</strong> – a recipe may instead declare its kind with a <code class="docutils literal notranslate"><span class="pre">#</span> <span class="pre">modelopt-schema:</span></code>
+comment, or inherit it from the recipe it delegates to; see <a class="reference internal" href="#declaring-a-recipe-s-kind">Declaring a recipe’s kind</a>:</p>
 <div class="table-wrapper colwidths-given docutils container">
 <table class="docutils align-default">
 <colgroup>
@@ -857,7 +861,7 @@ schema is neither the list type nor the element type, loading raises
 </thead>
 <tbody>
 <tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">recipe_type</span></code></p></td>
-<td><p>Yes</p></td>
+<td><p>No</p></td>
 <td><p>The optimization category.  Determines which configuration sections are
 expected (e.g., <code class="docutils literal notranslate"><span class="pre">&quot;ptq&quot;</span></code> expects a <code class="docutils literal notranslate"><span class="pre">quantize</span></code> section).  See
 <code class="xref py py-class docutils literal notranslate"><span class="pre">RecipeType</span></code> for supported values.</p></td>
@@ -871,11 +875,11 @@ expected (e.g., <code class="docutils literal notranslate"><span class="pre">&qu
 </div>
 </section>
 <section id="type-specific-configuration-sections">
-<h2><a class="toc-backref" href="#id10" role="doc-backlink">Type-specific configuration sections</a><a class="headerlink" href="#type-specific-configuration-sections" title="Link to this heading">#</a></h2>
+<h2><a class="toc-backref" href="#id11" role="doc-backlink">Type-specific configuration sections</a><a class="headerlink" href="#type-specific-configuration-sections" title="Link to this heading">#</a></h2>
 <p>Each recipe type defines its own configuration section.  The section name and
-schema depend on the <code class="docutils literal notranslate"><span class="pre">recipe_type</span></code> value in the metadata.</p>
+schema depend on the recipe’s kind, however it is declared.</p>
 <section id="ptq-recipe-type-ptq">
-<h3><a class="toc-backref" href="#id11" role="doc-backlink">PTQ (<code class="docutils literal notranslate"><span class="pre">recipe_type:</span> <span class="pre">ptq</span></code>)</a><a class="headerlink" href="#ptq-recipe-type-ptq" title="Link to this heading">#</a></h3>
+<h3><a class="toc-backref" href="#id12" role="doc-backlink">PTQ (<code class="docutils literal notranslate"><span class="pre">recipe_type:</span> <span class="pre">ptq</span></code>)</a><a class="headerlink" href="#ptq-recipe-type-ptq" title="Link to this heading">#</a></h3>
 <p>PTQ recipes contain a <code class="docutils literal notranslate"><span class="pre">quantize</span></code> mapping with:</p>
 <div class="table-wrapper colwidths-given docutils container">
 <table class="docutils align-default">
@@ -911,7 +915,7 @@ formats that need no calibration (e.g. MX formats).</p></td>
 </section>
 </section>
 <section id="exmy-floating-point-notation">
-<h2><a class="toc-backref" href="#id12" role="doc-backlink">ExMy floating-point notation</a><a class="headerlink" href="#exmy-floating-point-notation" title="Link to this heading">#</a></h2>
+<h2><a class="toc-backref" href="#id13" role="doc-backlink">ExMy floating-point notation</a><a class="headerlink" href="#exmy-floating-point-notation" title="Link to this heading">#</a></h2>
 <p>The config loader supports a convenient shorthand for floating-point bit formats.
 This is primarily used in PTQ recipes for <code class="docutils literal notranslate"><span class="pre">num_bits</span></code> and <code class="docutils literal notranslate"><span class="pre">scale_bits</span></code> fields,
 but applies to any YAML value loaded through <code class="xref py py-func docutils literal notranslate"><span class="pre">load_config()</span></code>.
@@ -959,12 +963,12 @@ YAML file, so it works in both recipe files and standalone config files.</p>
 </div>
 </section>
 <section id="built-in-recipes">
-<h2><a class="toc-backref" href="#id13" role="doc-backlink">Built-in recipes</a><a class="headerlink" href="#built-in-recipes" title="Link to this heading">#</a></h2>
+<h2><a class="toc-backref" href="#id14" role="doc-backlink">Built-in recipes</a><a class="headerlink" href="#built-in-recipes" title="Link to this heading">#</a></h2>
 <p>ModelOpt ships a library of built-in recipes under the <code class="docutils literal notranslate"><span class="pre">modelopt_recipes/</span></code> package.
 These are bundled with the Python distribution and can be referenced by their relative
 path (without the <code class="docutils literal notranslate"><span class="pre">modelopt_recipes/</span></code> prefix).</p>
 <section id="ptq-recipes">
-<h3><a class="toc-backref" href="#id14" role="doc-backlink">PTQ recipes</a><a class="headerlink" href="#ptq-recipes" title="Link to this heading">#</a></h3>
+<h3><a class="toc-backref" href="#id15" role="doc-backlink">PTQ recipes</a><a class="headerlink" href="#ptq-recipes" title="Link to this heading">#</a></h3>
 <p>General PTQ recipes are model-agnostic and apply to any supported architecture:</p>
 <div class="table-wrapper colwidths-given docutils container">
 <table class="docutils align-default">
@@ -1020,17 +1024,25 @@ path (without the <code class="docutils literal notranslate"><span class="pre">m
 </tbody>
 </table>
 </div>
+<p>See <a class="reference external" href="https://github.com/NVIDIA/Model-Optimizer/blob/main/modelopt_recipes/ptq.md" rel="noopener noreferrer" target="_blank">modelopt_recipes/ptq.md</a>
+for the full list and for guidance on choosing between them.</p>
 </section>
 <section id="model-specific-recipes">
-<h3><a class="toc-backref" href="#id15" role="doc-backlink">Model-specific recipes</a><a class="headerlink" href="#model-specific-recipes" title="Link to this heading">#</a></h3>
+<h3><a class="toc-backref" href="#id16" role="doc-backlink">Model-specific recipes</a><a class="headerlink" href="#model-specific-recipes" title="Link to this heading">#</a></h3>
 <p>Model-specific recipes come in two tiers: architecture recipes keyed by a
 Hugging Face <code class="docutils literal notranslate"><span class="pre">model_type</span></code> under <code class="docutils literal notranslate"><span class="pre">model_type/&lt;model_type&gt;/&lt;task&gt;/</span></code>, and
-checkpoint mirrors keyed by a model-hub path under
+checkpoint entries keyed by a model-hub path under
 <code class="docutils literal notranslate"><span class="pre">models/&lt;org&gt;/&lt;model_id&gt;/&lt;task&gt;/</span></code>. See
 <a class="reference external" href="https://github.com/NVIDIA/Model-Optimizer/blob/main/modelopt_recipes/model_type/README.md" rel="noopener noreferrer" target="_blank">modelopt_recipes/model_type/README.md</a>
 and
 <a class="reference external" href="https://github.com/NVIDIA/Model-Optimizer/blob/main/modelopt_recipes/models/README.md" rel="noopener noreferrer" target="_blank">modelopt_recipes/models/README.md</a>
 for the layout conventions and recipe-lookup order.</p>
+<p>A checkpoint entry comes in two forms. A <strong>mirror</strong> carries its own body, because the
+release uses a per-layer scheme no portable recipe expresses. An <strong>alias</strong> has no body of
+its own: a general or architecture recipe already produces that scheme, so the entry
+imports that recipe wholesale and exists to make it findable from the checkpoint’s hub
+path. See <a class="reference external" href="https://github.com/NVIDIA/Model-Optimizer/blob/main/modelopt_recipes/ptq.md" rel="noopener noreferrer" target="_blank">modelopt_recipes/ptq.md</a>
+for what each checkpoint entry does.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p><code class="docutils literal notranslate"><span class="pre">model_type/</span></code> was previously named <code class="docutils literal notranslate"><span class="pre">huggingface/</span></code>. Old
@@ -1060,14 +1072,45 @@ new <code class="docutils literal notranslate"><span class="pre">--recipe</span>
 </table>
 </div>
 </section>
+<section id="delegating-to-another-recipe">
+<h3><a class="toc-backref" href="#id17" role="doc-backlink">Delegating to another recipe</a><a class="headerlink" href="#delegating-to-another-recipe" title="Link to this heading">#</a></h3>
+<p>A recipe can hand its whole body to another recipe with a top-level <code class="docutils literal notranslate"><span class="pre">$import</span></code> and keep
+only its own <code class="docutils literal notranslate"><span class="pre">metadata</span></code>.  Keys given alongside the <code class="docutils literal notranslate"><span class="pre">$import</span></code> override the imported
+ones, so the body – <code class="docutils literal notranslate"><span class="pre">quantize</span></code>, its algorithm and every <code class="docutils literal notranslate"><span class="pre">quant_cfg</span></code> entry – is
+inherited unchanged:</p>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span data-line="1"><span class="nt">imports</span><span class="p">:</span>
+</span><span data-line="2"><span class="w">  </span><span class="nt">base</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">general/ptq/nvfp4_default-kv_fp8_cast</span>
+</span><span data-line="3">
+</span><span data-line="4"><span class="nt">$import</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">base</span>
+</span><span data-line="5"><span class="nt">metadata</span><span class="p">:</span>
+</span><span data-line="6"><span class="w">  </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">What this checkpoint uses the base recipe for.</span>
+</span></pre></div>
+</div>
+<p id="declaring-a-recipe-s-kind">Note the missing <code class="docutils literal notranslate"><span class="pre">recipe_type</span></code>.  A recipe states its kind in whichever of these it
+likes, and the loader takes the first that answers: a <code class="docutils literal notranslate"><span class="pre">#</span> <span class="pre">modelopt-schema:</span></code> comment
+naming its schema class, <code class="docutils literal notranslate"><span class="pre">metadata.recipe_type</span></code>, or – as here – the recipe it
+delegates to.  <code class="docutils literal notranslate"><span class="pre">metadata.recipe_type</span></code> is <strong>deprecated</strong>: it is still read and still
+honoured, so no existing recipe needs changing, but new recipes should declare their
+schema instead.  A directory-format recipe’s <code class="docutils literal notranslate"><span class="pre">metadata.yml</span></code> can declare a schema
+comment too, the same way; delegation is the one source that does not apply to it,
+since a directory recipe has no top-level <code class="docutils literal notranslate"><span class="pre">$import</span></code> to inherit a kind from.</p>
+<p>Stating more than one is allowed, but they must agree, and that extends across the
+import: a recipe and the recipe it delegates to must be the same kind, since the import
+takes over the whole body.  A PTQ recipe importing an EAGLE one is rejected as a kind
+mismatch rather than left to fail on whatever the spliced sections do to the schema.</p>
+<p>What <em>is</em> required: a recipe that another file imports must carry the schema comment,
+since <code class="docutils literal notranslate"><span class="pre">$import</span></code> resolution needs it to validate the imported payload.  A recipe nothing
+imports needs no comment at all.  This is how the checkpoint aliases under <code class="docutils literal notranslate"><span class="pre">models/</span></code>
+name the recipe behind a release without duplicating its body.</p>
+</section>
 </section>
 <section id="loading-recipes">
-<h2><a class="toc-backref" href="#id16" role="doc-backlink">Loading recipes</a><a class="headerlink" href="#loading-recipes" title="Link to this heading">#</a></h2>
+<h2><a class="toc-backref" href="#id18" role="doc-backlink">Loading recipes</a><a class="headerlink" href="#loading-recipes" title="Link to this heading">#</a></h2>
 <section id="python-api">
-<h3><a class="toc-backref" href="#id17" role="doc-backlink">Python API</a><a class="headerlink" href="#python-api" title="Link to this heading">#</a></h3>
+<h3><a class="toc-backref" href="#id19" role="doc-backlink">Python API</a><a class="headerlink" href="#python-api" title="Link to this heading">#</a></h3>
 <p>Use <code class="xref py py-func docutils literal notranslate"><span class="pre">load_recipe()</span></code> to load a recipe.  The path is resolved
 against the built-in library first, then the filesystem.  The returned object’s
-type depends on the <code class="docutils literal notranslate"><span class="pre">recipe_type</span></code> in the metadata:</p>
+type depends on the recipe’s kind, however it is declared:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span data-line="1"><span class="kn">from</span><span class="w"> </span><span class="nn">modelopt.recipe</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_recipe</span>
 </span><span data-line="2">
 </span><span data-line="3"><span class="c1"># Load a built-in recipe by relative path (suffix optional)</span>
@@ -1086,7 +1129,7 @@ type depends on the <code class="docutils literal notranslate"><span class="pre"
 </div>
 </section>
 <section id="command-line-usage">
-<h3><a class="toc-backref" href="#id18" role="doc-backlink">Command-line usage</a><a class="headerlink" href="#command-line-usage" title="Link to this heading">#</a></h3>
+<h3><a class="toc-backref" href="#id20" role="doc-backlink">Command-line usage</a><a class="headerlink" href="#command-line-usage" title="Link to this heading">#</a></h3>
 <p>Some example scripts accept a <code class="docutils literal notranslate"><span class="pre">--recipe</span></code> flag.  For instance, the PTQ example:</p>
 <div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span data-line="1">python<span class="w"> </span>examples/hf_ptq/hf_ptq.py<span class="w"> </span><span class="se">\</span>
 </span><span data-line="2"><span class="w">    </span>--model<span class="w"> </span>Qwen/Qwen3-8B<span class="w"> </span><span class="se">\</span>
@@ -1101,7 +1144,7 @@ directly, bypassing format-specific flags (e.g., <code class="docutils literal n
 for PTQ).</p>
 </section>
 <section id="loading-standalone-configs">
-<h3><a class="toc-backref" href="#id19" role="doc-backlink">Loading standalone configs</a><a class="headerlink" href="#loading-standalone-configs" title="Link to this heading">#</a></h3>
+<h3><a class="toc-backref" href="#id21" role="doc-backlink">Loading standalone configs</a><a class="headerlink" href="#loading-standalone-configs" title="Link to this heading">#</a></h3>
 <p><code class="xref py py-func docutils literal notranslate"><span class="pre">load_config()</span></code> loads arbitrary YAML config files with
 automatic <code class="docutils literal notranslate"><span class="pre">ExMy</span></code> conversion and built-in path resolution.  This is useful
 for loading shared configuration fragments:</p>
@@ -1113,7 +1156,7 @@ for loading shared configuration fragments:</p>
 </section>
 </section>
 <section id="path-resolution">
-<h2><a class="toc-backref" href="#id20" role="doc-backlink">Path resolution</a><a class="headerlink" href="#path-resolution" title="Link to this heading">#</a></h2>
+<h2><a class="toc-backref" href="#id22" role="doc-backlink">Path resolution</a><a class="headerlink" href="#path-resolution" title="Link to this heading">#</a></h2>
 <p>Both <code class="xref py py-func docutils literal notranslate"><span class="pre">load_recipe()</span></code> and <code class="xref py py-func docutils literal notranslate"><span class="pre">load_config()</span></code>
 resolve paths using the same strategy:</p>
 <ol class="arabic simple">
@@ -1131,7 +1174,7 @@ directories.</p></li>
 </div>
 </section>
 <section id="writing-a-custom-recipe">
-<h2><a class="toc-backref" href="#id21" role="doc-backlink">Writing a custom recipe</a><a class="headerlink" href="#writing-a-custom-recipe" title="Link to this heading">#</a></h2>
+<h2><a class="toc-backref" href="#id23" role="doc-backlink">Writing a custom recipe</a><a class="headerlink" href="#writing-a-custom-recipe" title="Link to this heading">#</a></h2>
 <p>To create a custom recipe:</p>
 <ol class="arabic simple">
 <li><p>Start from an existing recipe that is close to your target configuration.</p></li>
@@ -1170,7 +1213,7 @@ deny-all prefix and standard exclusions.  Only the format-specific entries need
 to be written inline.</p>
 </section>
 <section id="recipe-repository-layout">
-<h2><a class="toc-backref" href="#id22" role="doc-backlink">Recipe repository layout</a><a class="headerlink" href="#recipe-repository-layout" title="Link to this heading">#</a></h2>
+<h2><a class="toc-backref" href="#id24" role="doc-backlink">Recipe repository layout</a><a class="headerlink" href="#recipe-repository-layout" title="Link to this heading">#</a></h2>
 <p>The <code class="docutils literal notranslate"><span class="pre">modelopt_recipes/</span></code> package is organized as follows:</p>
 <div class="highlight-text notranslate"><div class="highlight"><pre><span></span><span data-line="1">modelopt_recipes/
 </span><span data-line="2">+-- __init__.py
@@ -1220,7 +1263,7 @@ to be written inline.</p>
 </div>
 </section>
 <section id="recipe-data-model">
-<h2><a class="toc-backref" href="#id23" role="doc-backlink">Recipe data model</a><a class="headerlink" href="#recipe-data-model" title="Link to this heading">#</a></h2>
+<h2><a class="toc-backref" href="#id25" role="doc-backlink">Recipe data model</a><a class="headerlink" href="#recipe-data-model" title="Link to this heading">#</a></h2>
 <p>Recipes are validated at load time using Pydantic models:</p>
 <dl class="simple">
 <dt><code class="xref py py-class docutils literal notranslate"><span class="pre">ModelOptRecipeBase</span></code></dt><dd><p>Base class for all recipe types.  Contains a required <code class="docutils literal notranslate"><span class="pre">metadata</span></code> field
@@ -1237,7 +1280,7 @@ typed as <code class="xref py py-class docutils literal notranslate"><span class
 </dl>
 </section>
 <section id="future-directions">
-<h2><a class="toc-backref" href="#id24" role="doc-backlink">Future directions</a><a class="headerlink" href="#future-directions" title="Link to this heading">#</a></h2>
+<h2><a class="toc-backref" href="#id26" role="doc-backlink">Future directions</a><a class="headerlink" href="#future-directions" title="Link to this heading">#</a></h2>
 <p>The recipe system is designed to grow:</p>
 <ul class="simple">
 <li><p><strong>QAT recipes</strong> – <code class="docutils literal notranslate"><span class="pre">recipe_type:</span> <span class="pre">qat</span></code> with training hyperparameters, distillation
