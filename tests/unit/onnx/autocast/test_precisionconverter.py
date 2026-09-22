@@ -625,6 +625,71 @@ def test_clamping_fp16_initializers_out_of_range(
 
 
 @pytest.mark.parametrize("use_standalone_type_inference", [True, False])
+def test_convert_to_f16_clamps_initializers_preserving_sign(use_standalone_type_inference):
+    values = np.array(
+        [
+            20000,
+            -20000,
+            70000,
+            -70000,
+            1e-10,
+            -1e-10,
+            1e-7,
+            -1e-7,
+            0.0,
+            -0.0,
+            np.inf,
+            -np.inf,
+            np.nan,
+        ],
+        dtype=np.float32,
+    )
+    graph = helper.make_graph(
+        [helper.make_node("Add", ["X", "weight"], ["Y"], name="add")],
+        "initializer_limits",
+        [helper.make_tensor_value_info("X", TensorProto.FLOAT, [len(values)])],
+        [helper.make_tensor_value_info("Y", TensorProto.FLOAT, [len(values)])],
+        [numpy_helper.from_array(values, name="weight")],
+    )
+    model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 19)], ir_version=10)
+
+    converted = convert_to_f16(
+        model,
+        keep_io_types=False,
+        use_standalone_type_inference=use_standalone_type_inference,
+    )
+
+    weight = next(init for init in converted.graph.initializer if init.name == "weight")
+    assert weight.data_type == TensorProto.FLOAT16
+    actual = numpy_helper.to_array(weight)
+    limits = np.finfo(np.float16)
+    expected = np.array(
+        [
+            20000,
+            -20000,
+            limits.max,
+            -limits.max,
+            limits.smallest_subnormal,
+            -limits.smallest_subnormal,
+            1e-7,
+            -1e-7,
+            0.0,
+            -0.0,
+            limits.max,
+            -limits.max,
+            np.nan,
+        ],
+        dtype=np.float16,
+    )
+    np.testing.assert_array_equal(actual, expected)
+    # Numeric equality alone does not distinguish positive and negative zero.
+    np.testing.assert_array_equal(np.signbit(actual[:-1]), np.signbit(values[:-1]))
+    for value in (*converted.graph.input, *converted.graph.output):
+        assert value.type.tensor_type.elem_type == TensorProto.FLOAT16
+    onnx.checker.check_model(converted, full_check=True)
+
+
+@pytest.mark.parametrize("use_standalone_type_inference", [True, False])
 def test_bf16_no_clamping_initializers_out_of_range(
     model_with_multiple_consumers, use_standalone_type_inference
 ):

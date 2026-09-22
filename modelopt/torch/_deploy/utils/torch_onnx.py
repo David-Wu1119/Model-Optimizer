@@ -544,18 +544,12 @@ def get_onnx_bytes_and_metadata(
     uses_int8 = is_int8_quantized(model)
     uses_other_unsupported_quantizer = is_int4_quantized(model) or uses_mxfp8 or uses_int8
     supports_nvfp4_conversion = uses_fp4 and not uses_other_unsupported_quantizer
-    is_bf16_fp4_noop = (
+    is_bf16_quantized_noop = (
         weights_dtype == "bf16"
         and source_parameter_dtypes == {torch.bfloat16}
-        and supports_nvfp4_conversion
+        and (uses_fp4 or uses_fp8)
+        and not uses_other_unsupported_quantizer
     )
-    is_bf16_fp8_noop = (
-        weights_dtype == "bf16"
-        and source_parameter_dtypes == {torch.bfloat16}
-        and uses_fp8
-        and not (uses_fp4 or uses_other_unsupported_quantizer)
-    )
-    is_bf16_quantized_noop = is_bf16_fp4_noop or is_bf16_fp8_noop
 
     # Standardize model args and also tensorize them so they also appear in the onnx graph!
     # Floats/ints are tensorized when they are provided, but not tensorized when they are not
@@ -685,13 +679,10 @@ def get_onnx_bytes_and_metadata(
         onnx_opt_graph = qdq_to_dq(onnx_opt_graph)
 
     if weights_dtype in ["fp16", "bf16"] and not is_bf16_quantized_noop:
-        convert_nvfp4_with_autocast = supports_nvfp4_conversion and (
-            weights_dtype == "bf16" or torch.bfloat16 in source_parameter_dtypes
-        )
         if (
             weights_dtype == "fp16"
-            and (uses_fp4 or uses_other_unsupported_quantizer or uses_fp8)
-            and not convert_nvfp4_with_autocast
+            and (uses_other_unsupported_quantizer or uses_fp8)
+            and not supports_nvfp4_conversion
         ):
             onnx_opt_graph = convert_float_to_float16(
                 onnx_opt_graph,

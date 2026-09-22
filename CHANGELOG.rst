@@ -23,6 +23,8 @@ Changelog
 
 **Backward Breaking Changes**
 
+- Supported NVFP4 ONNX FP16 conversions now use AutoCast's precision policy, including FP16 ``Div`` where supported and initializer clamping to the FP16 range (including infinities), instead of the legacy converter's narrower range. Exported numerical results can change; revalidate model accuracy when upgrading.
+
 - The ``modelopt.onnx.quantization.graph_utils`` module has been removed with no
   compatibility shim; update direct imports using this migration map:
 
@@ -67,6 +69,7 @@ Changelog
 - Fix unified Megatron export writing a second, unreferenced copy of the vocab embedding when a model with MTP layers is exported with pipeline parallelism. The duplicate was never loaded but inflated the checkpoint by the size of the embedding (about 1 GB for Qwen3.6-35B-A3B); re-export to reclaim the space.
 - Fail fast on non-finite AutoQuantize output gradients with an actionable error before accumulating sensitivity scores, without changing attention backend settings.
 - Fix NVFP4 ONNX exports that failed ONNX or TensorRT parsing due to mixed-precision ``MatMul``, ``Gemm``, and elementwise inputs. Export preserves FP32 graph boundaries around low-precision NVFP4 compute and supports conversion of FP32, BF16, or mixed FP32/BF16 models to FP16 or BF16.
+- Fix ONNX AutoCast changing tiny negative initializer values to positive values during precision conversion; underflow clamping now preserves their sign.
 - Fix ONNX INT8 entropy calibration failing or producing invalid quantization parameters for FP16 activations.
 - Fix ``--use_fsdp2`` HuggingFace checkpoint export gathering the whole model onto rank 0, which made export the dominant phase of a PTQ run and could exhaust host memory on large models. The model is now split into per-decoder-layer units dealt round-robin across ranks; each rank gathers every unit but keeps, packs, and writes only the ones it owns, so a rank buffers roughly ``model / world_size`` instead of the whole checkpoint, and rank 0 writes the combined index. Export configurations that cannot be split this way now raise instead of producing a mismatched checkpoint: FSDP2 combined with another DTensor parallelism (for example FSDP2 + tensor parallel on a 2-D mesh; HSDP is supported), models whose decoder layers cannot be discovered, a decoder layer object reused across layers, and a module that holds the decoder layers while owning parameters of its own.
 - Speed up ``mtq.quantize`` on FSDP2-sharded fused-MoE models. Promoting static-block weight quantizers gathered each expert's slice of the fused weight across ranks even though only quantizer state is read, adding a collective per expert to calibration.

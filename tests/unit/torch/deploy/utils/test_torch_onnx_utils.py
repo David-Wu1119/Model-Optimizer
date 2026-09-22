@@ -301,17 +301,34 @@ def test_fp8_export_rejects_unsupported_dtype_conversion(
 
 
 @pytest.mark.parametrize(
-    ("source_dtype", "weights_dtype", "expected_calls"),
+    ("source_dtype", "weights_dtype", "quantizers", "expected_calls"),
     [
-        (torch.float32, "fp16", ["onnxconverter"]),
-        (torch.float32, "bf16", ["autocast"]),
-        (torch.bfloat16, "fp16", ["autocast"]),
-        (torch.bfloat16, "bf16", []),
+        (torch.float32, "fp16", ("fp4",), ["autocast"]),
+        (torch.float32, "bf16", ("fp4",), ["autocast"]),
+        (torch.bfloat16, "fp16", ("fp4",), ["autocast"]),
+        (torch.bfloat16, "bf16", ("fp4",), []),
+        (torch.float32, "fp16", ("fp4", "fp8"), ["autocast"]),
+        (torch.bfloat16, "bf16", ("fp4", "fp8"), []),
+        (torch.float32, "fp16", ("fp8",), ["onnxconverter"]),
+        (torch.float32, "fp16", ("fp4", "int4"), ["onnxconverter"]),
+        (torch.float32, "fp16", ("fp4", "int8"), ["onnxconverter"]),
+        (torch.float32, "fp16", ("fp4", "mxfp8"), ["onnxconverter"]),
     ],
-    ids=["fp32-to-fp16", "fp32-to-bf16", "bf16-to-fp16", "bf16-noop"],
+    ids=[
+        "fp32-to-fp16",
+        "fp32-to-bf16",
+        "bf16-to-fp16",
+        "bf16-noop",
+        "fp4-fp8-to-fp16",
+        "fp4-fp8-bf16-noop",
+        "fp8-legacy",
+        "fp4-int4-legacy",
+        "fp4-int8-legacy",
+        "fp4-mxfp8-legacy",
+    ],
 )
-def test_nvfp4_export_selects_precision_converter(
-    source_dtype, weights_dtype, expected_calls, monkeypatch
+def test_quantized_export_selects_precision_converter(
+    source_dtype, weights_dtype, quantizers, expected_calls, monkeypatch
 ):
     calls = []
 
@@ -323,7 +340,12 @@ def test_nvfp4_export_selects_precision_converter(
         calls.append("autocast")
         return model
 
-    monkeypatch.setattr(torch_onnx, "is_fp4_quantized", lambda _: True)
+    for quantizer in ("fp4", "fp8", "int4", "int8", "mxfp8"):
+        monkeypatch.setattr(
+            torch_onnx,
+            f"is_{quantizer}_quantized",
+            lambda _, enabled=quantizer in quantizers: enabled,
+        )
     monkeypatch.setattr(
         torch_onnx, "configure_linear_module_onnx_quantizers", lambda _: nullcontext()
     )

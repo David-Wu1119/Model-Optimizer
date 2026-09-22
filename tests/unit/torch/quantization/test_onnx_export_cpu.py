@@ -30,6 +30,7 @@ from _test_utils.torch.quantization.models import SimpleLinear
 from _test_utils.torch.quantization.onnx_export import TEST_MODELS, onnx_export_tester
 from onnx import TensorProto, helper, numpy_helper
 
+import modelopt.torch._deploy.utils.torch_onnx as torch_onnx
 import modelopt.torch.quantization as mtq
 import modelopt.torch.quantization.tensor_quant as tensor_quant
 from modelopt.onnx import utils
@@ -151,6 +152,31 @@ def _make_cpu_nvfp4_model(
     return model
 
 
+def _export_deploy_onnx_with_types(model, sample_input, weights_dtype, dynamic_axes=None):
+    onnx_bytes, _ = get_onnx_bytes_and_metadata(
+        model,
+        (sample_input,),
+        weights_dtype=weights_dtype,
+        dynamic_axes=dynamic_axes or {},
+    )
+    exported_model = onnx.load_model_from_string(
+        OnnxBytes.from_bytes(onnx_bytes).get_onnx_model_file_bytes()
+    )
+    onnx.checker.check_model(exported_model, full_check=True)
+    inferred_model = onnx.shape_inference.infer_shapes(exported_model, strict_mode=True)
+    tensor_types = {
+        initializer.name: initializer.data_type for initializer in inferred_model.graph.initializer
+    }
+    for value in [
+        *inferred_model.graph.input,
+        *inferred_model.graph.value_info,
+        *inferred_model.graph.output,
+    ]:
+        if value.type.HasField("tensor_type"):
+            tensor_types[value.name] = value.type.tensor_type.elem_type
+    return exported_model, tensor_types
+
+
 def test_nvfp4_exported_onnx_is_topologically_sorted(monkeypatch):
     model = SimpleLinear().eval()
     sample_input = model.get_input()
@@ -191,17 +217,11 @@ def test_nvfp4_deploy_export_has_consistent_elementwise_types(
     # Swin leaves LayerNorm input quantizers disabled on its high-rank activation paths.
     model.norm.input_quantizer.disable()
 
-    onnx_bytes, _ = get_onnx_bytes_and_metadata(
-        model,
-        (sample_input,),
-        weights_dtype=weights_dtype,
-    )
-    exported_model = onnx.load_model_from_string(
-        OnnxBytes.from_bytes(onnx_bytes).get_onnx_model_file_bytes()
+    exported_model, tensor_types = _export_deploy_onnx_with_types(
+        model, sample_input, weights_dtype
     )
 
     assert utils.get_opset_version(exported_model) >= 23
-    onnx.checker.check_model(exported_model, full_check=True)
     assert exported_model.graph.input[0].type.tensor_type.elem_type == expected_dtype
     assert exported_model.graph.output[0].type.tensor_type.elem_type == expected_dtype
     assert any(
@@ -211,20 +231,8 @@ def test_nvfp4_deploy_export_has_consistent_elementwise_types(
     )
     assert any(node.op_type == "TRT_FP4DynamicQuantize" for node in exported_model.graph.node)
 
-    inferred_model = onnx.shape_inference.infer_shapes(exported_model, strict_mode=True)
-    tensor_types = {
-        initializer.name: initializer.data_type for initializer in inferred_model.graph.initializer
-    }
-    for value in [
-        *inferred_model.graph.input,
-        *inferred_model.graph.value_info,
-        *inferred_model.graph.output,
-    ]:
-        if value.type.HasField("tensor_type"):
-            tensor_types[value.name] = value.type.tensor_type.elem_type
-
     dynamic_quantize = next(
-        node for node in inferred_model.graph.node if node.op_type == "TRT_FP4DynamicQuantize"
+        node for node in exported_model.graph.node if node.op_type == "TRT_FP4DynamicQuantize"
     )
     assert [tensor_types[output] for output in dynamic_quantize.output] == [
         TensorProto.FLOAT4E2M1,
@@ -234,7 +242,7 @@ def test_nvfp4_deploy_export_has_consistent_elementwise_types(
     floating_types = {TensorProto.FLOAT, TensorProto.FLOAT16, TensorProto.BFLOAT16}
     elementwise_nodes = [
         node
-        for node in inferred_model.graph.node
+        for node in exported_model.graph.node
         if node.op_type in {"Add", "Sub", "Mul", "Div", "Pow"}
     ]
     assert any(node.op_type == "Add" for node in elementwise_nodes)
@@ -273,38 +281,53 @@ def test_nvfp4_deploy_export_preserves_mixed_precision_boundaries(
         )
     model = _make_cpu_nvfp4_model(monkeypatch, model, sample_input, quant_config=quant_config)
 
-    onnx_bytes, _ = get_onnx_bytes_and_metadata(
-        model,
-        (sample_input,),
-        weights_dtype=weights_dtype,
-    )
-    exported_model = onnx.load_model_from_string(
-        OnnxBytes.from_bytes(onnx_bytes).get_onnx_model_file_bytes()
-    )
+    quantized_types = {TensorProto.FLOAT4E2M1, TensorProto.FLOAT8E4M3FN}
+    expected_payloads = {}
+    quantize_weights = torch_onnx.quantize_weights
 
-    onnx.checker.check_model(exported_model, full_check=True)
+    def quantized_payloads(graph):
+        return {
+            initializer.name: (
+                initializer.data_type,
+                tuple(initializer.dims),
+                initializer.raw_data,
+            )
+            for initializer in graph.graph.initializer
+            if initializer.data_type in quantized_types
+        }
+
+    def capture_quantized_payloads(model, graph):
+        graph = quantize_weights(model, graph)
+        expected_payloads.update(quantized_payloads(graph))
+        return graph
+
+    monkeypatch.setattr(torch_onnx, "quantize_weights", capture_quantized_payloads)
+    exported_model, tensor_types = _export_deploy_onnx_with_types(
+        model,
+        sample_input,
+        weights_dtype,
+        dynamic_axes=(
+            {"inputs": {0: "batch"}, "out": {0: "batch"}} if weights_dtype != "fp32" else None
+        ),
+    )
+    assert {payload[0] for payload in expected_payloads.values()} == quantized_types
+    assert all(payload[2] for payload in expected_payloads.values())
+    assert quantized_payloads(exported_model) == expected_payloads
     assert exported_model.graph.input[0].type.tensor_type.elem_type == expected_dtype
     assert exported_model.graph.output[0].type.tensor_type.elem_type == expected_dtype
-    inferred_model = onnx.shape_inference.infer_shapes(exported_model, strict_mode=True)
-    tensor_types = {
-        initializer.name: initializer.data_type for initializer in inferred_model.graph.initializer
-    }
-    for value in [
-        *inferred_model.graph.input,
-        *inferred_model.graph.value_info,
-        *inferred_model.graph.output,
-    ]:
-        if value.type.HasField("tensor_type"):
-            tensor_types[value.name] = value.type.tensor_type.elem_type
+    if weights_dtype != "fp32":
+        for value in [*exported_model.graph.input, *exported_model.graph.output]:
+            assert value.type.tensor_type.shape.dim[0].dim_param == "batch"
+            assert value.type.tensor_type.shape.dim[1].dim_value == 16
 
-    add_node = next(node for node in inferred_model.graph.node if node.op_type == "Add")
+    add_node = next(node for node in exported_model.graph.node if node.op_type == "Add")
     assert [tensor_types[input_name] for input_name in add_node.input] == [
         expected_dtype,
         expected_dtype,
     ]
     if with_fp8_branch and weights_dtype != "fp32":
         quantize_nodes = [
-            node for node in inferred_model.graph.node if node.op_type == "QuantizeLinear"
+            node for node in exported_model.graph.node if node.op_type == "QuantizeLinear"
         ]
         assert quantize_nodes
         for node in quantize_nodes:
@@ -329,34 +352,17 @@ def test_nvfp4_deploy_export_has_consistent_gemm_types(
     sample_input = torch.ones(2, 16, dtype=source_dtype)
     model = _make_cpu_nvfp4_model(monkeypatch, model, sample_input)
 
-    onnx_bytes, _ = get_onnx_bytes_and_metadata(
-        model,
-        (sample_input,),
-        weights_dtype=weights_dtype,
-    )
-    exported_model = onnx.load_model_from_string(
-        OnnxBytes.from_bytes(onnx_bytes).get_onnx_model_file_bytes()
+    exported_model, tensor_types = _export_deploy_onnx_with_types(
+        model, sample_input, weights_dtype
     )
 
     assert utils.get_opset_version(exported_model) >= 23
-    onnx.checker.check_model(exported_model, full_check=True)
     assert any(node.op_type == "TRT_FP4DynamicQuantize" for node in exported_model.graph.node)
-    inferred_model = onnx.shape_inference.infer_shapes(exported_model, strict_mode=True)
-    tensor_types = {
-        initializer.name: initializer.data_type for initializer in inferred_model.graph.initializer
-    }
-    for value in [
-        *inferred_model.graph.input,
-        *inferred_model.graph.value_info,
-        *inferred_model.graph.output,
-    ]:
-        if value.type.HasField("tensor_type"):
-            tensor_types[value.name] = value.type.tensor_type.elem_type
 
-    gemm_node = next(node for node in inferred_model.graph.node if node.op_type == "Gemm")
+    gemm_node = next(node for node in exported_model.graph.node if node.op_type == "Gemm")
     assert [tensor_types[input_name] for input_name in gemm_node.input] == [expected_gemm_dtype] * 3
     assert tensor_types[gemm_node.output[0]] == expected_gemm_dtype
-    assert tensor_types[inferred_model.graph.output[0].name] == expected_output_dtype
+    assert tensor_types[exported_model.graph.output[0].name] == expected_output_dtype
 
 
 @pytest.mark.parametrize(
