@@ -16,13 +16,18 @@ token-state quantization, decay approximation, and SSM replay remain later miles
 
 - Install `fla-core==0.5.1` alongside the training framework. FLA and Triton remain optional
   for ordinary ModelOpt imports and the PyTorch references.
+- On Hopper with Triton 3.4 or newer, install `tilelang==0.1.8` and `apache-tvm-ffi==0.1.9`
+  for FLA's backward fallback. This path supports **BF16 Q/K/V only** and rejects FP32
+  before launch. The adapter expands grouped Q/K heads for that backend; autograd sums their
+  gradients back to the original heads. This adds temporary Q/K activation storage.
 - The fused GDN implementation accepts **chunk size 64 only**, including backward.
 - State QDQ requires NVIDIA SM89 or newer for the native E4M3 conversion instruction.
   W-only QDQ can run on the A6000/SM86 environment used for local validation.
 - The numerical recipe supports dynamic E4M3 and `pass_through_bwd=True`. Static scales,
   clipping-aware backward, real quantization, rotations, and custom format backends are rejected.
-- Context parallelism with either numerical site enabled is rejected. Distributed/sharded
-  checkpoint qualification remains a release gate; ordinary ModelOpt save/restore is covered.
+- Context parallelism with either numerical site enabled is rejected. Distributed checkpoint
+  save/restore is qualified at TP=1 and TP=2 with unchanged topology and PP=1. Pipeline
+  parallelism and resharding across topology changes remain unqualified.
 - Megatron's dynamic-batching `ssm_prefill` and `ssm_decode` paths are outside this integration.
 
 ## Configure training
@@ -121,10 +126,24 @@ PYTHONPATH=. pytest -q \
 The GPU suite compares outputs, final states, and gradients for every differentiable
 input against the declared surrogate. It also covers packed boundaries, state layout,
 fused gate/beta activation, activation checkpointing, and unsupported-policy errors.
-The Megatron test includes an optimizer step. The `gpu` and `gpu_megatron` Nox sessions
-install the pinned FLA dependency so missing FLA does not silently remove CI coverage.
+The Megatron tests exercise state-only, W-only, and combined QAT after a distributed
+checkpoint round trip at TP=1 and TP=2, including an edited execution policy and an optimizer
+step. The `gpu` and `gpu_megatron` Nox sessions install pinned FLA and TileLang dependencies.
 
-Local validation uses Python 3.12.8, Torch 2.9.1, Triton 3.5.1, FLA 0.5.1, and A6000/SM86.
-State-QDQ GPU cases require a separate SM89+ run; the local environment also lacks
-Megatron-Core. Those gates must pass before M1 is considered fully qualified. No model
-quality, QAT recovery, or throughput result is claimed.
+Kernel validation covers two environments:
+
+- RTX A6000/SM86: Python 3.12.8, Torch 2.9.1, Triton 3.5.1, FLA 0.5.1. The suite passes
+  17 cases; 11 native state-FP8 cases and the Hopper-only capability test are skipped.
+- H100/SM90 in NeMo 26.08: Python 3.12.3, Torch 2.13.0a0 (NV 26.6), Triton 3.7.0,
+  FLA 0.5.1, TileLang 0.1.8, and TVM-FFI 0.1.9. The suite passes 20 cases, including all
+  state scale tiles and BF16 state/W gradient comparisons against float32 references.
+  Nine FP32 cases are outside the supported Hopper contract; its early rejection is tested.
+
+In the same H100 environment, Megatron-Core 0.19.1 and Transformer Engine 2.18.0 pass all
+eight integration cases: state-only, W-only, and combined QAT at TP=1 and TP=2, plus two
+context-parallel rejection cases. The training cases verify changed GDN branch outputs,
+disabled-path parity, distributed checkpoint restore, backward, and an optimizer step.
+Both direct-forward and older split-forward Megatron layouts are handled by the adapter;
+the runtime qualification above uses the direct-forward layout in 0.19.1.
+
+No model-quality, QAT recovery, or throughput result is claimed.
