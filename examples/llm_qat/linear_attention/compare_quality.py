@@ -34,6 +34,8 @@ _MATCHED_FIELDS = (
     "train_tokens_sha256",
     "eval_tokens_sha256",
     "sequence_length",
+    "prefill_tokens",
+    "loss_scope",
     "seed",
     "train_order",
     "training",

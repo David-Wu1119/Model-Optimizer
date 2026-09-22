@@ -13,6 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from contextlib import nullcontext
+
 import pytest
 import torch
 from _test_utils.torch.megatron.models import get_mcore_gpt_model
@@ -23,7 +25,10 @@ from _test_utils.torch.megatron.utils import (
 )
 
 import modelopt.torch.quantization as mtq
-from modelopt.torch.quantization.linear_attention import LinearAttentionConfig
+from modelopt.torch.quantization.linear_attention import (
+    LinearAttentionConfig,
+    linear_attention_training_phase,
+)
 from modelopt.torch.quantization.nn import TensorQuantizer
 
 pytest.importorskip("fla")  # Megatron-Core GatedDeltaNet and the state QDQ kernel need fla
@@ -90,7 +95,14 @@ def _config_for_mode(mode):
     sites = ("state", "w") if mode == "both" else ((mode,) if mode in ("state", "w") else ())
     if mode in ("prefill_fp8", "prefill_nvfp4"):
         sites = ("w",)
+    if mode.startswith("decode"):
+        sites = ("state",)
     cfg = _gdn_config(sites)
+    if mode.startswith("decode"):
+        policy = cfg["linear_attention"][0]["cfg"]
+        policy.update(backend="matmul", decode={"implementation": "triton"})
+        if mode == "decode_replay":
+            policy["decode"].update(mode="replay", replay={"window": 8})
     if mode.startswith("prefill"):
         policy = cfg["linear_attention"][0]["cfg"]
         policy["backend"] = "matmul"
@@ -119,7 +131,16 @@ def _test_gdn_qat_helper(rank, size, mode, checkpoint_path):
         tensor_model_parallel_size=size, pipeline_model_parallel_size=1, seed=SEED
     )
     model = _make_model(size)
-    forward = get_forward(model)
+    original_forward = get_forward(model)
+
+    def forward(m):
+        enabled = any(
+            getattr(getattr(layer, "linear_attention_config", None), "decode", None) is not None
+            for layer in m.modules()
+        )
+        with linear_attention_training_phase(m, [64, 64]) if enabled else nullcontext():
+            return original_forward(m)
+
     outputs = []
     handles = [
         module.register_forward_hook(
@@ -200,7 +221,17 @@ def _test_gdn_qat_helper(rank, size, mode, checkpoint_path):
 @pytest.mark.parametrize("tp_size", [1, 2])
 @pytest.mark.parametrize(
     "mode",
-    ["state", "w", "both", "prefill_fp8", "prefill_nvfp4", "prefill_arithmetic", "prefill_solve"],
+    [
+        "state",
+        "w",
+        "both",
+        "prefill_fp8",
+        "prefill_nvfp4",
+        "prefill_arithmetic",
+        "prefill_solve",
+        "decode_token",
+        "decode_replay",
+    ],
 )
 def test_gdn_qat_and_sharded_restore(request, tmp_path, tp_size, mode):
     """Train through state/W QDQ after a Megatron distributed-checkpoint round trip."""
@@ -218,7 +249,16 @@ def _test_gdn_context_parallel_helper(rank, size, mode):
 
 
 @pytest.mark.parametrize(
-    "mode", ["state", "w", "prefill_fp8", "prefill_arithmetic", "prefill_solve"]
+    "mode",
+    [
+        "state",
+        "w",
+        "prefill_fp8",
+        "prefill_arithmetic",
+        "prefill_solve",
+        "decode_token",
+        "decode_replay",
+    ],
 )
 def test_gdn_context_parallel_rejected(dist_workers_size_2, mode):
     """Reject unqualified Megatron CP even when it does not pass an FLA CP context."""

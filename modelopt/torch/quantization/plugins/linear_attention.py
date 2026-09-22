@@ -32,6 +32,7 @@ class _LinearAttentionQuantMixin(QuantModule):
             setattr(self, name, TensorQuantizer(QuantizerAttributeConfig(enable=False)))
         self.linear_attn_sites = LinearAttentionMatmulSites()
         self.linear_attention_config = LinearAttentionConfig()
+        self._linear_attention_prefill_lengths = None
 
     @property
     def _linear_attn_state(self):
@@ -50,6 +51,7 @@ class _LinearAttentionQuantMixin(QuantModule):
             or self.linear_attn_sites.is_enabled
             or bool(self.linear_attention_config.matmul or self.linear_attention_config.elementwise)
             or self.linear_attention_config.solve.method != "exact"
+            or self.linear_attention_config.decode is not None
         )
 
     def validate_linear_attention(self):

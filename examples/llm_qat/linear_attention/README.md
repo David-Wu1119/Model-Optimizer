@@ -110,3 +110,28 @@ versions, and training settings. It reports per-block deltas and a descriptive
 95% paired block-bootstrap interval. Adjacent text blocks can remain correlated;
 the interval is not a broad downstream-quality guarantee. Compare a combined
 FP8/approximation candidate against its FP8 control to isolate the approximation.
+
+## Explicit prefix and decode training
+
+See [the decode contract](../../../docs/linear_attention_decode.md). The
+`kda_decode_*.json` configurations independently expose token state QDQ, rounded
+log retention, and replay factors/anchors. Pass `--prefill-tokens 64` to
+`quality_study.py` for explicit phase metadata and suffix-only loss; the context
+also spans activation-checkpoint recomputation. `decode_study_plan.json` fixes
+validation selection before held-out test access. These configurations keep the
+exact prefill solve.
+
+Measure complete prefix/suffix forward, backward, and peak allocated memory:
+
+```bash
+python examples/llm_qat/linear_attention/benchmark_decode.py \
+  --attention kda --length 257 --prefill 64 --dim 128 --output decode-cost.json
+```
+
+The benchmark first checks outputs, final states, and all input gradients against
+the same Torch numerical policy, then runs interleaved measurements after warmup.
+Its speedup compares training implementations of the same emulation; it is not
+an inference kernel or compressed-cache benchmark.
+
+The fixed validation selection, held-out pilot results, and measured training
+costs are recorded in [the decode study](../../../docs/linear_attention_decode_study.md).

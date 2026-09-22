@@ -18,6 +18,7 @@
 import torch
 import torch.nn.functional as F
 
+from .decode_prefill import _decode_prefill
 from .matmul import _validate_operand_quantizer
 from .prefill import _matmul_prefill
 
@@ -53,6 +54,7 @@ def matmul_kda(
     cp_context=None,
     disable_recompute=False,
     return_intermediate_states=False,
+    prefill_lengths=None,
 ):
     """Run KDA chunk prefill with actual-operand QDQ and differentiable state carry.
 
@@ -90,6 +92,26 @@ def matmul_kda(
         g = -rate * F.softplus(g) if lower_bound is None else lower_bound * (rate * g).sigmoid()
     if use_beta_sigmoid_in_kernel:
         beta = beta.sigmoid() * (2.0 if allow_neg_eigval else 1.0)
+    if policy.decode is not None:
+        return _decode_prefill(
+            q,
+            k,
+            v,
+            g,
+            beta,
+            sites=sites,
+            policy=policy,
+            w_quantizer=w_quantizer,
+            state_qdq=state_qdq,
+            scale=scale,
+            initial_state=initial_state,
+            output_final_state=output_final_state,
+            cu_seqlens=cu_seqlens,
+            cu_seqlens_cpu=cu_seqlens_cpu,
+            state_v_first=state_v_first,
+            output_dtype=output_dtype,
+            prefill_lengths=prefill_lengths,
+        )
     return _matmul_prefill(
         q,
         k,

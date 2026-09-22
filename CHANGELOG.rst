@@ -13,6 +13,8 @@ Changelog
 
 *Quantization*
 
+- Add experimental GDN/KDA decode-aware QAT with explicit prefix lengths, per-token state fake quantization, rounded log retention, and encoded-update replay. Select a saved decode policy and keep its phase context active through checkpointed backward.
+
 - Added opt-in differentiable Neumann solve approximation for GDN/KDA QAT, with an explicit saved degree and a CUDA FP32 candidate. Exact solve remains the default.
 
 - Add experimental KDA prefill QAT for FLA 0.5.1 layers with stable per-channel decay and independent operand/state fake quantization. Enable the explicit ``matmul`` backend; numerical policies and quantizers persist through ModelOpt save/restore.

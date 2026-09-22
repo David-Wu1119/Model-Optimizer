@@ -14,13 +14,18 @@
 # limitations under the License.
 
 import copy
+from contextlib import nullcontext
 
 import pytest
 import torch
+from torch.utils.checkpoint import checkpoint
 
 import modelopt.torch.opt as mto
 import modelopt.torch.quantization as mtq
-from modelopt.torch.quantization.linear_attention import LinearAttentionConfig
+from modelopt.torch.quantization.linear_attention import (
+    LinearAttentionConfig,
+    linear_attention_training_phase,
+)
 from modelopt.torch.quantization.nn import TensorQuantizer
 
 KimiDeltaAttention = pytest.importorskip("fla.layers.kda").KimiDeltaAttention
@@ -35,12 +40,29 @@ def _layer():
 
 
 def _forward(model, hidden):
-    with torch.autocast("cuda", dtype=torch.bfloat16):
+    policy = getattr(model, "linear_attention_config", None)
+    phase = (
+        linear_attention_training_phase(model, [min(31, hidden.shape[1])])
+        if policy is not None and policy.decode is not None
+        else nullcontext()
+    )
+    with phase, torch.autocast("cuda", dtype=torch.bfloat16):
         return model(hidden)[0]
 
 
 @pytest.mark.parametrize(
-    "mode", ["state", "w", "prefill_fp8", "prefill_nvfp4", "arithmetic", "solve"]
+    "mode",
+    [
+        "state",
+        "w",
+        "prefill_fp8",
+        "prefill_nvfp4",
+        "arithmetic",
+        "solve",
+        "decode_token",
+        "decode_replay",
+        "decode_decay",
+    ],
 )
 @pytest.mark.timeout(180)
 def test_fla_layer_qat_restore_and_optimizer(tmp_path, mode):
@@ -77,6 +99,20 @@ def test_fla_layer_qat_restore_and_optimizer(tmp_path, mode):
             "degree": 3,
             "implementation": "triton",
         }
+    if mode.startswith("decode"):
+        cfg["quant_cfg"].append(
+            {"quantizer_name": "*kda_state_quantizer", "cfg": {**attributes, "axis": (0, 1)}}
+        )
+        policy_cfg = cfg["linear_attention"][0]["cfg"]
+        policy_cfg["state"] = {"block_v": 16}
+        policy_cfg["decode"] = {
+            "mode": "replay" if mode == "decode_replay" else "token",
+            "implementation": "triton",
+        }
+        if mode == "decode_replay":
+            policy_cfg["decode"]["replay"] = {"window": 5}
+        if mode == "decode_decay":
+            policy_cfg["decode"]["decay_log_step"] = 1 / 256
     mtq.quantize(model, cfg)
     output = _forward(model, hidden)
     assert torch.isfinite(output).all()
@@ -113,5 +149,49 @@ def test_fla_layer_qat_restore_and_optimizer(tmp_path, mode):
     torch.optim.SGD(restored.parameters(), lr=0.1).step()
     assert not torch.equal(before, restored.q_proj.weight)
     restored.eval()
-    with pytest.raises(NotImplementedError, match="chunk path"):
-        _forward(restored, hidden[:, :1])
+    if mode.startswith("decode"):
+        with (
+            linear_attention_training_phase(restored, [0]),
+            torch.autocast("cuda", dtype=torch.bfloat16),
+        ):
+            assert torch.isfinite(restored(hidden[:, :1])[0]).all()
+            with pytest.raises(NotImplementedError, match="use_cache=False"):
+                restored(hidden[:, :1], use_cache=True)
+        with (
+            pytest.raises(ValueError, match="explicit"),
+            torch.autocast("cuda", dtype=torch.bfloat16),
+        ):
+            restored(hidden)
+    else:
+        with pytest.raises(NotImplementedError, match="chunk path"):
+            _forward(restored, hidden[:, :1])
+
+
+def test_decode_phase_spans_activation_checkpoint_backward():
+    model = _layer()
+    mtq.quantize(
+        model,
+        {
+            "quant_cfg": [{"quantizer_name": "*", "enable": False}],
+            "algorithm": None,
+            "linear_attention": [
+                {
+                    "module_name": "*",
+                    "cfg": {"backend": "matmul", "decode": {"implementation": "triton"}},
+                }
+            ],
+        },
+    )
+    hidden = torch.randn(1, 73, 32, device="cuda", requires_grad=True)
+    with linear_attention_training_phase(model, [31]):
+        with torch.autocast("cuda", dtype=torch.bfloat16):
+            actual = checkpoint(lambda x: model(x)[0], hidden, use_reentrant=False)
+        actual.square().mean().backward()
+    assert model._linear_attention_prefill_lengths is None
+    assert torch.isfinite(hidden.grad).all()
+    assert torch.count_nonzero(model.q_proj.weight.grad) > 0
+    with linear_attention_training_phase(model, [0]):
+        with linear_attention_training_phase(model, [73]):
+            assert model._linear_attention_prefill_lengths == (73,)
+        assert model._linear_attention_prefill_lengths == (0,)
+    assert model._linear_attention_prefill_lengths is None

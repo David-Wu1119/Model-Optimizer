@@ -39,6 +39,8 @@ def _receipt():
         "train_tokens_sha256": "train_tokens",
         "eval_tokens_sha256": "test_tokens",
         "sequence_length": 128,
+        "prefill_tokens": None,
+        "loss_scope": "full",
         "seed": 2026,
         "train_order": [1, 0],
         "training": "attention_only",
@@ -69,7 +71,15 @@ def test_paired_quality_bound_and_failure():
 
 
 @pytest.mark.parametrize(
-    "field", ["eval_tokens_sha256", "source_sha256", "train_order", "learning_rate"]
+    "field",
+    [
+        "eval_tokens_sha256",
+        "source_sha256",
+        "train_order",
+        "learning_rate",
+        "prefill_tokens",
+        "loss_scope",
+    ],
 )
 def test_quality_refuses_unmatched_studies(field):
     control, candidate = _receipt(), _receipt()

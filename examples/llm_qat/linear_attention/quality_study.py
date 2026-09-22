@@ -22,6 +22,7 @@ import json
 import math
 import random
 import time
+from contextlib import nullcontext
 from pathlib import Path
 
 import pyarrow.parquet as pq
@@ -30,6 +31,7 @@ from fla.layers.kda import KimiDeltaAttention
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 import modelopt.torch.quantization as mtq
+from modelopt.torch.quantization.linear_attention import linear_attention_training_phase
 
 
 def _token_blocks(path, tokenizer, length, count):
@@ -43,13 +45,32 @@ def _token_blocks(path, tokenizer, length, count):
     return tensor, digest
 
 
-def _evaluate(model, blocks):
+def _phase(model, prefill_tokens):
+    return (
+        nullcontext()
+        if prefill_tokens is None
+        else linear_attention_training_phase(model, [prefill_tokens])
+    )
+
+
+def _labels(ids, prefill_tokens):
+    labels = ids.clone()
+    if prefill_tokens is not None:
+        labels[:, :prefill_tokens] = -100
+    return labels
+
+
+def _evaluate(model, blocks, prefill_tokens=None):
     model.eval()
     losses = []
-    with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
+    with (
+        _phase(model, prefill_tokens),
+        torch.no_grad(),
+        torch.autocast("cuda", dtype=torch.bfloat16),
+    ):
         for block in blocks:
             ids = block.unsqueeze(0).cuda()
-            loss = model(input_ids=ids, labels=ids, use_cache=False).loss
+            loss = model(input_ids=ids, labels=_labels(ids, prefill_tokens), use_cache=False).loss
             if not torch.isfinite(loss):
                 raise RuntimeError("Non-finite evaluation loss")
             losses.append(float(loss.detach()))
@@ -58,7 +79,7 @@ def _evaluate(model, blocks):
         "mean_nll": mean,
         "perplexity": math.exp(mean),
         "block_nll": losses,
-        "predicted_tokens": len(blocks) * (blocks.shape[1] - 1),
+        "predicted_tokens": len(blocks) * (blocks.shape[1] - max(1, prefill_tokens or 0)),
     }
 
 
@@ -78,6 +99,9 @@ def main():
     parser.add_argument("--train-steps", type=int, default=1)
     parser.add_argument("--eval-blocks", type=int, default=4)
     parser.add_argument("--length", type=int, default=128)
+    parser.add_argument(
+        "--prefill-tokens", type=int, help="Explicit prefix; score/train suffix labels only"
+    )
     parser.add_argument("--seed", type=int, default=2026)
     parser.add_argument("--learning-rate", type=float, default=1e-5)
     options = parser.parse_args()
@@ -85,6 +109,8 @@ def main():
         parser.error("length must be >=64, train-steps nonnegative, and eval-blocks positive")
     if options.train_data.resolve() == options.eval_data.resolve():
         parser.error("Training and evaluation data must be distinct splits")
+    if options.prefill_tokens is not None and not 0 <= options.prefill_tokens <= options.length:
+        parser.error("prefill-tokens must be between zero and length")
     torch.manual_seed(options.seed)
     random.seed(options.seed)
     torch.set_float32_matmul_precision("highest")
@@ -122,7 +148,7 @@ def main():
         quant_cfg = json.loads(options.quant_config.read_text())
         mtq.quantize(model, quant_cfg)
     model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
-    before = _evaluate(model, evaluation)
+    before = _evaluate(model, evaluation, options.prefill_tokens)
     trainable = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(trainable, lr=options.learning_rate, weight_decay=0)
     model.train()
@@ -139,11 +165,15 @@ def main():
         ids = train[index].unsqueeze(0).cuda()
         torch.cuda.synchronize()
         start = time.perf_counter()
-        with torch.autocast("cuda", dtype=torch.bfloat16):
-            loss = model(input_ids=ids, labels=ids, use_cache=False).loss
-        if not torch.isfinite(loss):
-            raise RuntimeError("Non-finite training loss")
-        loss.backward()
+        # Activation checkpoint recomputation needs the same explicit phase metadata.
+        with _phase(model, options.prefill_tokens):
+            with torch.autocast("cuda", dtype=torch.bfloat16):
+                loss = model(
+                    input_ids=ids, labels=_labels(ids, options.prefill_tokens), use_cache=False
+                ).loss
+            if not torch.isfinite(loss):
+                raise RuntimeError("Non-finite training loss")
+            loss.backward()
         gradients = [p.grad for p in trainable if p.grad is not None]
         if (
             len(gradients) != len(trainable)
@@ -172,15 +202,24 @@ def main():
         raise RuntimeError("Training did not update the query projection")
     peak = torch.cuda.max_memory_allocated()
     optimizer.zero_grad(set_to_none=True)
-    after = _evaluate(model, evaluation) if options.train_steps else before
+    after = _evaluate(model, evaluation, options.prefill_tokens) if options.train_steps else before
     root = Path(__file__).resolve().parents[3]
     sources = [
         root / "modelopt/torch/quantization/linear_attention" / name
-        for name in ["config.py", "kda.py", "prefill.py", "matmul.py", "solve.py"]
+        for name in [
+            "config.py",
+            "kda.py",
+            "prefill.py",
+            "matmul.py",
+            "solve.py",
+            "decode.py",
+            "decode_prefill.py",
+        ]
     ]
     sources.extend(
         [
             root / "modelopt/torch/kernels/quantization/linear_attention/neumann.py",
+            root / "modelopt/torch/kernels/quantization/linear_attention/decode.py",
             root / "modelopt/torch/quantization/plugins/kda.py",
             root / "modelopt/torch/quantization/plugins/linear_attention.py",
             Path(__file__).resolve(),
@@ -202,6 +241,8 @@ def main():
         "train_tokens_sha256": train_hash,
         "eval_tokens_sha256": eval_hash,
         "sequence_length": options.length,
+        "prefill_tokens": options.prefill_tokens,
+        "loss_scope": "full" if options.prefill_tokens is None else "suffix",
         "seed": options.seed,
         "train_order": order,
         "training": "KDA attention parameters only; FP32 AdamW, BF16 autocast, gradient checkpointing",
@@ -216,7 +257,8 @@ def main():
         "training_losses": losses,
         "gradient_norms": grad_norms,
         "step_seconds": timings,
-        "train_predicted_tokens": options.train_steps * options.length,
+        "train_predicted_tokens": options.train_steps
+        * (options.length + 1 - max(1, options.prefill_tokens or 0)),
         "peak_train_bytes": peak,
         "query_weight_changed": query_changed,
         "gpu": torch.cuda.get_device_name(),

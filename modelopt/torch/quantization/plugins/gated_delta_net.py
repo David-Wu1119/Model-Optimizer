@@ -95,6 +95,7 @@ class GatedDeltaNetStateQuantMixin(_LinearAttentionQuantMixin):
                 w_quantizer=self.gdn_w_quantizer,
                 state_qdq=quantize_state,
                 chunk_size=chunk_size,
+                prefill_lengths=self._linear_attention_prefill_lengths,
                 **kwargs,
             )
         return _state_qdq_chunk_gated_delta_rule()(

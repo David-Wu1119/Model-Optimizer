@@ -19,6 +19,7 @@ import torch
 import torch.nn.functional as F
 
 from .config import LinearAttentionConfig
+from .decode_prefill import _decode_prefill
 from .matmul import LinearAttentionMatmulSites, _validate_operand_quantizer
 from .reference import _prepare, state_fp8_qdq_reference
 from .solve import triangular_inverse
@@ -51,6 +52,7 @@ def matmul_gdn(
     state_v_first=False,
     chunk_size=64,
     cp_context=None,
+    prefill_lengths=None,
 ):
     """Execute all eight GDN prefill sites with autograd through their QDQ operators.
 
@@ -78,6 +80,26 @@ def matmul_gdn(
         beta = beta.sigmoid() * (2.0 if allow_neg_eigval else 1.0)
     if g.ndim != 3:
         raise ValueError("matmul_gdn requires scalar GDN log gates")
+    if policy.decode is not None:
+        return _decode_prefill(
+            q,
+            k,
+            v,
+            g,
+            beta,
+            sites=sites,
+            policy=policy,
+            w_quantizer=w_quantizer,
+            state_qdq=state_qdq,
+            scale=scale,
+            initial_state=initial_state,
+            output_final_state=output_final_state,
+            cu_seqlens=cu_seqlens,
+            cu_seqlens_cpu=cu_seqlens_cpu,
+            state_v_first=state_v_first,
+            output_dtype=output_dtype,
+            prefill_lengths=prefill_lengths,
+        )
     return _matmul_prefill(
         q,
         k,

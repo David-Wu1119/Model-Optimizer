@@ -16,6 +16,8 @@
 """QAT integration for the optional FLA KimiDeltaAttention layer."""
 
 import importlib.metadata
+import inspect
+from functools import lru_cache
 from types import FunctionType
 
 from ..linear_attention.kda import matmul_kda
@@ -24,6 +26,11 @@ from .custom import CUSTOM_MODEL_PLUGINS
 from .linear_attention import _LinearAttentionQuantMixin
 
 __all__ = []
+
+
+@lru_cache(maxsize=8)
+def _forward_signature(function):
+    return inspect.signature(function)
 
 
 class _QuantKimiDeltaAttention(_LinearAttentionQuantMixin):
@@ -39,6 +46,12 @@ class _QuantKimiDeltaAttention(_LinearAttentionQuantMixin):
         if not self.linear_attention_is_enabled:
             return super().forward(*args, **kwargs)
         original = super().forward.__func__
+        if self.linear_attention_config.decode is not None:
+            arguments = _forward_signature(original).bind(self, *args, **kwargs).arguments
+            if arguments.get("use_cache", False) or arguments.get("past_key_values") is not None:
+                raise NotImplementedError(
+                    "Decode-aware QAT requires use_cache=False; use explicit numerical carry for continuation"
+                )
         # Bind this invocation so copied modules cannot retain another module's quantizers.
         namespace = {
             **original.__globals__,
@@ -62,10 +75,13 @@ class _QuantKimiDeltaAttention(_LinearAttentionQuantMixin):
             policy=self.linear_attention_config,
             w_quantizer=self.kda_w_quantizer,
             state_qdq=self.kda_state_quantizer.is_enabled and self.kda_state_quantizer._if_quant,
+            prefill_lengths=self._linear_attention_prefill_lengths,
             **kwargs,
         )
 
     def _unsupported_recurrent(self, *args, **kwargs):
+        if self.linear_attention_config.decode is not None:
+            return self._quantized_chunk(*args, **kwargs)
         raise NotImplementedError(
             "KDA prefill QAT requires the chunk path; recurrent decode is not yet supported"
         )
