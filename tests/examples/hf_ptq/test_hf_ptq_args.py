@@ -35,6 +35,17 @@ from modelopt.torch.quantization.config import QuantizeConfig
 _EXAMPLES_DIR = Path(__file__).resolve().parents[3] / "examples" / "hf_ptq"
 
 
+@pytest.fixture(autouse=True)
+def clean_env(monkeypatch):
+    """Pin what the tracking reads from the environment.
+
+    ``resolve_tracking_uri`` consults $MLFLOW_TRACKING_URI, so a developer shell or runner
+    that exports it -- exactly the population this feature is built for -- would otherwise
+    flip the tracked/untracked branch under test. Tests that want the variable set it.
+    """
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+
+
 def _import_hf_ptq(monkeypatch):
     monkeypatch.syspath_prepend(str(_EXAMPLES_DIR))
     return importlib.import_module("hf_ptq")

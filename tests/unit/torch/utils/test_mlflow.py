@@ -119,8 +119,15 @@ def _unreachable(fake):
 
 
 @pytest.fixture(autouse=True)
-def deterministic_user(monkeypatch):
+def clean_env(monkeypatch):
+    """Pin what the tracking reads from the environment.
+
+    ``resolve_tracking_uri`` consults $MLFLOW_TRACKING_URI, so a developer shell or runner
+    that exports it -- exactly the population this feature is built for -- would otherwise
+    flip the tracked/untracked branch under test. Tests that want the variable set it.
+    """
     monkeypatch.setattr(getpass, "getuser", lambda: "tester")
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
 
 
 def _logger(**kwargs):

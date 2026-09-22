@@ -82,6 +82,18 @@ class FakeMlflow:
         self.status = status
 
 
+@pytest.fixture(autouse=True)
+def clean_env(monkeypatch):
+    """Pin what the tracking reads from the environment.
+
+    ``resolve_tracking_uri`` consults $MLFLOW_TRACKING_URI, so a developer shell or runner
+    that exports it -- exactly the population this feature is built for -- would otherwise
+    flip the tracked/untracked branch under test. Tests that want the variable set it.
+    """
+    monkeypatch.setattr(getpass, "getuser", lambda: "tester")
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+
+
 @pytest.fixture
 def fake_mlflow(monkeypatch):
     fake = FakeMlflow()
@@ -91,7 +103,6 @@ def fake_mlflow(monkeypatch):
 
 def _parse(monkeypatch, *argv):
     """The parser side of ``quantize.py``, limited to what the tracking reads off args."""
-    monkeypatch.setattr(getpass, "getuser", lambda: "tester")
     parser = argparse.ArgumentParser()
     parser.add_argument("--hf_model_name_or_path", default="/models/Qwen3-0.6B")
     parser.add_argument("--export_megatron_path", default="/tmp/out")

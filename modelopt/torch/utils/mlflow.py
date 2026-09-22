@@ -750,4 +750,4 @@ def drop_experiment_json(checkpoint_dir: Path | str) -> None:
     try:
         stale.unlink(missing_ok=True)
     except OSError as e:
-        print(f"Warning: could not remove stale {stale}: {e}")
+        print(f"[mlflow] WARNING: could not remove stale {stale}: {e}")
