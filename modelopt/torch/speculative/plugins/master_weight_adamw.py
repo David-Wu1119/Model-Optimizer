@@ -86,15 +86,23 @@ class MasterWeightAdamW(torch.optim.AdamW):
                     continue
                 state = self.state[p]
                 needs_master = p.dtype != torch.float32
-                if not state:
-                    if needs_master:
-                        state["master"] = p.detach().float().clone()
-                    zeros = state.get("master", p).detach().float()
-                    state["exp_avg"] = torch.zeros_like(zeros)
-                    state["exp_avg_sq"] = torch.zeros_like(zeros)
+                # Per key rather than `if not state`: a resume restores the moments without a
+                # master -- from plain AdamW, or from the fp32-draft implementation this
+                # replaces -- and an all-or-nothing guard falls straight through to
+                # `state["master"]` below and raises a bare KeyError.
+                if needs_master and "master" not in state:
+                    state["master"] = p.detach().float().clone()
+                reference = state.get("master", p)
+                for key in ("exp_avg", "exp_avg_sq", *(("max_exp_avg_sq",) if amsgrad else ())):
+                    if key not in state:
+                        state[key] = torch.zeros_like(reference, dtype=torch.float32)
+                    elif state[key].dtype != torch.float32:
+                        # Restored by a path that does not go through `load_state_dict` below;
+                        # DeepSpeed, for one, never calls it. An fp32 master with bf16 moments
+                        # is not a mixture the functional `adamw()` accepts.
+                        state[key] = state[key].float()
+                if "step" not in state:
                     state["step"] = torch.zeros((), dtype=torch.float32)
-                if amsgrad and "max_exp_avg_sq" not in state:
-                    state["max_exp_avg_sq"] = torch.zeros_like(state["exp_avg"])
                 target = state["master"] if needs_master else p
                 if needs_master:
                     downcast.append((p, target))
@@ -136,22 +144,49 @@ class MasterWeightAdamW(torch.optim.AdamW):
     def load_state_dict(self, state_dict):
         """Restore, without letting the base class round the fp32 state to the parameters.
 
-        ``Optimizer.load_state_dict`` casts every floating-point state tensor to its
-        parameter's dtype. For a bf16 model that silently rounds the master copy and both
+        ``Optimizer.load_state_dict`` casts every restored state tensor except ``step`` to
+        its parameter's dtype. For a bf16 model that silently rounds the master copy and both
         moments on every resume -- the exact loss this optimizer exists to avoid, and
         invisible, since training continues and the loss keeps falling. The incoming
-        ``state_dict`` still holds the saved fp32 tensors, so they are put back afterwards.
+        ``state_dict`` still holds the saved tensors, so they are put back afterwards, at
+        fp32: a checkpoint written by plain ``AdamW`` saved bf16 moments, and restoring those
+        verbatim would leave the feature inert for the whole resumed run.
         """
         super().load_state_dict(state_dict)
-        params = [p for group in self.param_groups for p in group["params"]]
+        # The positional id -> parameter map the base class builds, rather than an integer
+        # index into a flattened parameter list: FSDP2 restores through torch's distributed
+        # checkpoint, which keys the state by module FQN and deliberately does not convert
+        # back, so an integer-only lookup skips every entry and leaves the downcast in place.
+        id_map = dict(
+            zip(
+                [ident for group in state_dict["param_groups"] for ident in group["params"]],
+                [p for group in self.param_groups for p in group["params"]],
+            )
+        )
         for param_id, saved in state_dict["state"].items():
-            if not isinstance(param_id, int) or param_id >= len(params):
+            param = id_map.get(param_id)
+            if param is None:
                 continue
-            param = params[param_id]
             for key in _FP32_STATE_KEYS:
                 value = saved.get(key)
                 if isinstance(value, torch.Tensor):
-                    self.state[param][key] = value.detach().clone().to(device=param.device)
+                    self.state[param][key] = value.detach().to(
+                        device=param.device, dtype=torch.float32, copy=True
+                    )
+        for group in self.param_groups:
+            if group.get("fused"):
+                # Every hyperparameter comes from the checkpoint, not from this run, so a
+                # checkpoint saved under the default `adamw_torch_fused` restores `fused` here
+                # and undoes what built this optimizer in the first place -- and `step()`
+                # refuses fused before it ever reaches the master.
+                group["fused"], group["foreach"] = False, True
+            for param in group["params"]:
+                state = self.state.get(param)
+                if state is not None and param.dtype == torch.float32 and "master" in state:
+                    # Saved by a run whose draft was bf16. On an fp32 parameter `step()` updates
+                    # the parameter directly, so a master left here never advances, is written
+                    # back out, and silently rolls the weights back on the next bf16 resume.
+                    state.pop("master")
 
 
 class VerifyMasterWeightsCallback(TrainerCallback):

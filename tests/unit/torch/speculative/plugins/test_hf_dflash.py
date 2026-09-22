@@ -1038,6 +1038,107 @@ class TestDFlashFp32MasterWeights:
                 assert got[key].dtype == torch.float32, f"{key} came back as {got[key].dtype}"
                 assert torch.equal(got[key], state[key]), key
 
+    def test_resume_from_plain_adamw_upcasts_instead_of_crashing(self):
+        """The upgrade path every in-flight job takes, and the one that used to crash.
+
+        A checkpoint written before this flag defaulted to ``True`` holds moments but no
+        master, so an all-or-nothing state guard skipped the master and ``step()`` died on a
+        bare ``KeyError``. Those moments are also bf16, so restoring them verbatim would trade
+        the crash for a run where the feature is silently absent.
+        """
+        model = _converted(fp32_master_weights=True)
+        model.train()
+        trainable = [p for p in model.dflash_module.parameters() if p.requires_grad]
+
+        plain = torch.optim.AdamW(trainable, lr=1e-2)
+        model(**_dflash_batch(model.dflash_config.vocab_size)).loss.backward()
+        plain.step()
+        model.zero_grad(set_to_none=True)
+        saved = plain.state_dict()
+        assert {
+            state[key].dtype for state in plain.state.values() for key in ("exp_avg", "exp_avg_sq")
+        } == {torch.bfloat16}
+
+        resumed = MasterWeightAdamW(trainable, lr=1e-2)
+        resumed.load_state_dict(saved)
+        model(**_dflash_batch(model.dflash_config.vocab_size)).loss.backward()
+        resumed.step()
+
+        for key in ("master", "exp_avg", "exp_avg_sq"):
+            seen = {state[key].dtype for state in resumed.state.values()}
+            assert seen == {torch.float32}, f"{key}: {seen}"
+        assert {p.dtype for p in trainable} == {torch.bfloat16}
+
+    def test_resume_keyed_by_name_still_restores_fp32(self):
+        """FSDP2 restores through torch's distributed checkpoint, which keys state by FQN.
+
+        It hands ``load_state_dict`` a dict whose ids are strings rather than the integers a
+        plain ``torch.save`` round trip produces, and does not convert them back. Anything
+        that only recognises integer ids silently restores nothing and leaves the base class's
+        downcast to the parameter dtype standing.
+        """
+        model = _converted(fp32_master_weights=True)
+        model.train()
+        trainable = [p for p in model.dflash_module.parameters() if p.requires_grad]
+        optimizer = MasterWeightAdamW(trainable, lr=1e-2)
+        model(**_dflash_batch(model.dflash_config.vocab_size)).loss.backward()
+        optimizer.step()
+
+        saved = optimizer.state_dict()
+        names = {i: f"dflash_module.p{i}" for i in range(len(trainable))}
+        saved["state"] = {names[i]: state for i, state in saved["state"].items()}
+        for group in saved["param_groups"]:
+            group["params"] = [names[i] for i in group["params"]]
+
+        restored = MasterWeightAdamW(trainable, lr=1e-2)
+        restored.load_state_dict(saved)
+        for key in ("master", "exp_avg", "exp_avg_sq"):
+            seen = {state[key].dtype for state in restored.state.values()}
+            assert seen == {torch.float32}, f"{key}: {seen}"
+
+    def test_resume_does_not_restore_the_fused_kernel(self):
+        """``load_state_dict`` takes every hyperparameter from the checkpoint, not this run.
+
+        ``TrainingArguments.optim`` defaults to ``adamw_torch_fused``, so a checkpoint written
+        before the flag was on carries ``fused``; restoring it undoes the switch to foreach
+        that building this optimizer performs, and ``step()`` refuses fused before it reaches
+        the master. The resume would fail on the most ordinary checkpoint there is.
+        """
+        model = _converted(fp32_master_weights=True)
+        model.train()
+        trainable = [p for p in model.dflash_module.parameters() if p.requires_grad]
+        plain = torch.optim.AdamW(trainable, lr=1e-2)
+        model(**_dflash_batch(model.dflash_config.vocab_size)).loss.backward()
+        plain.step()
+        model.zero_grad(set_to_none=True)
+        saved = plain.state_dict()
+        for group in saved["param_groups"]:
+            group["fused"] = True
+
+        resumed = MasterWeightAdamW(trainable, lr=1e-2, foreach=True)
+        resumed.load_state_dict(saved)
+        assert not any(group["fused"] for group in resumed.param_groups)
+        model(**_dflash_batch(model.dflash_config.vocab_size)).loss.backward()
+        resumed.step()
+
+    def test_resume_drops_a_master_the_parameter_no_longer_needs(self):
+        """A master left on an fp32 parameter goes stale and later rolls the weights back.
+
+        ``step()`` updates an fp32 parameter directly, so a master restored onto one never
+        advances again -- but it is still written to the next checkpoint, and the resume after
+        that copies it over a parameter thousands of steps newer.
+        """
+        bf16 = torch.nn.Linear(16, 16, bias=False).to(torch.bfloat16)
+        source = MasterWeightAdamW(bf16.parameters(), lr=1e-2)
+        bf16(torch.randn(4, 16, dtype=torch.bfloat16)).pow(2).mean().backward()
+        source.step()
+        assert all("master" in state for state in source.state.values())
+
+        fp32 = torch.nn.Linear(16, 16, bias=False)
+        resumed = MasterWeightAdamW(fp32.parameters(), lr=1e-2)
+        resumed.load_state_dict(source.state_dict())
+        assert all("master" not in state for state in resumed.state.values())
+
     def test_an_fp32_model_is_plain_adamw(self):
         """No master copy where there is no precision to recover, and identical arithmetic."""
         torch.manual_seed(3)
