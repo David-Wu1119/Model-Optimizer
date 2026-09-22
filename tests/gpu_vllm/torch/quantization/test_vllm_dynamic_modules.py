@@ -448,6 +448,31 @@ def test_quant_vllm_attention_forward_skips_only_in_kernel_qv_quantization():
     assert attention.v_bmm_quantizer.call_count == 2
 
 
+@pytest.mark.parametrize("wrapper", ["model", "language_model"])
+def test_disable_compilation_handles_missing_marker(wrapper):
+    inner_model = SimpleNamespace()
+    if wrapper == "model":
+        model = SimpleNamespace(model=inner_model)
+    else:
+        model = SimpleNamespace(language_model=SimpleNamespace(model=inner_model))
+
+    with disable_compilation(model):
+        assert inner_model.do_not_compile is True
+
+    assert not hasattr(inner_model, "do_not_compile")
+
+
+@pytest.mark.parametrize("initial_value", [False, True])
+def test_disable_compilation_restores_existing_marker(initial_value):
+    inner_model = SimpleNamespace(do_not_compile=initial_value)
+    model = SimpleNamespace(model=inner_model)
+
+    with disable_compilation(model):
+        assert inner_model.do_not_compile is True
+
+    assert inner_model.do_not_compile is initial_value
+
+
 def test_attention_kv_defaults_set_only_uncalibrated_dynamic_block16_quantizers():
     calibrated_amax = 7.25
     layer = SimpleNamespace(

@@ -241,28 +241,28 @@ _moe_fakequant_active: contextvars.ContextVar[bool] = contextvars.ContextVar(
 
 @contextmanager
 def disable_compilation(model):
-    """Disable compilation for a model.
+    """Temporarily disable compilation for a model.
 
     Args:
         model: The model to disable compilation for.
     """
-    do_not_compile = True
     if hasattr(model, "model"):
-        do_not_compile = model.model.do_not_compile
-        model.model.do_not_compile = True
+        inner_model = model.model
     elif hasattr(model, "language_model"):
-        do_not_compile = model.language_model.model.do_not_compile
-        model.language_model.model.do_not_compile = True
+        inner_model = model.language_model.model
     else:
         raise ValueError("Model does not have a model or language_model attribute")
 
+    had_do_not_compile = hasattr(inner_model, "do_not_compile")
+    previous_do_not_compile = getattr(inner_model, "do_not_compile", None)
+    inner_model.do_not_compile = True
     try:
         yield
     finally:
-        if hasattr(model, "model"):
-            model.model.do_not_compile = do_not_compile
-        elif hasattr(model, "language_model"):
-            model.language_model.model.do_not_compile = do_not_compile
+        if had_do_not_compile:
+            inner_model.do_not_compile = previous_do_not_compile
+        else:
+            del inner_model.do_not_compile
 
 
 # vLLM Attention stores ``device``/``dtype`` as plain attrs; ``dtype`` may be a string
