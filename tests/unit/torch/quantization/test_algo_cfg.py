@@ -205,19 +205,6 @@ def test_fallback_algorithm_excludes_scopes_claimed_by_entries(quantized):
     assert not (fallback_quantizers & mlp_quantizers)
 
 
-def test_per_stage_settings_are_rejected_at_plan_level():
-    from modelopt.torch.quantization.config import CalibrationPlanConfig
-
-    entry = [{"module_name": "*", "cfg": ["max"]}]
-    CalibrationPlanConfig(algo_cfg=entry)  # plain plan is fine
-
-    # `layerwise` and `moe_calib_experts_ratio` are inherited from QuantizeAlgorithmConfig but
-    # only ever read per stage, so accepting them on the plan would silently drop them.
-    for ignored in ({"layerwise": {"enable": True}}, {"moe_calib_experts_ratio": 0.5}):
-        with pytest.raises(ValidationError, match="never read"):
-            CalibrationPlanConfig(algo_cfg=entry, **ignored)
-
-
 # ---------------------------------------------------------------------------- validation
 
 REJECTIONS = [
@@ -639,7 +626,7 @@ def test_scoping_never_toggles_enable_state():
     assert before == after
 
 
-def test_scoped_plan_records_a_single_calibration_mode():
+def test_each_stage_is_recorded_as_its_own_calibration_mode():
     from modelopt.torch.opt.conversion import ModeloptStateManager
 
     model = mtq.quantize(
@@ -652,7 +639,7 @@ def test_scoped_plan_records_a_single_calibration_mode():
         _forward_loop,
     )
     modes = [str(mode) for mode, _, _ in ModeloptStateManager(model).modes_with_states()]
-    assert modes == ["quantize", "calibration_plan"]
+    assert modes == ["quantize", "max_calibrate", "mse_calibrate"]
 
 
 def test_a_max_collect_after_mse_does_not_reenter_the_spent_calibrator():
@@ -713,7 +700,8 @@ def test_awq_needs_a_dynamic_grid_and_static_never_downgrades():
 
 
 def test_fp8_scale_sweep_requires_static_and_a_dynamic_grid_is_upgraded():
-    from modelopt.torch.quantization.algo_cfg import capabilities_for, prepare_grid
+    from modelopt.torch.quantization.algo_cfg import capabilities_for, stage_targets
+    from modelopt.torch.quantization.mode import BaseCalibrateModeDescriptor, CalibrateModeRegistry
 
     assert capabilities_for("mse", {"fp8_scale_sweep": True}).requires_grid == "static"
     assert capabilities_for("mse").requires_grid is None
@@ -724,5 +712,7 @@ def test_fp8_scale_sweep_requires_static_and_a_dynamic_grid_is_upgraded():
     )[0]
     quantizer = model[0].weight_quantizer
     assert quantizer.block_sizes["type"] == "dynamic"
-    prepare_grid(model, stage)
+    descriptor = CalibrateModeRegistry[BaseCalibrateModeDescriptor._get_mode_name(stage.algo)]
+    _, quantizers = stage_targets(model, stage)
+    assert type(descriptor).prepare(model, quantizers, stage.cfg)
     assert model[0].weight_quantizer.block_sizes["type"] == "static"

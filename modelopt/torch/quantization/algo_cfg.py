@@ -32,7 +32,6 @@ __all__ = [
     "CalibrationPlan",
     "capabilities_for",
     "compile_algo_cfg",
-    "prepare_grid",
     "stage_predicate",
 ]
 
@@ -560,22 +559,3 @@ def derive_handoff(model: nn.Module, plan: CalibrationPlan, i: int) -> dict:
 def _stage_targets(model: nn.Module, stage: AlgoStage) -> set[str]:
     modules, quantizers = stage_targets(model, stage)
     return modules | quantizers
-
-
-def prepare_grid(model: nn.Module, stage: AlgoStage) -> bool:
-    """Upgrade this stage's NVFP4 weight quantizers to a static grid if it requires one.
-
-    Returns ``True`` when the grid changed. The stage's own ``max_calibrate`` then seeds the
-    per-block amax and promotes; any amax an earlier stage produced described the old grid.
-    """
-    caps = stage.capabilities
-    if caps is None or caps.requires_grid != "static":
-        return False
-    _, quantizers = stage_targets(model, stage)
-    upgrade = [q for q in quantizers if getattr(model.get_submodule(q), "is_nvfp4_dynamic", False)]
-    for name in upgrade:
-        quantizer = model.get_submodule(name)
-        quantizer.block_sizes["type"] = "static"
-        # A dynamic grid's amax is one global scalar and means nothing per block.
-        quantizer.reset_amax()
-    return bool(upgrade)

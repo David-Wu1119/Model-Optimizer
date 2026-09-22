@@ -45,17 +45,12 @@ from .algo_cfg import (
     WEIGHT_AMAX,
     AlgoCapabilities,
     capabilities_for,
-    compile_algo_cfg,
-    derive_handoff,
-    prepare_grid,
-    stage_predicate,
 )
 from .compress import compress_convert, compress_restore, update_compress_metadata
 from .config import (
     AWQClipCalibConfig,
     AWQFullCalibConfig,
     AWQLiteCalibConfig,
-    CalibrationPlanConfig,
     CompressConfig,
     GPTQCalibConfig,
     LocalHessianCalibConfig,
@@ -91,7 +86,6 @@ from .model_calib import (
     smoothquant,
     svdquant,
 )
-from .utils import print_rank_0
 
 __all__ = ["BaseCalibrateModeDescriptor"]
 
@@ -195,7 +189,7 @@ class RealQuantizeModeDescriptor(ModeDescriptor):
     def next_modes(self) -> set[str] | None:
         """Real quantization should be the last mode in the chain."""
         # TODO: update this to support QLoRA
-        return {"max_calibrate", "calibration_plan", "eagle"}
+        return {"max_calibrate", "eagle"}
 
     @property
     def config_class(self) -> type[ModeloptBaseConfig]:
@@ -372,6 +366,30 @@ class BaseCalibrateModeDescriptor(ModeDescriptor):
     )
 
     @classmethod
+    def prepare(cls, model: nn.Module, quantizers: set[str], cfg: dict) -> bool:
+        """Bring ``quantizers`` into the state this algorithm needs; ``True`` if anything changed.
+
+        Runs at the start of the stage that needs it rather than the end of the one before: the
+        requirement belongs to the consumer, and a standalone run must not be dragged into a
+        state it never asked for. The default implements ``requires_grid``; override for
+        anything an algorithm needs beyond that.
+        """
+        caps = cls.capabilities_for_cfg(cfg)
+        if caps.requires_grid != "static":
+            return False
+        upgrade = [
+            name
+            for name in quantizers
+            if getattr(model.get_submodule(name), "is_nvfp4_dynamic", False)
+        ]
+        for name in upgrade:
+            quantizer = model.get_submodule(name)
+            quantizer.block_sizes["type"] = "static"
+            # A dynamic grid's amax is one global scalar and means nothing per block.
+            quantizer.reset_amax()
+        return bool(upgrade)
+
+    @classmethod
     def capabilities_for_cfg(cls, cfg: dict) -> AlgoCapabilities:
         """Capabilities given this algorithm's own kwargs.
 
@@ -422,15 +440,17 @@ class BaseCalibrateModeDescriptor(ModeDescriptor):
             "either define it or override the `convert` method!"
         )
 
-        def wrapped_func(model, config, forward_loop=None):
-            # Access _calib_func as a class attribute to avoid binding
-            # Check if _calib_func is defined as a class attribute
+        def wrapped_func(model, config, forward_loop=None, should_process=None, handoff=None):
+            # `should_process` and `handoff` arrive via `apply_mode(mode_kwargs=...)`: they are
+            # derived from the plan, so they reach the algorithm but are never saved in state.
             return wrapped_calib_func(
                 model,
                 config,
                 forward_loop,
                 func=self.__class__._calib_func,
                 supports_layerwise=self.__class__._supports_layerwise,
+                should_process=should_process,
+                handoff=handoff,
             )
 
         return wrapped_func
@@ -740,86 +760,6 @@ class GPTQModeDescriptor(BaseCalibrateModeDescriptor):
         consumes=frozenset({WEIGHT, "acts", WEIGHT_AMAX}),
         produces=frozenset({WEIGHT, WEIGHT_AMAX, INPUT_AMAX}),
     )
-
-
-def calibration_plan_convert(
-    model: ModelLikeModule,
-    config: CalibrationPlanConfig,
-    forward_loop: ForwardLoop | None = None,
-) -> ConvertReturnType:
-    """Run a compiled calibration plan and record it as a single mode.
-
-    Compile (pure) then execute (effectful):
-
-    1. :func:`compile_algo_cfg <modelopt.torch.quantization.algo_cfg.compile_algo_cfg>` lowers
-       ``algo_cfg`` + ``algorithm`` into one ordered stage list and validates it against the
-       model structure.
-    2. Each stage runs in order through the same :func:`wrapped_calib_func` the whole-model
-       algorithms use, with a ``should_process`` write-mask built from the stage's scope and
-       any handoff kwargs implied by what earlier stages produced.
-
-    Stages are serial in this phase — each runs its own forward.  Batching independent
-    stages onto a shared forward is a later optimization the declared capabilities already
-    carry enough information for (``shareable_forward``).
-    """
-    plan = compile_algo_cfg(
-        {"algo_cfg": config.algo_cfg, "algorithm": config.algorithm},
-        model,
-    )
-    print_rank_0(f"calibration_plan: {' -> '.join(str(s.algo) for s in plan)}")
-
-    for i, stage in enumerate(plan):
-        if stage.algo is None:
-            continue
-        descriptor = CalibrateModeRegistry[
-            BaseCalibrateModeDescriptor._get_mode_name(stage.algo, check=True)
-        ]
-        # Only algorithms exposing a knob for it can act on a handoff; the rest would reject
-        # the extra kwarg.
-        grid_changed = prepare_grid(model, stage)
-        handoff = {} if grid_changed else derive_handoff(model, plan, i)
-        stage_config = descriptor.config_class(**stage.cfg)
-        wrapped_calib_func(
-            model,
-            stage_config,
-            forward_loop,
-            func=type(descriptor)._calib_func,
-            supports_layerwise=type(descriptor)._supports_layerwise,
-            should_process=stage_predicate(model, stage),
-            handoff=handoff,
-        )
-
-    metadata = {}
-    update_quantize_metadata(model, config, metadata)
-    return model, metadata
-
-
-@CalibrateModeRegistry.register_mode
-class CalibrationPlanModeDescriptor(BaseCalibrateModeDescriptor):
-    """Mode for a compiled, scoped calibration plan.
-
-    One mode covers an arbitrary number of stages: recording one mode per stage would
-    bloat the saved state (``auto_quantize`` would emit hundreds).  Restore needs nothing
-    algorithm-specific — the generic quantizer-state snapshot already captures amax,
-    pre_quant_scale, num_bits and friends.
-    """
-
-    _calib_func = None
-
-    @property
-    def name(self) -> str:
-        """Returns the value (str representation) of the mode."""
-        return "calibration_plan"
-
-    @property
-    def config_class(self) -> type[QuantizeAlgorithmConfig]:
-        """Specifies the config class for the mode."""
-        return CalibrationPlanConfig
-
-    @property
-    def convert(self) -> ConvertEntrypoint:
-        """The mode's entrypoint for converting a model."""
-        return calibration_plan_convert
 
 
 @CalibrateModeRegistry.register_mode

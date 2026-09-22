@@ -1640,46 +1640,6 @@ class AlgoCfgEntry(ModeloptBaseConfig):
         return "quantizer_name", self.quantizer_name  # type: ignore[return-value]
 
 
-class CalibrationPlanConfig(QuantizeAlgorithmConfig):
-    """Config for the ``calibration_plan`` mode — the compiled, scoped calibration plan.
-
-    The saved config is the user's *intent* (``algo_cfg`` + ``algorithm``), not the compiled
-    stage list: the plan is a pure function of the config and the model structure, so it is
-    re-derivable, and keeping the intent makes the recorded state readable.
-    """
-
-    method: Literal["calibration_plan"] = ModeloptField("calibration_plan")
-
-    algo_cfg: list[AlgoCfgEntry] | None = ModeloptField(
-        default=None,
-        title="Scoped calibration pipelines; see :class:`AlgoCfgEntry`.",
-    )
-
-    algorithm: QuantizeAlgoCfgType = ModeloptField(
-        default=None,
-        title="Model-wide fallback algorithm for targets no ``algo_cfg`` entry matches.",
-    )
-
-    @model_validator(mode="after")
-    def _reject_per_stage_settings_at_plan_level(self):
-        """Inherited per-algorithm settings mean nothing on the plan; they are per stage."""
-        ignored = [
-            name
-            for name, value in (
-                ("layerwise", self.layerwise != LayerwiseConfig()),
-                ("moe_calib_experts_ratio", self.moe_calib_experts_ratio is not None),
-            )
-            if value
-        ]
-        if ignored:
-            raise ValueError(
-                f"{sorted(ignored)} is inherited by the calibration plan but never read: each "
-                "stage carries its own. Set it inside the stage instead, e.g. "
-                "cfg: [{'method': 'local_hessian', 'layerwise': {'enable': True}}]."
-            )
-        return self
-
-
 class QuantizeConfig(ModeloptBaseConfig):
     """Default configuration for ``quantize`` mode."""
 

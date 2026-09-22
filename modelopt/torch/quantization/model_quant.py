@@ -61,6 +61,46 @@ __all__ = [
 
 
 # TODO: Descriptors for the supported algorithms
+
+
+def _apply_calibration_plan(model, algo_cfg, algorithm, forward_loop) -> None:
+    """Compile `algo_cfg` into ordered stages and apply each as its own calibration mode.
+
+    Compile first, so a bad plan fails before any expensive calibration. Each stage is then a
+    real mode application: it is recorded in the modelopt state under its own name, and the
+    mode graph checks the hand-off. The values derived from the plan -- the write-mask, the
+    hand-off kwargs -- travel through `mode_kwargs`, which reaches the convert entrypoint but
+    is deliberately never saved.
+    """
+    from .algo_cfg import compile_algo_cfg, derive_handoff, stage_predicate, stage_targets
+    from .mode import BaseCalibrateModeDescriptor, CalibrateModeRegistry
+    from .utils import print_rank_0
+
+    plan = compile_algo_cfg({"algo_cfg": algo_cfg, "algorithm": algorithm}, model)
+    print_rank_0(f"calibration plan: {' -> '.join(str(s.algo) for s in plan)}")
+    for i, stage in enumerate(plan):
+        if stage.algo is None:
+            continue
+        name = BaseCalibrateModeDescriptor._get_mode_name(stage.algo, check=True)
+        descriptor = CalibrateModeRegistry[name]
+        _, quantizers = stage_targets(model, stage)
+        # A grid change invalidates the hand-off: the amax an earlier stage produced described
+        # the old grid, so this stage must re-initialize rather than skip.
+        changed = type(descriptor).prepare(model, quantizers, stage.cfg)
+        apply_mode(
+            model,
+            mode=[(name, stage.cfg)],
+            registry=CalibrateModeRegistry,
+            mode_kwargs=[
+                {
+                    "forward_loop": forward_loop,
+                    "should_process": stage_predicate(model, stage),
+                    "handoff": {} if changed else derive_handoff(model, plan, i),
+                }
+            ],
+        )
+
+
 def calibrate(
     model: nn.Module,
     algorithm: QuantizeAlgoCfgType = "max",
@@ -120,18 +160,15 @@ def calibrate(
     # `algorithm` into one ordered stage list and records a single mode. Without `algo_cfg`
     # the plan is the all-"*" single-stage case, which is exactly what the legacy per-algorithm
     # modes already do -- so that path is left alone and its recorded state stays byte-identical.
-    mode = (
-        [("calibration_plan", {"algo_cfg": algo_cfg, "algorithm": algorithm})]
-        if algo_cfg
-        else get_modelike_from_algo_cfg(algorithm)
-    )
-
     with forward_with_reshard(model):
-        apply_mode(
-            model,
-            mode=mode,
-            mode_kwargs={"forward_loop": forward_loop},
-        )
+        if algo_cfg:
+            _apply_calibration_plan(model, algo_cfg, algorithm, forward_loop)
+        else:
+            apply_mode(
+                model,
+                mode=get_modelike_from_algo_cfg(algorithm),
+                mode_kwargs={"forward_loop": forward_loop},
+            )
 
     for name, module in model.named_modules():
         if isinstance(module, TensorQuantizer):
