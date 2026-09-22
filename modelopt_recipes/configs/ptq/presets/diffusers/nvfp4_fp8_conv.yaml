@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Diffusers NVFP4 preset with dynamic E2M1 block quantization and FP8 softmax.
+# Diffusers SDXL preset with dynamic NVFP4 Linears and per-tensor FP8 Conv2d layers.
 
 # modelopt-schema: modelopt.torch.quantization.config.QuantizeConfig
 imports:
@@ -24,17 +24,30 @@ imports:
 algorithm: max
 quant_cfg:
   - $import: base_disable_all
-  - quantizer_name: '*weight_quantizer'
+  - parent_class: nn.Linear
+    quantizer_name: '*weight_quantizer'
     cfg:
       $import: nvfp4
-  - quantizer_name: '*input_quantizer'
+  - parent_class: nn.Linear
+    quantizer_name: '*input_quantizer'
     cfg:
       $import: nvfp4
+  - parent_class: nn.Linear
+    quantizer_name: '*to_[qkv].input_quantizer'
+    enable: false
+  - parent_class: nn.Linear
+    quantizer_name: '*to_[qkv].weight_quantizer'
+    enable: false
+  - parent_class: nn.Conv2d
+    quantizer_name: '*weight_quantizer'
+    cfg:
+      $import: fp8
+  - parent_class: nn.Conv2d
+    quantizer_name: '*input_quantizer'
+    cfg:
+      $import: fp8
   - quantizer_name: '*output_quantizer'
     enable: false
   - quantizer_name: '*softmax_quantizer'
     cfg:
       $import: fp8
-  - parent_class: 'nn.LayerNorm'
-    quantizer_name: '*'
-    enable: false
