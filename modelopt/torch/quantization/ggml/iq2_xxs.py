@@ -37,6 +37,7 @@ https://github.com/ggml-org/llama.cpp/blob/9b05354ec6fb58b4e665e9a39ebc40285c015
 
 import torch
 
+from ..extensions import get_cuda_ext_ggml
 from .codebooks import iq2_xxs_grid_bytes
 from .common import (
     GGML_BLOCK_SIZE,
@@ -75,6 +76,7 @@ _IQ2_XXS_PEAK_TO_RMS_TAPER = 0.035
 _DEFAULT_BLOCK_CHUNK_SIZE = 512
 # The decode runs on every forward and is launch-bound, so it takes a much larger chunk.
 _DEFAULT_DECODE_CHUNK_SIZE = 4096
+_SCALE_BLOCK_CHUNK_SIZE = 4096
 
 _GRID_CACHE: dict[torch.device, torch.Tensor] = {}
 
@@ -190,8 +192,7 @@ def quantize_iq2_xxs(
     Returned shapes are ``[*weight.shape[:-1], weight.shape[-1] // 256, 66]``
     and ``[weight.ndim]``. The packed payload remains on the weight's device;
     the logical-shape metadata is kept on CPU. Non-finite input elements are
-    treated as zero during packing. There is no CUDA encoder for this format
-    yet, so packing always runs the torch search.
+    treated as zero during packing.
     """
     validate_weight(weight, "IQ2_XXS")
     validate_block_chunk_size(block_chunk_size)
@@ -199,15 +200,25 @@ def quantize_iq2_xxs(
     logical_shape = torch.tensor(weight.shape, dtype=torch.int64)
     blocks = weight.contiguous().reshape(-1, IQ2_XXS_BLOCK_SIZE)
     grid = iq2_xxs_grid(weight.device)
-    chunks = [
-        _encode_blocks(blocks[start : start + block_chunk_size], grid)
-        for start in range(0, blocks.shape[0], block_chunk_size)
-    ]
     packed_shape = (
         *weight.shape[:-1],
         weight.shape[-1] // IQ2_XXS_BLOCK_SIZE,
         IQ2_XXS_BLOCK_BYTES,
     )
+    if weight.is_cuda:
+        extension = get_cuda_ext_ggml()
+        if extension is not None:
+            scale_chunks = [
+                _predict_iq2_xxs_scales(blocks[start : start + _SCALE_BLOCK_CHUNK_SIZE])
+                for start in range(0, blocks.shape[0], _SCALE_BLOCK_CHUNK_SIZE)
+            ]
+            packed = extension.iq2_xxs_pack(blocks, grid, torch.cat(scale_chunks))
+            return packed.reshape(packed_shape), logical_shape
+
+    chunks = [
+        _encode_blocks(blocks[start : start + block_chunk_size], grid)
+        for start in range(0, blocks.shape[0], block_chunk_size)
+    ]
     return torch.cat(chunks).reshape(packed_shape), logical_shape
 
 

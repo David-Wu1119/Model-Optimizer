@@ -39,6 +39,7 @@ https://github.com/ggml-org/llama.cpp/blob/9b05354ec6fb58b4e665e9a39ebc40285c015
 
 import torch
 
+from ..extensions import get_cuda_ext_ggml
 from .common import (
     GGML_BLOCK_SIZE,
     fake_quantize_with_cache,
@@ -75,6 +76,7 @@ _IQ1_M_GROUPS = 32
 _IQ1_M_SUBBLOCKS = 8
 _DEFAULT_BLOCK_CHUNK_SIZE = 1024
 _DEFAULT_DECODE_CHUNK_SIZE = 4096
+_SCALE_BLOCK_CHUNK_SIZE = 4096
 
 
 def _predict_iq1_m_scales(blocks: torch.Tensor) -> torch.Tensor:
@@ -183,8 +185,7 @@ def quantize_iq1_m(
     """Pack a floating-point weight into GGML-compatible IQ1_M blocks.
 
     Returned shapes are ``[*weight.shape[:-1], weight.shape[-1] // 256, 56]``
-    and ``[weight.ndim]``. There is no CUDA encoder for this format yet, so
-    packing always runs the torch search.
+    and ``[weight.ndim]``.
     """
     validate_weight(weight, "IQ1_M")
     validate_block_chunk_size(block_chunk_size)
@@ -192,11 +193,21 @@ def quantize_iq1_m(
     logical_shape = torch.tensor(weight.shape, dtype=torch.int64)
     blocks = weight.contiguous().reshape(-1, IQ1_M_BLOCK_SIZE)
     grid = iq1_s_grid(weight.device)
+    packed_shape = (*weight.shape[:-1], weight.shape[-1] // IQ1_M_BLOCK_SIZE, IQ1_M_BLOCK_BYTES)
+    if weight.is_cuda:
+        extension = get_cuda_ext_ggml()
+        if extension is not None:
+            scale_chunks = [
+                _predict_iq1_m_scales(blocks[start : start + _SCALE_BLOCK_CHUNK_SIZE])
+                for start in range(0, blocks.shape[0], _SCALE_BLOCK_CHUNK_SIZE)
+            ]
+            packed = extension.iq1_m_pack(blocks, grid, torch.cat(scale_chunks))
+            return packed.reshape(packed_shape), logical_shape
+
     chunks = [
         _encode_blocks(blocks[start : start + block_chunk_size], grid)
         for start in range(0, blocks.shape[0], block_chunk_size)
     ]
-    packed_shape = (*weight.shape[:-1], weight.shape[-1] // IQ1_M_BLOCK_SIZE, IQ1_M_BLOCK_BYTES)
     return torch.cat(chunks).reshape(packed_shape), logical_shape
 
 

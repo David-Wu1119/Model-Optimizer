@@ -37,6 +37,7 @@ https://github.com/ggml-org/llama.cpp/blob/9b05354ec6fb58b4e665e9a39ebc40285c015
 
 import torch
 
+from ..extensions import get_cuda_ext_ggml
 from .codebooks import iq2_s_grid_bytes
 from .common import (
     GGML_BLOCK_SIZE,
@@ -71,6 +72,7 @@ _IQ2_S_PEAK_TO_RMS_TAPER = 0.035
 # The grid is twice IQ2_XS's, so the same search tile costs twice the memory.
 _DEFAULT_BLOCK_CHUNK_SIZE = 128
 _DEFAULT_DECODE_CHUNK_SIZE = 4096
+_SCALE_BLOCK_CHUNK_SIZE = 4096
 
 _GRID_CACHE: dict[torch.device, torch.Tensor] = {}
 
@@ -162,8 +164,7 @@ def quantize_iq2_s(
     """Pack a floating-point weight into GGML-compatible IQ2_S blocks.
 
     Returned shapes are ``[*weight.shape[:-1], weight.shape[-1] // 256, 82]``
-    and ``[weight.ndim]``. There is no CUDA encoder for this format yet, so
-    packing always runs the torch search.
+    and ``[weight.ndim]``.
     """
     validate_weight(weight, "IQ2_S")
     validate_block_chunk_size(block_chunk_size)
@@ -171,11 +172,21 @@ def quantize_iq2_s(
     logical_shape = torch.tensor(weight.shape, dtype=torch.int64)
     blocks = weight.contiguous().reshape(-1, IQ2_S_BLOCK_SIZE)
     grid = iq2_s_grid(weight.device)
+    packed_shape = (*weight.shape[:-1], weight.shape[-1] // IQ2_S_BLOCK_SIZE, IQ2_S_BLOCK_BYTES)
+    if weight.is_cuda:
+        extension = get_cuda_ext_ggml()
+        if extension is not None:
+            scale_chunks = [
+                _predict_iq2_s_scales(blocks[start : start + _SCALE_BLOCK_CHUNK_SIZE])
+                for start in range(0, blocks.shape[0], _SCALE_BLOCK_CHUNK_SIZE)
+            ]
+            packed = extension.iq2_s_pack(blocks, grid, torch.cat(scale_chunks))
+            return packed.reshape(packed_shape), logical_shape
+
     chunks = [
         _encode_blocks(blocks[start : start + block_chunk_size], grid)
         for start in range(0, blocks.shape[0], block_chunk_size)
     ]
-    packed_shape = (*weight.shape[:-1], weight.shape[-1] // IQ2_S_BLOCK_SIZE, IQ2_S_BLOCK_BYTES)
     return torch.cat(chunks).reshape(packed_shape), logical_shape
 
 
