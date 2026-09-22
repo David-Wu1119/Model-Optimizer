@@ -2,7 +2,7 @@
 <html lang="en" data-accent-color="green" data-content_root="../../">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"><title>ggml - Model Optimizer 0.0.1.dev1+g52670b7ca</title><link rel="index" title="Index" href="../../genindex.html" /><link rel="search" title="Search" href="../../search.html" /><link rel="next" title="kv_cache_auto_quant" href="modelopt.torch.quantization.kv_cache_auto_quant.html" /><link rel="prev" title="extensions" href="modelopt.torch.quantization.extensions.html" /><script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"><title>ggml - Model Optimizer 0.0.1.dev1+gdbb4344aa</title><link rel="index" title="Index" href="../../genindex.html" /><link rel="search" title="Search" href="../../search.html" /><link rel="next" title="kv_cache_auto_quant" href="modelopt.torch.quantization.kv_cache_auto_quant.html" /><link rel="prev" title="extensions" href="modelopt.torch.quantization.extensions.html" /><script>
     function setColorMode(t){let e=document.documentElement;e.setAttribute("data-color-mode",t);let a=window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches,s=t;"auto"===t&&(s=a?"dark":"light"),"light"===s?(e.classList.remove("dark"),e.classList.add("light")):(e.classList.remove("light"),e.classList.add("dark"))}
     setColorMode(localStorage._theme||"auto");
   </script><link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=e1a1ceaf" />
@@ -472,7 +472,7 @@ data-aria-dark="Switch to auto color mode">
 </div>
 <dl class="py function">
 <dt class="sig sig-object py" id="modelopt.torch.quantization.ggml.dequantize_iq1_s">
-<span class="sig-name descname"><span class="pre">dequantize_iq1_s</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">packed_weights</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">weight_shape</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">dtype</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">torch.bfloat16</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">block_chunk_size</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1024</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#modelopt.torch.quantization.ggml.dequantize_iq1_s" title="Link to this definition">#</a></dt>
+<span class="sig-name descname"><span class="pre">dequantize_iq1_s</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">packed_weights</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">weight_shape</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">dtype</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">torch.bfloat16</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">block_chunk_size</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">4096</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#modelopt.torch.quantization.ggml.dequantize_iq1_s" title="Link to this definition">#</a></dt>
 <dd><p>Decode GGML-compatible IQ1_S payload bytes.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
@@ -491,7 +491,7 @@ data-aria-dark="Switch to auto color mode">
 
 <dl class="py function">
 <dt class="sig sig-object py" id="modelopt.torch.quantization.ggml.dequantize_iq2_xs">
-<span class="sig-name descname"><span class="pre">dequantize_iq2_xs</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">packed_weights</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">weight_shape</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">dtype</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">torch.bfloat16</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">block_chunk_size</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">256</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#modelopt.torch.quantization.ggml.dequantize_iq2_xs" title="Link to this definition">#</a></dt>
+<span class="sig-name descname"><span class="pre">dequantize_iq2_xs</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">packed_weights</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">weight_shape</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">dtype</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">torch.bfloat16</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">block_chunk_size</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">4096</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#modelopt.torch.quantization.ggml.dequantize_iq2_xs" title="Link to this definition">#</a></dt>
 <dd><p>Decode GGML-compatible IQ2_XS payload bytes.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
@@ -510,13 +510,14 @@ data-aria-dark="Switch to auto color mode">
 
 <dl class="py function">
 <dt class="sig sig-object py" id="modelopt.torch.quantization.ggml.iq1_s_fake_quant">
-<span class="sig-name descname"><span class="pre">iq1_s_fake_quant</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">inputs</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">quantizer</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">block_chunk_size</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1024</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#modelopt.torch.quantization.ggml.iq1_s_fake_quant" title="Link to this definition">#</a></dt>
+<span class="sig-name descname"><span class="pre">iq1_s_fake_quant</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">inputs</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">quantizer</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">block_chunk_size</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1024</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">decode_chunk_size</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">4096</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#modelopt.torch.quantization.ggml.iq1_s_fake_quant" title="Link to this definition">#</a></dt>
 <dd><p>IQ1_S weight backend for TensorQuantizer, with pass-through backward.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
 <li><p><strong>inputs</strong> (<em>Tensor</em>)</p></li>
 <li><p><strong>block_chunk_size</strong> (<em>int</em>)</p></li>
+<li><p><strong>decode_chunk_size</strong> (<em>int</em>)</p></li>
 </ul>
 </dd>
 <dt class="field-even">Return type<span class="colon">:</span></dt>
@@ -541,13 +542,14 @@ data-aria-dark="Switch to auto color mode">
 
 <dl class="py function">
 <dt class="sig sig-object py" id="modelopt.torch.quantization.ggml.iq2_xs_fake_quant">
-<span class="sig-name descname"><span class="pre">iq2_xs_fake_quant</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">inputs</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">quantizer</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">block_chunk_size</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">256</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#modelopt.torch.quantization.ggml.iq2_xs_fake_quant" title="Link to this definition">#</a></dt>
+<span class="sig-name descname"><span class="pre">iq2_xs_fake_quant</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">inputs</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">quantizer</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">block_chunk_size</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">256</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">decode_chunk_size</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">4096</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#modelopt.torch.quantization.ggml.iq2_xs_fake_quant" title="Link to this definition">#</a></dt>
 <dd><p>IQ2_XS weight backend for TensorQuantizer, with pass-through backward.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
 <li><p><strong>inputs</strong> (<em>Tensor</em>)</p></li>
 <li><p><strong>block_chunk_size</strong> (<em>int</em>)</p></li>
+<li><p><strong>decode_chunk_size</strong> (<em>int</em>)</p></li>
 </ul>
 </dd>
 <dt class="field-even">Return type<span class="colon">:</span></dt>

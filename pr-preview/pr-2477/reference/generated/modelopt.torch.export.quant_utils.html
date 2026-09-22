@@ -2,7 +2,7 @@
 <html lang="en" data-accent-color="green" data-content_root="../../">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"><title>quant_utils - Model Optimizer 0.0.1.dev1+g52670b7ca</title><link rel="index" title="Index" href="../../genindex.html" /><link rel="search" title="Search" href="../../search.html" /><link rel="next" title="registry" href="modelopt.torch.export.registry.html" /><link rel="prev" title="quant_format" href="modelopt.torch.export.quant_format.html" /><script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"><title>quant_utils - Model Optimizer 0.0.1.dev1+gdbb4344aa</title><link rel="index" title="Index" href="../../genindex.html" /><link rel="search" title="Search" href="../../search.html" /><link rel="next" title="registry" href="modelopt.torch.export.registry.html" /><link rel="prev" title="quant_format" href="modelopt.torch.export.quant_format.html" /><script>
     function setColorMode(t){let e=document.documentElement;e.setAttribute("data-color-mode",t);let a=window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches,s=t;"auto"===t&&(s=a?"dark":"light"),"light"===s?(e.classList.remove("dark"),e.classList.add("light")):(e.classList.remove("light"),e.classList.add("dark"))}
     setColorMode(localStorage._theme||"auto");
   </script><link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=e1a1ceaf" />
@@ -408,8 +408,10 @@ data-aria-dark="Switch to auto color mode">
 <li><a class="reference internal" href="#modelopt.torch.export.quant_utils.postprocess_state_dict"><code class="docutils literal notranslate"><span class="pre">postprocess_state_dict()</span></code></a></li>
 <li><a class="reference internal" href="#modelopt.torch.export.quant_utils.preprocess_linear_fusion"><code class="docutils literal notranslate"><span class="pre">preprocess_linear_fusion()</span></code></a></li>
 <li><a class="reference internal" href="#modelopt.torch.export.quant_utils.process_layer_quant_config"><code class="docutils literal notranslate"><span class="pre">process_layer_quant_config()</span></code></a></li>
+<li><a class="reference internal" href="#modelopt.torch.export.quant_utils.seed_carried_over_exclusions"><code class="docutils literal notranslate"><span class="pre">seed_carried_over_exclusions()</span></code></a></li>
 <li><a class="reference internal" href="#modelopt.torch.export.quant_utils.sync_tied_input_amax"><code class="docutils literal notranslate"><span class="pre">sync_tied_input_amax()</span></code></a></li>
 <li><a class="reference internal" href="#modelopt.torch.export.quant_utils.to_quantized_weight"><code class="docutils literal notranslate"><span class="pre">to_quantized_weight()</span></code></a></li>
+<li><a class="reference internal" href="#modelopt.torch.export.quant_utils.uses_iq_quantization"><code class="docutils literal notranslate"><span class="pre">uses_iq_quantization()</span></code></a></li>
 </ul>
 </div><div id="ethical-ad-placement" data-ea-publisher="readthedocs"></div></div>
   </aside>
@@ -525,11 +527,17 @@ data-aria-dark="Switch to auto color mode">
 <tr class="row-even"><td><p><a class="reference internal" href="#modelopt.torch.export.quant_utils.process_layer_quant_config" title="modelopt.torch.export.quant_utils.process_layer_quant_config"><code class="xref py py-obj docutils literal notranslate"><span class="pre">process_layer_quant_config</span></code></a></p></td>
 <td><p>Processes per layer quantization information for TRTLLM export to quant_cfg.json.</p></td>
 </tr>
-<tr class="row-odd"><td><p><a class="reference internal" href="#modelopt.torch.export.quant_utils.sync_tied_input_amax" title="modelopt.torch.export.quant_utils.sync_tied_input_amax"><code class="xref py py-obj docutils literal notranslate"><span class="pre">sync_tied_input_amax</span></code></a></p></td>
+<tr class="row-odd"><td><p><a class="reference internal" href="#modelopt.torch.export.quant_utils.seed_carried_over_exclusions" title="modelopt.torch.export.quant_utils.seed_carried_over_exclusions"><code class="xref py py-obj docutils literal notranslate"><span class="pre">seed_carried_over_exclusions</span></code></a></p></td>
+<td><p>Add carried-weight module names to an already-built <code class="docutils literal notranslate"><span class="pre">quant_config</span></code>'s exclusions.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#modelopt.torch.export.quant_utils.sync_tied_input_amax" title="modelopt.torch.export.quant_utils.sync_tied_input_amax"><code class="xref py py-obj docutils literal notranslate"><span class="pre">sync_tied_input_amax</span></code></a></p></td>
 <td><p>Max-merge <code class="docutils literal notranslate"><span class="pre">input_quantizer</span></code> amaxes across modules that share a weight, in place.</p></td>
 </tr>
-<tr class="row-even"><td><p><a class="reference internal" href="#modelopt.torch.export.quant_utils.to_quantized_weight" title="modelopt.torch.export.quant_utils.to_quantized_weight"><code class="xref py py-obj docutils literal notranslate"><span class="pre">to_quantized_weight</span></code></a></p></td>
+<tr class="row-odd"><td><p><a class="reference internal" href="#modelopt.torch.export.quant_utils.to_quantized_weight" title="modelopt.torch.export.quant_utils.to_quantized_weight"><code class="xref py py-obj docutils literal notranslate"><span class="pre">to_quantized_weight</span></code></a></p></td>
 <td><p>Converts the weight to the quantized (packed) format.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#modelopt.torch.export.quant_utils.uses_iq_quantization" title="modelopt.torch.export.quant_utils.uses_iq_quantization"><code class="xref py py-obj docutils literal notranslate"><span class="pre">uses_iq_quantization</span></code></a></p></td>
+<td><p>Whether any weight quantizer in <code class="docutils literal notranslate"><span class="pre">module</span></code> or its children targets an IQ format.</p></td>
 </tr>
 </tbody>
 </table>
@@ -890,6 +898,37 @@ undeclared genuine shares and coincidental collisions.</p></li>
 </dd></dl>
 
 <dl class="py function">
+<dt class="sig sig-object py" id="modelopt.torch.export.quant_utils.seed_carried_over_exclusions">
+<span class="sig-name descname"><span class="pre">seed_carried_over_exclusions</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">model</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">quant_config</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#modelopt.torch.export.quant_utils.seed_carried_over_exclusions" title="Link to this definition">#</a></dt>
+<dd><p>Add carried-weight module names to an already-built <code class="docutils literal notranslate"><span class="pre">quant_config</span></code>’s exclusions.</p>
+<p>The single place carried weights reach <code class="docutils literal notranslate"><span class="pre">exclude_modules</span></code>, for both exporters.
+<a class="reference internal" href="#modelopt.torch.export.quant_utils.get_quant_config" title="modelopt.torch.export.quant_utils.get_quant_config"><code class="xref py py-func docutils literal notranslate"><span class="pre">get_quant_config()</span></code></a> calls it once the per-layer pass is done, and the layerwise exporter
+calls it again from <code class="docutils literal notranslate"><span class="pre">finalize()</span></code> – it snapshots its config during <code class="docutils literal notranslate"><span class="pre">bind()</span></code>, while
+calibration is still running and long before <code class="docutils literal notranslate"><span class="pre">export_hf_checkpoint</span></code> records what it carried,
+so it has no chance to see them any earlier. Without it a layerwise export copies GLM-4.7’s
+<code class="docutils literal notranslate"><span class="pre">mtp.safetensors</span></code> into the checkpoint with nothing in <code class="docutils literal notranslate"><span class="pre">exclude_modules</span></code>: the same
+NVBug 5718750 failure this pass exists to prevent, reached through the other exporter.</p>
+<p>Exclusions are exact module names rather than prefix wildcards. That keeps both exporters
+emitting the same thing, and a literal can never over-match a module the export did in fact
+quantize – the risk <code class="xref py py-func docutils literal notranslate"><span class="pre">_prefix_wildcard_summarize_exclude_modules()</span></code> has to guard against by
+consulting <code class="docutils literal notranslate"><span class="pre">quantized_layers</span></code>, which is unavailable by the time the layerwise path runs.</p>
+<p>Returns the names it added. No-op when the export is not uniformly quantized – there is no
+single <code class="docutils literal notranslate"><span class="pre">quant_algo</span></code> for a deployment framework to misapply, so there is nothing to exclude
+a weight from.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>model</strong> (<em>Module</em>)</p></li>
+<li><p><strong>quant_config</strong> (<em>dict</em>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><em>list</em>[<em>str</em>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
 <dt class="sig sig-object py" id="modelopt.torch.export.quant_utils.sync_tied_input_amax">
 <span class="sig-name descname"><span class="pre">sync_tied_input_amax</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">model</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">tied_map</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#modelopt.torch.export.quant_utils.sync_tied_input_amax" title="Link to this definition">#</a></dt>
 <dd><p>Max-merge <code class="docutils literal notranslate"><span class="pre">input_quantizer</span></code> amaxes across modules that share a weight, in place.</p>
@@ -927,6 +966,27 @@ Returns the number of groups merged; pass <code class="docutils literal notransl
 <li><p><strong>weights_scaling_factor2</strong> (<em>Tensor</em><em> | </em><em>None</em>)</p></li>
 <li><p><strong>block_size</strong> (<em>int</em><em> | </em><em>None</em>)</p></li>
 </ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="modelopt.torch.export.quant_utils.uses_iq_quantization">
+<span class="sig-name descname"><span class="pre">uses_iq_quantization</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">module</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#modelopt.torch.export.quant_utils.uses_iq_quantization" title="Link to this definition">#</a></dt>
+<dd><p>Whether any weight quantizer in <code class="docutils literal notranslate"><span class="pre">module</span></code> or its children targets an IQ format.</p>
+<p><code class="docutils literal notranslate"><span class="pre">get_quantization_format</span></code> returns the <em>first</em> non-<code class="docutils literal notranslate"><span class="pre">NONE</span></code> format it finds, so in a
+mixed-format model IQ layers sitting behind, say, an FP8 layer are invisible to it. Callers
+that must reject IQ specifically need to see every layer.</p>
+<p>This reads <code class="docutils literal notranslate"><span class="pre">num_bits</span></code> directly rather than resolving each layer’s full format, so an
+unrelated unsupported quantizer elsewhere in the model cannot turn the check into an error.</p>
+<p>Known gap, shared with <code class="docutils literal notranslate"><span class="pre">get_quantization_format</span></code>: <code class="docutils literal notranslate"><span class="pre">weight_attr_names</span></code> yields nothing for
+a TEGroupedLinear, whose parameters are <code class="docutils literal notranslate"><span class="pre">weight0..N</span></code> while its quantizer is a single
+<code class="docutils literal notranslate"><span class="pre">GroupedQuantizer</span></code> under <code class="docutils literal notranslate"><span class="pre">weight_quantizer</span></code>. Neither function sees such a module, so an
+experts-only IQ model reports no format at all – not just here. Closing it belongs in
+<code class="docutils literal notranslate"><span class="pre">weight_attr_names</span></code>, where it affects every format, rather than in this helper.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><em>bool</em></p>
 </dd>
 </dl>
 </dd></dl>

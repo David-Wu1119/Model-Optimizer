@@ -2,7 +2,7 @@
 <html lang="en" data-accent-color="green" data-content_root="../../">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"><title>mlflow - Model Optimizer 0.0.1.dev1+g52670b7ca</title><link rel="index" title="Index" href="../../genindex.html" /><link rel="search" title="Search" href="../../search.html" /><link rel="next" title="nemotron_vlm_dataset_utils" href="modelopt.torch.utils.nemotron_vlm_dataset_utils.html" /><link rel="prev" title="memory_monitor" href="modelopt.torch.utils.memory_monitor.html" /><script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"><title>mlflow - Model Optimizer 0.0.1.dev1+gdbb4344aa</title><link rel="index" title="Index" href="../../genindex.html" /><link rel="search" title="Search" href="../../search.html" /><link rel="next" title="nemotron_vlm_dataset_utils" href="modelopt.torch.utils.nemotron_vlm_dataset_utils.html" /><link rel="prev" title="memory_monitor" href="modelopt.torch.utils.memory_monitor.html" /><script>
     function setColorMode(t){let e=document.documentElement;e.setAttribute("data-color-mode",t);let a=window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches,s=t;"auto"===t&&(s=a?"dark":"light"),"light"===s?(e.classList.remove("dark"),e.classList.add("light")):(e.classList.remove("light"),e.classList.add("dark"))}
     setColorMode(localStorage._theme||"auto");
   </script><link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=e1a1ceaf" />
@@ -585,9 +585,12 @@ the server side too.</p>
 <p><em>checkpoint_dir</em> also writes the JSON there as <code class="xref py py-data docutils literal notranslate"><span class="pre">EXPERIMENT_JSON</span></code>. Pass it only
 once the checkpoint is really on disk, since the file claims authorship of the weights
 sitting next to it: an output directory existing proves nothing, as it may hold a
-checkpoint from an earlier attempt whose weights this run never touched. Nothing is
-recorded at all when the run never opened, which a URI taken from the environment
-reaches by design.</p>
+checkpoint from an earlier attempt whose weights this run never touched.</p>
+<p>After the checkpoint is written, the pointer beside it is this run’s or absent –
+never a previous run’s. So a run that never opened <em>removes</em> the pointer rather than
+leaving one: tracking can disable itself mid-flight (an unreachable server or an
+uninstalled client, which a URI inherited from the environment tolerates by design),
+and the caller’s untracked cleanup was skipped because tracking looked configured.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><p><strong>checkpoint_dir</strong> (<em>Path</em><em> | </em><em>str</em><em> | </em><em>None</em>)</p>
