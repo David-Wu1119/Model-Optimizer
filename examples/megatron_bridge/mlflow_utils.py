@@ -230,8 +230,10 @@ def record_checkpoint_provenance(args: argparse.Namespace, tool: Tool = DISTILL)
     """Point the trained checkpoint at the run Megatron-Bridge opened for it.
 
     Called once training has written the checkpoint, from the rank that owns that run --
-    Megatron-Bridge opens it on the *last* rank, not the first.
+    Megatron-Bridge opens it on the *last* rank, not the first. Silent when there is no
+    checkpoint to point at, which is what a run that died before its first save leaves.
     """
-    if not args.mlflow or not dist.is_last_process():
+    checkpoint_dir = Path(tool.checkpoint(args))
+    if not args.mlflow or not dist.is_last_process() or not checkpoint_dir.is_dir():
         return
-    log_active_run_experiment_json(tool.checkpoint(args))
+    log_active_run_experiment_json(checkpoint_dir)

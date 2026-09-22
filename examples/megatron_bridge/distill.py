@@ -621,12 +621,18 @@ def main(args: argparse.Namespace):
     )
 
     print_rank_0("\nStarting distillation...")
-    distill(config)
+    try:
+        distill(config)
+    finally:
+        # In a finally: when --exit_interval or --exit_duration_in_mins fires -- which is how
+        # a Slurm run usually ends -- Megatron-Bridge calls sys.exit() from inside train(),
+        # so nothing after distill() runs. The checkpoint is already saved by then.
+        if not args.validate_only:
+            record_checkpoint_provenance(args)
     if args.validate_only:
         print_rank_0("\nValidation-only run done! Skipped training and checkpoint export.\n")
         return
 
-    record_checkpoint_provenance(args)
     print_rank_0(
         f"\nDistillation done! Saved checkpoint to {checkpoint_dir}"
         " in megatron distributed checkpoint format.\n"

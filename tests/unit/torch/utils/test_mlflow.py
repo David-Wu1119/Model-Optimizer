@@ -1099,8 +1099,9 @@ def test_a_failed_tracked_run_leaves_no_pointer_but_is_still_recorded(fake_mlflo
 class ForeignMlflow:
     """A run opened by another library -- Megatron-Bridge's LoggerConfig, in practice."""
 
-    def __init__(self, run=True):
+    def __init__(self, run=True, ended=False):
         self.texts = {}
+        self._ended = ended
         self._run = (
             SimpleNamespace(
                 info=SimpleNamespace(experiment_id="9", run_id="cafe", run_name="qad-1")
@@ -1110,6 +1111,9 @@ class ForeignMlflow:
         )
 
     def active_run(self):
+        return None if self._ended else self._run
+
+    def last_active_run(self):
         return self._run
 
     def get_tracking_uri(self):
@@ -1138,9 +1142,21 @@ def test_the_active_run_can_claim_a_checkpoint(monkeypatch, tmp_path):
     assert json.loads(fake.texts["experiment.json"]) == written
 
 
+def test_a_run_already_closed_can_still_claim_its_checkpoint(monkeypatch, tmp_path):
+    """Megatron-Bridge exits the process from inside its training loop, so the caller can
+    reach this after mlflow's atexit has closed the run."""
+    monkeypatch.setitem(sys.modules, "mlflow", ForeignMlflow(ended=True))
+
+    log_active_run_experiment_json(tmp_path)
+
+    assert json.loads((tmp_path / EXPERIMENT_JSON).read_text())["run_id"] == "cafe"
+
+
 def test_no_active_run_writes_nothing(monkeypatch, tmp_path):
     """An untracked training job reaches the same call and must not leave a file."""
-    monkeypatch.setitem(sys.modules, "mlflow", ForeignMlflow(run=False))
+    fake = ForeignMlflow(run=False)
+    fake.last_active_run = lambda: None
+    monkeypatch.setitem(sys.modules, "mlflow", fake)
 
     log_active_run_experiment_json(tmp_path)
 

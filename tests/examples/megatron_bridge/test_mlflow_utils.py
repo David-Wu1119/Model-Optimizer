@@ -500,11 +500,12 @@ def test_checkpoint_artifacts_are_off_unless_asked_for(argv, expected):
     assert mlflow_utils.logger_kwargs(args)["mlflow_log_artifacts"] is expected
 
 
-def test_the_distill_pointer_is_written_by_the_rank_that_owns_the_run(monkeypatch):
+def test_the_distill_pointer_is_written_by_the_rank_that_owns_the_run(monkeypatch, tmp_path):
     """Megatron-Bridge opens its run on the last rank, not the first."""
     calls = []
     monkeypatch.setattr(mlflow_utils, "log_active_run_experiment_json", calls.append)
-    args = _parse_distill("--mlflow", URI)
+    (tmp_path / "checkpoints").mkdir()
+    args = _parse_distill("--mlflow", URI, "--output_dir", str(tmp_path))
 
     monkeypatch.setattr(mlflow_utils.dist, "is_last_process", lambda: False)
     mlflow_utils.record_checkpoint_provenance(args)
@@ -512,7 +513,22 @@ def test_the_distill_pointer_is_written_by_the_rank_that_owns_the_run(monkeypatc
 
     monkeypatch.setattr(mlflow_utils.dist, "is_last_process", lambda: True)
     mlflow_utils.record_checkpoint_provenance(args)
-    assert calls == ["/runs/qad/checkpoints"]
+    assert calls == [tmp_path / "checkpoints"]
+
+
+def test_no_pointer_when_training_never_saved_a_checkpoint(monkeypatch, tmp_path):
+    """A run that died before its first save has nothing to point at."""
+    calls = []
+    monkeypatch.setattr(mlflow_utils, "log_active_run_experiment_json", calls.append)
+    monkeypatch.setattr(mlflow_utils.dist, "is_last_process", lambda: True)
+    args = _parse_distill("--mlflow", URI, "--output_dir", str(tmp_path))
+
+    mlflow_utils.record_checkpoint_provenance(args)
+    assert calls == []
+
+    (tmp_path / "checkpoints").mkdir()
+    mlflow_utils.record_checkpoint_provenance(args)
+    assert calls == [tmp_path / "checkpoints"]
 
 
 def test_an_untracked_distill_writes_no_pointer(monkeypatch):
@@ -535,6 +551,9 @@ def test_distill_script_wires_the_tracking():
     assert "resolve_mlflow_args(args, parser, DISTILL)" in source
     # Handed to Megatron-Bridge's logger rather than opening a competing run.
     assert "**logger_kwargs(args)," in source
+    # In a finally: Megatron-Bridge calls sys.exit() from inside train() when --exit_interval
+    # or --exit_duration_in_mins fires, so a call placed after distill() never runs.
+    assert "try:\n        distill(config)\n    finally:" in source
     assert "mlflow_run" not in source
     assert "record_checkpoint_provenance(args)" in source
     assert "print_args(masked_args(args))" in source

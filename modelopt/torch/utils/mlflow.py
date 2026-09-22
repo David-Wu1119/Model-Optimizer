@@ -759,7 +759,9 @@ def log_active_run_experiment_json(checkpoint_dir: Path | str) -> None:
     try:
         import mlflow
 
-        run = mlflow.active_run()
+        # last_active_run() covers a run mlflow's atexit has already closed, which is what
+        # a caller running from its own atexit or shutdown path sees.
+        run = mlflow.active_run() or mlflow.last_active_run()
         if run is None:
             return
         uri = _redact(mlflow.get_tracking_uri()).rstrip("/")
