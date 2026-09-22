@@ -695,7 +695,7 @@ def resolve_tracking_uri(
     except ValueError as e:
         if required:
             parser.error(f"--mlflow: {e}")  # exits
-        warnings.warn(f"Ignoring {TRACKING_URI_ENV}, continuing untracked: {e}")
+        warnings.warn(f"Ignoring ${TRACKING_URI_ENV}, continuing untracked: {e}")
         return None, required
 
 

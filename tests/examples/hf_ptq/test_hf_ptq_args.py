@@ -461,7 +461,7 @@ def test_an_unusable_environment_uri_warns_instead_of_failing(monkeypatch):
     unlike an explicit --mlflow, which is an unambiguous request."""
     monkeypatch.setenv("MLFLOW_TRACKING_URI", "file:///local/mlruns")
 
-    with pytest.warns(UserWarning, match="Ignoring MLFLOW_TRACKING_URI"):
+    with pytest.warns(UserWarning, match=r"Ignoring \$MLFLOW_TRACKING_URI"):
         _, args = _parse_hf_ptq_args(monkeypatch, "--pyt_ckpt_path", "/models/Qwen3-0.6B")
 
     assert args.mlflow is None
