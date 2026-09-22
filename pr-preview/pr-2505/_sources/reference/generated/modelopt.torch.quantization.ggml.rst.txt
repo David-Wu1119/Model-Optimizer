@@ -39,6 +39,7 @@ ggml
    
       dequantize_iq1_m
       iq1_m_fake_quant
+      iq1_m_grid
       quantize_iq1_m
       dequantize_iq1_s
       iq1_s_fake_quant

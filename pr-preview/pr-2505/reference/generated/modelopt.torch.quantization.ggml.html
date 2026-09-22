@@ -2,7 +2,7 @@
 <html lang="en" data-accent-color="green" data-content_root="../../">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"><title>ggml - Model Optimizer 0.0.1.dev1+g85bfcca92</title><link rel="index" title="Index" href="../../genindex.html" /><link rel="search" title="Search" href="../../search.html" /><link rel="next" title="kv_cache_auto_quant" href="modelopt.torch.quantization.kv_cache_auto_quant.html" /><link rel="prev" title="extensions" href="modelopt.torch.quantization.extensions.html" /><script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"><title>ggml - Model Optimizer 0.0.1.dev1+g9e30adfac</title><link rel="index" title="Index" href="../../genindex.html" /><link rel="search" title="Search" href="../../search.html" /><link rel="next" title="kv_cache_auto_quant" href="modelopt.torch.quantization.kv_cache_auto_quant.html" /><link rel="prev" title="extensions" href="modelopt.torch.quantization.extensions.html" /><script>
     function setColorMode(t){let e=document.documentElement;e.setAttribute("data-color-mode",t);let a=window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches,s=t;"auto"===t&&(s=a?"dark":"light"),"light"===s?(e.classList.remove("dark"),e.classList.add("light")):(e.classList.remove("light"),e.classList.add("dark"))}
     setColorMode(localStorage._theme||"auto");
   </script><link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=e1a1ceaf" />
@@ -392,6 +392,7 @@ data-aria-dark="Switch to auto color mode">
 <li><a class="reference internal" href="#modelopt.torch.quantization.ggml.dequantize_iq2_xs"><code class="docutils literal notranslate"><span class="pre">dequantize_iq2_xs()</span></code></a></li>
 <li><a class="reference internal" href="#modelopt.torch.quantization.ggml.dequantize_iq2_xxs"><code class="docutils literal notranslate"><span class="pre">dequantize_iq2_xxs()</span></code></a></li>
 <li><a class="reference internal" href="#modelopt.torch.quantization.ggml.iq1_m_fake_quant"><code class="docutils literal notranslate"><span class="pre">iq1_m_fake_quant()</span></code></a></li>
+<li><a class="reference internal" href="#modelopt.torch.quantization.ggml.iq1_m_grid"><code class="docutils literal notranslate"><span class="pre">iq1_m_grid()</span></code></a></li>
 <li><a class="reference internal" href="#modelopt.torch.quantization.ggml.iq1_s_fake_quant"><code class="docutils literal notranslate"><span class="pre">iq1_s_fake_quant()</span></code></a></li>
 <li><a class="reference internal" href="#modelopt.torch.quantization.ggml.iq1_s_grid"><code class="docutils literal notranslate"><span class="pre">iq1_s_grid()</span></code></a></li>
 <li><a class="reference internal" href="#modelopt.torch.quantization.ggml.iq2_s_fake_quant"><code class="docutils literal notranslate"><span class="pre">iq2_s_fake_quant()</span></code></a></li>
@@ -460,55 +461,58 @@ data-aria-dark="Switch to auto color mode">
 <tr class="row-even"><td><p><a class="reference internal" href="#modelopt.torch.quantization.ggml.iq1_m_fake_quant" title="modelopt.torch.quantization.ggml.iq1_m_fake_quant"><code class="xref py py-obj docutils literal notranslate"><span class="pre">iq1_m_fake_quant</span></code></a></p></td>
 <td><p>IQ1_M weight backend for TensorQuantizer, with pass-through backward.</p></td>
 </tr>
-<tr class="row-odd"><td><p><a class="reference internal" href="#modelopt.torch.quantization.ggml.quantize_iq1_m" title="modelopt.torch.quantization.ggml.quantize_iq1_m"><code class="xref py py-obj docutils literal notranslate"><span class="pre">quantize_iq1_m</span></code></a></p></td>
+<tr class="row-odd"><td><p><a class="reference internal" href="#modelopt.torch.quantization.ggml.iq1_m_grid" title="modelopt.torch.quantization.ggml.iq1_m_grid"><code class="xref py py-obj docutils literal notranslate"><span class="pre">iq1_m_grid</span></code></a></p></td>
+<td><p>Return the canonical IQ1_M ternary grid as float32.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#modelopt.torch.quantization.ggml.quantize_iq1_m" title="modelopt.torch.quantization.ggml.quantize_iq1_m"><code class="xref py py-obj docutils literal notranslate"><span class="pre">quantize_iq1_m</span></code></a></p></td>
 <td><p>Pack a floating-point weight into GGML-compatible IQ1_M blocks.</p></td>
 </tr>
-<tr class="row-even"><td><p><a class="reference internal" href="#modelopt.torch.quantization.ggml.dequantize_iq1_s" title="modelopt.torch.quantization.ggml.dequantize_iq1_s"><code class="xref py py-obj docutils literal notranslate"><span class="pre">dequantize_iq1_s</span></code></a></p></td>
+<tr class="row-odd"><td><p><a class="reference internal" href="#modelopt.torch.quantization.ggml.dequantize_iq1_s" title="modelopt.torch.quantization.ggml.dequantize_iq1_s"><code class="xref py py-obj docutils literal notranslate"><span class="pre">dequantize_iq1_s</span></code></a></p></td>
 <td><p>Decode GGML-compatible IQ1_S payload bytes.</p></td>
 </tr>
-<tr class="row-odd"><td><p><a class="reference internal" href="#modelopt.torch.quantization.ggml.iq1_s_fake_quant" title="modelopt.torch.quantization.ggml.iq1_s_fake_quant"><code class="xref py py-obj docutils literal notranslate"><span class="pre">iq1_s_fake_quant</span></code></a></p></td>
+<tr class="row-even"><td><p><a class="reference internal" href="#modelopt.torch.quantization.ggml.iq1_s_fake_quant" title="modelopt.torch.quantization.ggml.iq1_s_fake_quant"><code class="xref py py-obj docutils literal notranslate"><span class="pre">iq1_s_fake_quant</span></code></a></p></td>
 <td><p>IQ1_S weight backend for TensorQuantizer, with pass-through backward.</p></td>
 </tr>
-<tr class="row-even"><td><p><a class="reference internal" href="#modelopt.torch.quantization.ggml.iq1_s_grid" title="modelopt.torch.quantization.ggml.iq1_s_grid"><code class="xref py py-obj docutils literal notranslate"><span class="pre">iq1_s_grid</span></code></a></p></td>
+<tr class="row-odd"><td><p><a class="reference internal" href="#modelopt.torch.quantization.ggml.iq1_s_grid" title="modelopt.torch.quantization.ggml.iq1_s_grid"><code class="xref py py-obj docutils literal notranslate"><span class="pre">iq1_s_grid</span></code></a></p></td>
 <td><p>Return the canonical IQ1_S ternary grid as float32.</p></td>
 </tr>
-<tr class="row-odd"><td><p><a class="reference internal" href="#modelopt.torch.quantization.ggml.quantize_iq1_s" title="modelopt.torch.quantization.ggml.quantize_iq1_s"><code class="xref py py-obj docutils literal notranslate"><span class="pre">quantize_iq1_s</span></code></a></p></td>
+<tr class="row-even"><td><p><a class="reference internal" href="#modelopt.torch.quantization.ggml.quantize_iq1_s" title="modelopt.torch.quantization.ggml.quantize_iq1_s"><code class="xref py py-obj docutils literal notranslate"><span class="pre">quantize_iq1_s</span></code></a></p></td>
 <td><p>Pack a floating-point weight into GGML-compatible IQ1_S blocks.</p></td>
 </tr>
-<tr class="row-even"><td><p><a class="reference internal" href="#modelopt.torch.quantization.ggml.dequantize_iq2_s" title="modelopt.torch.quantization.ggml.dequantize_iq2_s"><code class="xref py py-obj docutils literal notranslate"><span class="pre">dequantize_iq2_s</span></code></a></p></td>
+<tr class="row-odd"><td><p><a class="reference internal" href="#modelopt.torch.quantization.ggml.dequantize_iq2_s" title="modelopt.torch.quantization.ggml.dequantize_iq2_s"><code class="xref py py-obj docutils literal notranslate"><span class="pre">dequantize_iq2_s</span></code></a></p></td>
 <td><p>Decode GGML-compatible IQ2_S payload bytes.</p></td>
 </tr>
-<tr class="row-odd"><td><p><a class="reference internal" href="#modelopt.torch.quantization.ggml.iq2_s_fake_quant" title="modelopt.torch.quantization.ggml.iq2_s_fake_quant"><code class="xref py py-obj docutils literal notranslate"><span class="pre">iq2_s_fake_quant</span></code></a></p></td>
+<tr class="row-even"><td><p><a class="reference internal" href="#modelopt.torch.quantization.ggml.iq2_s_fake_quant" title="modelopt.torch.quantization.ggml.iq2_s_fake_quant"><code class="xref py py-obj docutils literal notranslate"><span class="pre">iq2_s_fake_quant</span></code></a></p></td>
 <td><p>IQ2_S weight backend for TensorQuantizer, with pass-through backward.</p></td>
 </tr>
-<tr class="row-even"><td><p><a class="reference internal" href="#modelopt.torch.quantization.ggml.iq2_s_grid" title="modelopt.torch.quantization.ggml.iq2_s_grid"><code class="xref py py-obj docutils literal notranslate"><span class="pre">iq2_s_grid</span></code></a></p></td>
+<tr class="row-odd"><td><p><a class="reference internal" href="#modelopt.torch.quantization.ggml.iq2_s_grid" title="modelopt.torch.quantization.ggml.iq2_s_grid"><code class="xref py py-obj docutils literal notranslate"><span class="pre">iq2_s_grid</span></code></a></p></td>
 <td><p>Return the canonical IQ2_S magnitude grid as float32.</p></td>
 </tr>
-<tr class="row-odd"><td><p><a class="reference internal" href="#modelopt.torch.quantization.ggml.quantize_iq2_s" title="modelopt.torch.quantization.ggml.quantize_iq2_s"><code class="xref py py-obj docutils literal notranslate"><span class="pre">quantize_iq2_s</span></code></a></p></td>
+<tr class="row-even"><td><p><a class="reference internal" href="#modelopt.torch.quantization.ggml.quantize_iq2_s" title="modelopt.torch.quantization.ggml.quantize_iq2_s"><code class="xref py py-obj docutils literal notranslate"><span class="pre">quantize_iq2_s</span></code></a></p></td>
 <td><p>Pack a floating-point weight into GGML-compatible IQ2_S blocks.</p></td>
 </tr>
-<tr class="row-even"><td><p><a class="reference internal" href="#modelopt.torch.quantization.ggml.dequantize_iq2_xs" title="modelopt.torch.quantization.ggml.dequantize_iq2_xs"><code class="xref py py-obj docutils literal notranslate"><span class="pre">dequantize_iq2_xs</span></code></a></p></td>
+<tr class="row-odd"><td><p><a class="reference internal" href="#modelopt.torch.quantization.ggml.dequantize_iq2_xs" title="modelopt.torch.quantization.ggml.dequantize_iq2_xs"><code class="xref py py-obj docutils literal notranslate"><span class="pre">dequantize_iq2_xs</span></code></a></p></td>
 <td><p>Decode GGML-compatible IQ2_XS payload bytes.</p></td>
 </tr>
-<tr class="row-odd"><td><p><a class="reference internal" href="#modelopt.torch.quantization.ggml.iq2_xs_fake_quant" title="modelopt.torch.quantization.ggml.iq2_xs_fake_quant"><code class="xref py py-obj docutils literal notranslate"><span class="pre">iq2_xs_fake_quant</span></code></a></p></td>
+<tr class="row-even"><td><p><a class="reference internal" href="#modelopt.torch.quantization.ggml.iq2_xs_fake_quant" title="modelopt.torch.quantization.ggml.iq2_xs_fake_quant"><code class="xref py py-obj docutils literal notranslate"><span class="pre">iq2_xs_fake_quant</span></code></a></p></td>
 <td><p>IQ2_XS weight backend for TensorQuantizer, with pass-through backward.</p></td>
 </tr>
-<tr class="row-even"><td><p><a class="reference internal" href="#modelopt.torch.quantization.ggml.iq2_xs_grid" title="modelopt.torch.quantization.ggml.iq2_xs_grid"><code class="xref py py-obj docutils literal notranslate"><span class="pre">iq2_xs_grid</span></code></a></p></td>
+<tr class="row-odd"><td><p><a class="reference internal" href="#modelopt.torch.quantization.ggml.iq2_xs_grid" title="modelopt.torch.quantization.ggml.iq2_xs_grid"><code class="xref py py-obj docutils literal notranslate"><span class="pre">iq2_xs_grid</span></code></a></p></td>
 <td><p>Return the canonical IQ2_XS magnitude grid as float32.</p></td>
 </tr>
-<tr class="row-odd"><td><p><a class="reference internal" href="#modelopt.torch.quantization.ggml.quantize_iq2_xs" title="modelopt.torch.quantization.ggml.quantize_iq2_xs"><code class="xref py py-obj docutils literal notranslate"><span class="pre">quantize_iq2_xs</span></code></a></p></td>
+<tr class="row-even"><td><p><a class="reference internal" href="#modelopt.torch.quantization.ggml.quantize_iq2_xs" title="modelopt.torch.quantization.ggml.quantize_iq2_xs"><code class="xref py py-obj docutils literal notranslate"><span class="pre">quantize_iq2_xs</span></code></a></p></td>
 <td><p>Pack a floating-point weight into GGML-compatible IQ2_XS blocks.</p></td>
 </tr>
-<tr class="row-even"><td><p><a class="reference internal" href="#modelopt.torch.quantization.ggml.dequantize_iq2_xxs" title="modelopt.torch.quantization.ggml.dequantize_iq2_xxs"><code class="xref py py-obj docutils literal notranslate"><span class="pre">dequantize_iq2_xxs</span></code></a></p></td>
+<tr class="row-odd"><td><p><a class="reference internal" href="#modelopt.torch.quantization.ggml.dequantize_iq2_xxs" title="modelopt.torch.quantization.ggml.dequantize_iq2_xxs"><code class="xref py py-obj docutils literal notranslate"><span class="pre">dequantize_iq2_xxs</span></code></a></p></td>
 <td><p>Decode GGML-compatible IQ2_XXS payload bytes.</p></td>
 </tr>
-<tr class="row-odd"><td><p><a class="reference internal" href="#modelopt.torch.quantization.ggml.iq2_xxs_fake_quant" title="modelopt.torch.quantization.ggml.iq2_xxs_fake_quant"><code class="xref py py-obj docutils literal notranslate"><span class="pre">iq2_xxs_fake_quant</span></code></a></p></td>
+<tr class="row-even"><td><p><a class="reference internal" href="#modelopt.torch.quantization.ggml.iq2_xxs_fake_quant" title="modelopt.torch.quantization.ggml.iq2_xxs_fake_quant"><code class="xref py py-obj docutils literal notranslate"><span class="pre">iq2_xxs_fake_quant</span></code></a></p></td>
 <td><p>IQ2_XXS weight backend for TensorQuantizer, with pass-through backward.</p></td>
 </tr>
-<tr class="row-even"><td><p><a class="reference internal" href="#modelopt.torch.quantization.ggml.iq2_xxs_grid" title="modelopt.torch.quantization.ggml.iq2_xxs_grid"><code class="xref py py-obj docutils literal notranslate"><span class="pre">iq2_xxs_grid</span></code></a></p></td>
+<tr class="row-odd"><td><p><a class="reference internal" href="#modelopt.torch.quantization.ggml.iq2_xxs_grid" title="modelopt.torch.quantization.ggml.iq2_xxs_grid"><code class="xref py py-obj docutils literal notranslate"><span class="pre">iq2_xxs_grid</span></code></a></p></td>
 <td><p>Return the canonical IQ2_XXS magnitude grid as float32.</p></td>
 </tr>
-<tr class="row-odd"><td><p><a class="reference internal" href="#modelopt.torch.quantization.ggml.quantize_iq2_xxs" title="modelopt.torch.quantization.ggml.quantize_iq2_xxs"><code class="xref py py-obj docutils literal notranslate"><span class="pre">quantize_iq2_xxs</span></code></a></p></td>
+<tr class="row-even"><td><p><a class="reference internal" href="#modelopt.torch.quantization.ggml.quantize_iq2_xxs" title="modelopt.torch.quantization.ggml.quantize_iq2_xxs"><code class="xref py py-obj docutils literal notranslate"><span class="pre">quantize_iq2_xxs</span></code></a></p></td>
 <td><p>Pack a floating-point weight into GGML-compatible IQ2_XXS blocks.</p></td>
 </tr>
 </tbody>
@@ -620,6 +624,22 @@ data-aria-dark="Switch to auto color mode">
 <li><p><strong>block_chunk_size</strong> (<em>int</em>)</p></li>
 <li><p><strong>decode_chunk_size</strong> (<em>int</em>)</p></li>
 </ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><em>Tensor</em></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="modelopt.torch.quantization.ggml.iq1_m_grid">
+<span class="sig-name descname"><span class="pre">iq1_m_grid</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">device</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#modelopt.torch.quantization.ggml.iq1_m_grid" title="Link to this definition">#</a></dt>
+<dd><p>Return the canonical IQ1_M ternary grid as float32.</p>
+<p>IQ1_M indexes the same 2048-entry table as IQ1_S; this alias exists so every format
+exposes a grid accessor under its own name.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>device</strong> (<em>device</em><em> | </em><em>str</em><em> | </em><em>None</em>)</p>
 </dd>
 <dt class="field-even">Return type<span class="colon">:</span></dt>
 <dd class="field-even"><p><em>Tensor</em></p>
@@ -760,8 +780,7 @@ data-aria-dark="Switch to auto color mode">
 <span class="sig-name descname"><span class="pre">quantize_iq1_m</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">weight</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">block_chunk_size</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1024</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#modelopt.torch.quantization.ggml.quantize_iq1_m" title="Link to this definition">#</a></dt>
 <dd><p>Pack a floating-point weight into GGML-compatible IQ1_M blocks.</p>
 <p>Returned shapes are <code class="docutils literal notranslate"><span class="pre">[*weight.shape[:-1],</span> <span class="pre">weight.shape[-1]</span> <span class="pre">//</span> <span class="pre">256,</span> <span class="pre">56]</span></code>
-and <code class="docutils literal notranslate"><span class="pre">[weight.ndim]</span></code>. There is no CUDA encoder for this format yet, so
-packing always runs the torch search.</p>
+and <code class="docutils literal notranslate"><span class="pre">[weight.ndim]</span></code>.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
@@ -801,8 +820,7 @@ treated as zero during packing.</p>
 <span class="sig-name descname"><span class="pre">quantize_iq2_s</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">weight</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">block_chunk_size</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">128</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#modelopt.torch.quantization.ggml.quantize_iq2_s" title="Link to this definition">#</a></dt>
 <dd><p>Pack a floating-point weight into GGML-compatible IQ2_S blocks.</p>
 <p>Returned shapes are <code class="docutils literal notranslate"><span class="pre">[*weight.shape[:-1],</span> <span class="pre">weight.shape[-1]</span> <span class="pre">//</span> <span class="pre">256,</span> <span class="pre">82]</span></code>
-and <code class="docutils literal notranslate"><span class="pre">[weight.ndim]</span></code>. There is no CUDA encoder for this format yet, so
-packing always runs the torch search.</p>
+and <code class="docutils literal notranslate"><span class="pre">[weight.ndim]</span></code>.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
@@ -844,8 +862,7 @@ treated as zero during packing.</p>
 <p>Returned shapes are <code class="docutils literal notranslate"><span class="pre">[*weight.shape[:-1],</span> <span class="pre">weight.shape[-1]</span> <span class="pre">//</span> <span class="pre">256,</span> <span class="pre">66]</span></code>
 and <code class="docutils literal notranslate"><span class="pre">[weight.ndim]</span></code>. The packed payload remains on the weight’s device;
 the logical-shape metadata is kept on CPU. Non-finite input elements are
-treated as zero during packing. There is no CUDA encoder for this format
-yet, so packing always runs the torch search.</p>
+treated as zero during packing.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
