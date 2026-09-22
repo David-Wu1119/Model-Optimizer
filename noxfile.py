@@ -130,6 +130,7 @@ def gpu(session):
         "mamba_ssm",
         "causal-conv1d",
     )
+    session.run("python", "-m", "pip", "install", "fla-core==0.5.1")
     session.run("python", "-m", "pytest", "tests/gpu", *_cov_args())
 
 
@@ -141,6 +142,7 @@ def gpu_megatron(session):
     # Pre-installed nvidia-modelopt shadows the editable install
     session.run("pip", "uninstall", "-y", "nvidia-modelopt")
     session.run("python", "-m", "pip", "install", "-e", ".[hf,dev-test]")
+    session.run("python", "-m", "pip", "install", "fla-core==0.5.1")
     session.run("python", "-m", "pytest", "tests/gpu_megatron", *_cov_args())
 
 
