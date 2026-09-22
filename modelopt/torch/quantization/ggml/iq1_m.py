@@ -64,11 +64,29 @@ IQ1_M_EFFECTIVE_BITS = IQ1_M_BLOCK_BYTES * 8 / IQ1_M_BLOCK_SIZE
 _IQ1_M_DELTA = 0.125
 # Largest representable magnitude: (1 + delta) at local scale 7 -> 15 * 1.125.
 _IQ1_M_NATIVE_MAX = 16.875
-_IQ1_M_SCALE_ANCHOR = 0.61
+# IQ1_M anchors differently from IQ1_S: the ratio rises with a block's peak-to-RMS
+# instead of being flat, and it is allowed closer to full range. Values follow the
+# reference predictor these encoders are derived from.
+_IQ1_M_SCALE_ANCHOR_BASE = 0.58
+_IQ1_M_SCALE_ANCHOR_MIN = 0.65
+_IQ1_M_SCALE_ANCHOR_MAX = 0.95
+_IQ1_M_PEAK_TO_RMS_TAPER = 0.035
 _IQ1_M_GROUPS = 32
 _IQ1_M_SUBBLOCKS = 8
 _DEFAULT_BLOCK_CHUNK_SIZE = 1024
 _DEFAULT_DECODE_CHUNK_SIZE = 4096
+
+
+def _predict_iq1_m_scales(blocks: torch.Tensor) -> torch.Tensor:
+    """Predict one FP16 super-block scale for each flattened block."""
+    x = narrow_to_float32(blocks)
+    amax = x.abs().amax(dim=1)
+    rms = x.square().mean(dim=1).sqrt()
+    peak_to_rms = torch.where(rms > 0, amax / rms, torch.zeros_like(rms))
+    anchor_ratio = (_IQ1_M_SCALE_ANCHOR_BASE + _IQ1_M_PEAK_TO_RMS_TAPER * peak_to_rms).clamp(
+        _IQ1_M_SCALE_ANCHOR_MIN, _IQ1_M_SCALE_ANCHOR_MAX
+    )
+    return ((amax / _IQ1_M_NATIVE_MAX) * anchor_ratio).clamp(max=65504.0).to(torch.float16)
 
 
 def _encode_blocks(blocks: torch.Tensor, grid: torch.Tensor) -> torch.Tensor:
@@ -79,8 +97,7 @@ def _encode_blocks(blocks: torch.Tensor, grid: torch.Tensor) -> torch.Tensor:
     xnorm = vectors.square().sum(dim=-1)
     xsum = vectors.sum(dim=-1)
 
-    amax = x.abs().amax(dim=1)
-    d = ((amax / _IQ1_M_NATIVE_MAX) * _IQ1_M_SCALE_ANCHOR).clamp(max=65504.0).to(torch.float16)
+    d = _predict_iq1_m_scales(x)
     d_float = d.float()
 
     # Choice index is shift * 8 + local, as in IQ1_S, but here the shift is free per group.
