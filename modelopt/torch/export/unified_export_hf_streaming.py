@@ -43,8 +43,7 @@ from modelopt.torch.quantization.utils.core_utils import (
 from modelopt.torch.quantization.utils.layerwise_calib import LayerActivationCollector
 from modelopt.torch.utils import distributed as _dist
 
-from .model_utils import get_export_units
-from .moe_utils import _release_exported_tensors
+from .model_utils import _release_exported_tensors, get_export_units
 from .quant_aware_conversion import _build_reverse_rules, build_reverse_name_mapper
 from .quant_utils import (
     _get_kv_cache_postprocess_config,
