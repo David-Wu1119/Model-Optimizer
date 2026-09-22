@@ -36,6 +36,7 @@ from safetensors.torch import save_file
 
 from modelopt import __version__
 from modelopt.torch.quantization.ggml import (
+    quantize_iq1_m,
     quantize_iq1_s,
     quantize_iq2_s,
     quantize_iq2_xs,
@@ -68,6 +69,7 @@ from .quant_format import (
     QUANTIZATION_FP8,
     QUANTIZATION_FP8_PB_REAL,
     QUANTIZATION_FP8_PB_WO,
+    QUANTIZATION_IQ1_M,
     QUANTIZATION_IQ1_S,
     QUANTIZATION_IQ2_S,
     QUANTIZATION_IQ2_XS,
@@ -96,6 +98,7 @@ with import_plugin("transformers", verbose=False):
 # One packer per GGML IQ format, mirroring the HF exporter's table.
 _IQ_PACKERS = {
     QUANTIZATION_IQ1_S: quantize_iq1_s,
+    QUANTIZATION_IQ1_M: quantize_iq1_m,
     QUANTIZATION_IQ2_XXS: quantize_iq2_xxs,
     QUANTIZATION_IQ2_XS: quantize_iq2_xs,
     QUANTIZATION_IQ2_S: quantize_iq2_s,

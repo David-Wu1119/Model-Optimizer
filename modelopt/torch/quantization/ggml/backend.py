@@ -18,6 +18,7 @@
 import torch
 
 from ..nn.modules.tensor_quantizer import register_quant_backend
+from .iq1_m import iq1_m_fake_quant
 from .iq1_s import iq1_s_fake_quant
 from .iq2_s import iq2_s_fake_quant
 from .iq2_xs import iq2_xs_fake_quant
@@ -25,6 +26,7 @@ from .iq2_xxs import iq2_xxs_fake_quant
 
 # One entry per GGML IQ format; adding a format is adding a row here.
 _FAKE_QUANTS = {
+    "iq1_m": iq1_m_fake_quant,
     "iq1_s": iq1_s_fake_quant,
     "iq2_s": iq2_s_fake_quant,
     "iq2_xs": iq2_xs_fake_quant,

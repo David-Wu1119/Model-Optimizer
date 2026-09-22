@@ -28,6 +28,9 @@ import torch.nn as nn
 from modelopt import __version__
 from modelopt.torch.models import get_spec, list_all_possible
 from modelopt.torch.quantization.ggml import (
+    IQ1_M_BLOCK_BYTES,
+    IQ1_M_BLOCK_SIZE,
+    IQ1_M_EFFECTIVE_BITS,
     IQ1_S_BLOCK_BYTES,
     IQ1_S_BLOCK_SIZE,
     IQ1_S_EFFECTIVE_BITS,
@@ -78,6 +81,7 @@ from .quant_format import (
     QUANTIZATION_INT4_AWQ,
     QUANTIZATION_INT8_SQ,
     QUANTIZATION_INT8_WO,
+    QUANTIZATION_IQ1_M,
     QUANTIZATION_IQ1_S,
     QUANTIZATION_IQ2_S,
     QUANTIZATION_IQ2_XS,
@@ -100,6 +104,7 @@ logger = logging.getLogger(__name__)
 # Block geometry per GGML IQ format, used to describe the packed payload in the checkpoint.
 _IQ_BLOCK_METADATA = {
     QUANTIZATION_IQ1_S: (IQ1_S_BLOCK_SIZE, IQ1_S_BLOCK_BYTES, IQ1_S_EFFECTIVE_BITS),
+    QUANTIZATION_IQ1_M: (IQ1_M_BLOCK_SIZE, IQ1_M_BLOCK_BYTES, IQ1_M_EFFECTIVE_BITS),
     QUANTIZATION_IQ2_XXS: (IQ2_XXS_BLOCK_SIZE, IQ2_XXS_BLOCK_BYTES, IQ2_XXS_EFFECTIVE_BITS),
     QUANTIZATION_IQ2_XS: (IQ2_XS_BLOCK_SIZE, IQ2_XS_BLOCK_BYTES, IQ2_XS_EFFECTIVE_BITS),
     QUANTIZATION_IQ2_S: (IQ2_S_BLOCK_SIZE, IQ2_S_BLOCK_BYTES, IQ2_S_EFFECTIVE_BITS),
