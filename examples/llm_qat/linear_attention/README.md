@@ -83,6 +83,10 @@ broad downstream-task quality, long-context equivalence, or native serving speed
 
 ## Approximate-solve pilot
 
+The initial plain Neumann screen rejected all four degrees. See the
+[qualification result](../../../docs/linear_attention_solve_study.md); these
+configs are experimental and no degree is recommended for the pinned model.
+
 The [study plan](solve_study_plan.json) fixes a degree-screening protocol before
 examining test results: degree 3, 7, 15, or 31; 32 validation blocks; and a 0.02-NLL
 margin against exact matmul. Use `--train-steps 0` for that initial sensitivity

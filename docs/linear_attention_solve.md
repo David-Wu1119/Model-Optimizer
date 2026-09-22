@@ -20,6 +20,10 @@ disabled. There is no automatic degree choice, residual-triggered fallback, or
 exact-inverse surrogate gradient. The all-disabled exact policy still uses the
 original framework path.
 
+**Qualification:** the plain Neumann candidate failed the pinned KDA quality
+screen and showed no measured speed benefit. See the
+[study result](linear_attention_solve_study.md). Keep exact solve for that model.
+
 ## Numerical and gradient contracts
 
 - The independent reference adds powers in ascending order. The implementation
