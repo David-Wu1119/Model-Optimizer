@@ -30,3 +30,8 @@ from .robust_json import *
 from .serialization import *
 from .tensor import *
 from .vlm_dataset_utils import *
+
+# NOTE: Do not add ``from .mlflow import *`` here. That module imports ``modelopt.recipe``,
+# which reaches back into ``modelopt.torch.quantization``, so re-exporting it closes a cycle
+# and every ``modelopt.torch`` import fails with a partially-initialized module. Import it by
+# path instead: ``from modelopt.torch.utils.mlflow import ...``.

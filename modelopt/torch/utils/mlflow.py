@@ -45,6 +45,11 @@ from urllib.parse import urlparse
 import yaml
 
 import modelopt
+
+# Module scope is safe because this module is deliberately not re-exported from
+# ``modelopt/torch/utils/__init__.py``: nothing imports back into it, so the chain
+# recipe -> torch.quantization.config -> ... does not close. It costs 5 modules on top of
+# what ``modelopt.torch.utils.logging`` below already loads, quantization stack included.
 from modelopt.recipe import load_recipe
 from modelopt.torch.utils.logging import TeeStream
 
