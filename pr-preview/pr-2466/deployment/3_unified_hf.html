@@ -2,7 +2,7 @@
 <html lang="en" data-accent-color="green" data-content_root="../">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Unified HuggingFace Checkpoint - Model Optimizer 0.0.1.dev1+g5013cf1c9</title><link rel="index" title="Index" href="../genindex.html" /><link rel="search" title="Search" href="../search.html" /><link rel="next" title="All GitHub Examples" href="../examples/0_all_examples.html" /><link rel="prev" title="Onnxruntime" href="2_onnxruntime.html" /><script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Unified HuggingFace Checkpoint - Model Optimizer 0.0.1.dev1+g0e1d2a5a9</title><link rel="index" title="Index" href="../genindex.html" /><link rel="search" title="Search" href="../search.html" /><link rel="next" title="All GitHub Examples" href="../examples/0_all_examples.html" /><link rel="prev" title="Onnxruntime" href="2_onnxruntime.html" /><script>
     function setColorMode(t){let e=document.documentElement;e.setAttribute("data-color-mode",t);let a=window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches,s=t;"auto"===t&&(s=a?"dark":"light"),"light"===s?(e.classList.remove("dark"),e.classList.add("light")):(e.classList.remove("light"),e.classList.add("dark"))}
     setColorMode(localStorage._theme||"auto");
   </script><link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=e1a1ceaf" />
@@ -388,7 +388,10 @@ data-aria-dark="Switch to auto color mode">
     <div class="sy-scrollbar sy-rside-inner px-6 xl:top-16 xl:sticky xl:pl-0 pt-6 pb-4"><div class="localtoc"><h3>On this page</h3><ul>
 <li><a class="reference internal" href="#export-quantized-model">Export Quantized Model</a></li>
 <li><a class="reference internal" href="#deployment-support-matrix">Deployment Support Matrix</a><ul>
-<li><a class="reference internal" href="#supported-quantization-formats">Supported Quantization Formats</a></li>
+<li><a class="reference internal" href="#supported-quantization-formats">Supported Quantization Formats</a><ul>
+<li><a class="reference internal" href="#iq-weight-representation">IQ weight representation</a></li>
+</ul>
+</li>
 <li><a class="reference internal" href="#minimum-framework-versions">Minimum Framework Versions</a></li>
 <li><a class="reference internal" href="#model-support-matrix">Model Support Matrix</a><ul>
 <li><a class="reference internal" href="#what-this-matrix-is-based-on">What this matrix is based on</a></li>
@@ -476,7 +479,55 @@ diffusers quantization examples for end-to-end workflows and CLI usage.</p>
 <li><p>NVFP4_AWQ - NVIDIA 4-bit floating point with AWQ optimization</p></li>
 <li><p>INT4_AWQ - 4-bit integer with AWQ optimization</p></li>
 <li><p>W4A8_AWQ - 4-bit weights and 8-bit activations with AWQ optimization</p></li>
+<li><p>IQ1_S - 1-bit codebook quantization using the GGML block layout</p></li>
+<li><p>IQ2_XS - 2-bit codebook quantization using the GGML block layout</p></li>
 </ol>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>GGML has no equivalent for ModelOpt’s per-tensor FP8 weight-and-activation format. In particular,
+GGML does not define a first-class FP8 tensor type with the corresponding per-tensor weight and
+activation scale semantics. Converting a ModelOpt FP8 checkpoint to GGUF therefore requires
+conversion to another GGML-supported tensor type rather than a lossless FP8 encoding.</p>
+</div>
+<section id="iq-weight-representation">
+<h4>IQ weight representation<a class="headerlink" href="#iq-weight-representation" title="Link to this heading">#</a></h4>
+<p>For IQ1_S and IQ2_XS, unified export replaces each floating-point <code class="docutils literal notranslate"><span class="pre">&lt;module&gt;.weight</span></code> with a
+<code class="docutils literal notranslate"><span class="pre">uint8</span></code> tensor containing byte-exact GGML blocks. Its shape is
+<code class="docutils literal notranslate"><span class="pre">[*logical_shape[:-1],</span> <span class="pre">logical_shape[-1]</span> <span class="pre">//</span> <span class="pre">256,</span> <span class="pre">payload_bytes]</span></code>, where <code class="docutils literal notranslate"><span class="pre">payload_bytes</span></code> is 50
+for IQ1_S and 74 for IQ2_XS. No separate shape tensor is stored: a loader recovers the logical
+shape as <code class="docutils literal notranslate"><span class="pre">[*weight.shape[:-2],</span> <span class="pre">weight.shape[-2]</span> <span class="pre">*</span> <span class="pre">256]</span></code>. This is unambiguous because IQ export
+requires the logical last dimension to be divisible by 256.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Megatron IQ export currently requires tensor and pipeline model parallel sizes of 1. Packing
+happens during export, so a tensor-parallel shard would be packed as if it were a whole
+weight, and a pipeline stage holding no IQ layer would not reach the same rejection as its
+peers. Expert parallelism is supported, assuming every expert uses the same format.</p>
+</div>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>Megatron fused-MoE IQ export is not currently supported. Its packed tensor would require the
+deployment consumer to understand
+<code class="docutils literal notranslate"><span class="pre">[num_experts,</span> <span class="pre">out_features,</span> <span class="pre">in_features</span> <span class="pre">//</span> <span class="pre">256,</span> <span class="pre">payload_bytes]</span></code> rather than the ordinary HF
+fused-expert order. The exporter raises <code class="docutils literal notranslate"><span class="pre">NotImplementedError</span></code> until a deployment loader owns
+this layout and is covered by an integration test. Dense and individually named expert weights
+continue to use the representation above.</p>
+</div>
+<p>The generated configuration records <code class="docutils literal notranslate"><span class="pre">quant_method:</span> <span class="pre">modelopt</span></code>, <code class="docutils literal notranslate"><span class="pre">packing:</span> <span class="pre">ggml</span></code>, the 256-value
+block size, and the payload byte count. IQ payloads are not represented as compressed-tensors
+integer <code class="docutils literal notranslate"><span class="pre">weights</span></code> groups because all scales and indices are embedded in each packed block.</p>
+<p>Each 74-byte IQ2_XS block represents 256 logical weights:</p>
+<ul class="simple">
+<li><p>bytes 0–1 are the little-endian FP16 super-block scale <code class="docutils literal notranslate"><span class="pre">d</span></code>;</p></li>
+<li><p>bytes 2–65 are 32 little-endian <code class="docutils literal notranslate"><span class="pre">uint16</span></code> codes, one per group of eight weights. Each code
+contains a 9-bit codebook index and seven stored sign bits; the eighth sign bit is derived from
+parity; and</p></li>
+<li><p>bytes 66–73 contain sixteen 4-bit local-scale codes, packed two per byte. Each local scale is
+shared by two adjacent eight-weight groups.</p></li>
+</ul>
+<p>The canonical 512-by-8 IQ2_XS codebook is part of the implementation rather than the checkpoint.
+The complete block therefore costs <code class="docutils literal notranslate"><span class="pre">74</span> <span class="pre">*</span> <span class="pre">8</span> <span class="pre">/</span> <span class="pre">256</span> <span class="pre">=</span> <span class="pre">2.3125</span></code> bits per logical weight.</p>
+</section>
 </section>
 <section id="minimum-framework-versions">
 <h3>Minimum Framework Versions<a class="headerlink" href="#minimum-framework-versions" title="Link to this heading">#</a></h3>

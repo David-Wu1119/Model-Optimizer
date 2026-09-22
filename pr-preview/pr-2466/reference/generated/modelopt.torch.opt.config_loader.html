@@ -2,7 +2,7 @@
 <html lang="en" data-accent-color="green" data-content_root="../../">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"><title>config_loader - Model Optimizer 0.0.1.dev1+g5013cf1c9</title><link rel="index" title="Index" href="../../genindex.html" /><link rel="search" title="Search" href="../../search.html" /><link rel="next" title="conversion" href="modelopt.torch.opt.conversion.html" /><link rel="prev" title="config" href="modelopt.torch.opt.config.html" /><script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"><title>config_loader - Model Optimizer 0.0.1.dev1+g0e1d2a5a9</title><link rel="index" title="Index" href="../../genindex.html" /><link rel="search" title="Search" href="../../search.html" /><link rel="next" title="conversion" href="modelopt.torch.opt.conversion.html" /><link rel="prev" title="config" href="modelopt.torch.opt.config.html" /><script>
     function setColorMode(t){let e=document.documentElement;e.setAttribute("data-color-mode",t);let a=window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches,s=t;"auto"===t&&(s=a?"dark":"light"),"light"===s?(e.classList.remove("dark"),e.classList.add("light")):(e.classList.remove("light"),e.classList.add("dark"))}
     setColorMode(localStorage._theme||"auto");
   </script><link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=e1a1ceaf" />
@@ -387,6 +387,7 @@ data-aria-dark="Switch to auto color mode">
     </button>
     <div class="sy-scrollbar sy-rside-inner px-6 xl:top-16 xl:sticky xl:pl-0 pt-6 pb-4"><div class="localtoc"><h3>On this page</h3><ul>
 <li><a class="reference internal" href="#modelopt.torch.opt.config_loader.load_config"><code class="docutils literal notranslate"><span class="pre">load_config()</span></code></a></li>
+<li><a class="reference internal" href="#modelopt.torch.opt.config_loader.peek_declared_schema"><code class="docutils literal notranslate"><span class="pre">peek_declared_schema()</span></code></a></li>
 </ul>
 </div><div id="ethical-ad-placement" data-ea-publisher="readthedocs"></div></div>
   </aside>
@@ -443,6 +444,9 @@ imports.</p>
 <tr class="row-odd"><td><p><a class="reference internal" href="#modelopt.torch.opt.config_loader.load_config" title="modelopt.torch.opt.config_loader.load_config"><code class="xref py py-obj docutils literal notranslate"><span class="pre">load_config</span></code></a></p></td>
 <td><p>Load a YAML config and resolve all <code class="docutils literal notranslate"><span class="pre">$import</span></code> references.</p></td>
 </tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#modelopt.torch.opt.config_loader.peek_declared_schema" title="modelopt.torch.opt.config_loader.peek_declared_schema"><code class="xref py py-obj docutils literal notranslate"><span class="pre">peek_declared_schema</span></code></a></p></td>
+<td><p>Return the <code class="docutils literal notranslate"><span class="pre">#</span> <span class="pre">modelopt-schema:</span></code> path a config file declares, if any.</p></td>
+</tr>
 </tbody>
 </table>
 </div>
@@ -481,6 +485,24 @@ selection above.</p>
 </dd>
 <dt class="field-even">Return type<span class="colon">:</span></dt>
 <dd class="field-even"><p><em>Any</em></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="modelopt.torch.opt.config_loader.peek_declared_schema">
+<span class="sig-name descname"><span class="pre">peek_declared_schema</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">config_file</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#modelopt.torch.opt.config_loader.peek_declared_schema" title="Link to this definition">#</a></dt>
+<dd><p>Return the <code class="docutils literal notranslate"><span class="pre">#</span> <span class="pre">modelopt-schema:</span></code> path a config file declares, if any.</p>
+<p>Reads only the comment preamble – no YAML parsing and no <code class="docutils literal notranslate"><span class="pre">$import</span></code> resolution –
+so a caller can find out what kind of config a file is <em>before</em> it can be loaded.
+<code class="xref py py-func docutils literal notranslate"><span class="pre">modelopt.recipe.load_recipe()</span></code> uses this to pick a recipe’s schema class, which
+is why a recipe can inherit its body from another one via a top-level <code class="docutils literal notranslate"><span class="pre">$import</span></code>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>config_file</strong> (<em>str</em><em> | </em><em>Path</em><em> | </em><em>Traversable</em>)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><em>str</em> | <em>None</em></p>
 </dd>
 </dl>
 </dd></dl>

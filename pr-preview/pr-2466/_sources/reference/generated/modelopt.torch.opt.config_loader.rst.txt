@@ -38,5 +38,6 @@ config\_loader
       :nosignatures:
    
       load_config
+      peek_declared_schema
    
    
