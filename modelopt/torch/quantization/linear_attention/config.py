@@ -21,7 +21,12 @@ from pydantic import Field, model_validator
 
 from modelopt.torch.opt.config import ModeloptBaseConfig, ModeloptField
 
-__all__ = ["LinearAttentionConfig", "LinearAttentionMatmulConfig", "LinearAttentionPolicyEntry"]
+__all__ = [
+    "LinearAttentionConfig",
+    "LinearAttentionMatmulConfig",
+    "LinearAttentionPolicyEntry",
+    "LinearAttentionSolveConfig",
+]
 
 _PrefillSite = Literal[
     "key_interaction",
@@ -67,8 +72,21 @@ class _StateConfig(ModeloptBaseConfig):
     quantize_initial: Literal[True] = ModeloptField(default=True)
 
 
-class _SolveConfig(ModeloptBaseConfig):
-    method: Literal["exact"] = ModeloptField(default="exact")
+class LinearAttentionSolveConfig(ModeloptBaseConfig):
+    """Exact solve or an explicit Neumann polynomial, differentiated as computed."""
+
+    method: Literal["exact", "neumann"] = ModeloptField(default="exact")
+    degree: int | None = Field(default=None, ge=0, le=63, strict=True)
+    implementation: Literal["torch", "triton"] = ModeloptField(default="torch")
+
+    @model_validator(mode="after")
+    def _validate_method(self):
+        if self.method == "exact":
+            if self.degree is not None or self.implementation != "torch":
+                raise ValueError("Exact solve does not accept a degree or Triton implementation")
+        elif self.degree is None:
+            raise ValueError("Neumann solve requires an explicit polynomial degree")
+        return self
 
 
 class LinearAttentionConfig(ModeloptBaseConfig):
@@ -83,13 +101,15 @@ class LinearAttentionConfig(ModeloptBaseConfig):
     backend: Literal["fla", "matmul"] = ModeloptField(default="fla")
     chunk_size: Literal[64] = ModeloptField(default=64)
     state: _StateConfig = ModeloptField(default=_StateConfig())
-    solve: _SolveConfig = ModeloptField(default=_SolveConfig())
+    solve: LinearAttentionSolveConfig = ModeloptField(default=LinearAttentionSolveConfig())
     matmul: dict[_PrefillSite, LinearAttentionMatmulConfig] = ModeloptField(default={})
     elementwise: dict[_ElementwiseSite, _ArithmeticDtype] = ModeloptField(default={})
 
     @model_validator(mode="after")
     def _validate_arithmetic_backend(self):
-        if self.backend == "fla" and (self.matmul or self.elementwise):
+        if self.backend == "fla" and (
+            self.matmul or self.elementwise or self.solve.method != "exact"
+        ):
             raise ValueError("Prefill arithmetic policies require backend='matmul'")
         return self
 

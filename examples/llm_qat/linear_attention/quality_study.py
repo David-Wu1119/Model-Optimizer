@@ -52,7 +52,7 @@ def _evaluate(model, blocks):
             loss = model(input_ids=ids, labels=ids, use_cache=False).loss
             if not torch.isfinite(loss):
                 raise RuntimeError("Non-finite evaluation loss")
-            losses.append(float(loss))
+            losses.append(float(loss.detach()))
     mean = sum(losses) / len(losses)
     return {
         "mean_nll": mean,
@@ -81,8 +81,8 @@ def main():
     parser.add_argument("--seed", type=int, default=2026)
     parser.add_argument("--learning-rate", type=float, default=1e-5)
     options = parser.parse_args()
-    if options.length < 64 or options.train_steps < 1 or options.eval_blocks < 1:
-        parser.error("length must be >=64 and train-steps/eval-blocks must be positive")
+    if options.length < 64 or options.train_steps < 0 or options.eval_blocks < 1:
+        parser.error("length must be >=64, train-steps nonnegative, and eval-blocks positive")
     if options.train_data.resolve() == options.eval_data.resolve():
         parser.error("Training and evaluation data must be distinct splits")
     torch.manual_seed(options.seed)
@@ -153,7 +153,7 @@ def main():
         norm = torch.nn.utils.clip_grad_norm_(trainable, 1.0, error_if_nonfinite=True)
         optimizer.step()
         torch.cuda.synchronize()
-        losses.append(float(loss))
+        losses.append(float(loss.detach()))
         grad_norms.append(float(norm))
         timings.append(time.perf_counter() - start)
         print(
@@ -167,17 +167,25 @@ def main():
             ),
             flush=True,
         )
-    if torch.equal(original, probe):
+    query_changed = not torch.equal(original, probe)
+    if options.train_steps and not query_changed:
         raise RuntimeError("Training did not update the query projection")
     peak = torch.cuda.max_memory_allocated()
     optimizer.zero_grad(set_to_none=True)
-    after = _evaluate(model, evaluation)
+    after = _evaluate(model, evaluation) if options.train_steps else before
     root = Path(__file__).resolve().parents[3]
     sources = [
         root / "modelopt/torch/quantization/linear_attention" / name
-        for name in ["config.py", "kda.py", "prefill.py", "matmul.py"]
+        for name in ["config.py", "kda.py", "prefill.py", "matmul.py", "solve.py"]
     ]
-    sources.append(Path(__file__).resolve())
+    sources.extend(
+        [
+            root / "modelopt/torch/kernels/quantization/linear_attention/neumann.py",
+            root / "modelopt/torch/quantization/plugins/kda.py",
+            root / "modelopt/torch/quantization/plugins/linear_attention.py",
+            Path(__file__).resolve(),
+        ]
+    )
     result = {
         "source_sha256": {
             str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest()
@@ -210,7 +218,7 @@ def main():
         "step_seconds": timings,
         "train_predicted_tokens": options.train_steps * options.length,
         "peak_train_bytes": peak,
-        "query_weight_changed": True,
+        "query_weight_changed": query_changed,
         "gpu": torch.cuda.get_device_name(),
         "torch": torch.__version__,
         "packages": {

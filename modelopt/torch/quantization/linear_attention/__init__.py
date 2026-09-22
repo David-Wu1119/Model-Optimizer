@@ -20,3 +20,4 @@ from .kda import *
 from .matmul import *
 from .prefill import *
 from .reference import *
+from .solve import *

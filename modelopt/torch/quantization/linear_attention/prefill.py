@@ -21,6 +21,7 @@ import torch.nn.functional as F
 from .config import LinearAttentionConfig
 from .matmul import LinearAttentionMatmulSites, _validate_operand_quantizer
 from .reference import _prepare, state_fp8_qdq_reference
+from .solve import triangular_inverse
 
 __all__ = ["matmul_gdn"]
 
@@ -176,10 +177,7 @@ def _matmul_prefill(
         scores = (mm("output_score", qc * scale, kc) * decay).tril()
         weighted_keys = kc * arithmetic("gate_exp", (gc[..., -1:] - gc).exp()).unsqueeze(-1)
         final_decay = arithmetic("gate_exp", gc[..., -1].exp())[..., None, None]
-    identity = torch.eye(chunk_size, device=q.device, dtype=dtype).expand_as(lower)
-    inverse = torch.linalg.solve_triangular(
-        identity + lower, identity, upper=False, unitriangular=True
-    )
+    inverse = triangular_inverse(lower, policy.solve)
     u = mm("wy_value", inverse, (bc * vc).transpose(-1, -2))
     w = mm("wy_key", inverse, (bc * kc * gate).transpose(-1, -2))
 

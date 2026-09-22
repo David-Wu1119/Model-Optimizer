@@ -148,6 +148,7 @@ def chunk_gdn_reference(
     w_quantizer: Callable[[torch.Tensor], torch.Tensor] | None = None,
     matmul: Callable[[str, torch.Tensor, torch.Tensor], torch.Tensor] | None = None,
     arithmetic: Callable[[str, torch.Tensor], torch.Tensor] | None = None,
+    inverse_fn: Callable[[torch.Tensor], torch.Tensor] | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Exact GDN chunk algebra with optional state/W fake quantization.
 
@@ -181,16 +182,20 @@ def chunk_gdn_reference(
                 lower = (mm("key_interaction", bc * kc, kc.transpose(-1, -2)) * decay).tril(-1)
             matrix = lower + torch.eye(hi - lo, device=q.device, dtype=q.dtype)
             gate = arithmetic("gate_exp", gc.exp()).unsqueeze(-1)
-            if matmul is None:
+            if matmul is None and inverse_fn is None:
                 rhs = torch.cat((bc * vc, bc * kc * gate), dim=-1)
                 solved = torch.linalg.solve_triangular(matrix, rhs, upper=False, unitriangular=True)
                 u, w = solved.split((v.shape[-1], k.shape[-1]), dim=-1)
             else:
-                inverse = torch.linalg.solve_triangular(
-                    matrix,
-                    torch.eye(hi - lo, device=q.device, dtype=q.dtype).expand_as(matrix),
-                    upper=False,
-                    unitriangular=True,
+                inverse = (
+                    inverse_fn(lower)
+                    if inverse_fn is not None
+                    else torch.linalg.solve_triangular(
+                        matrix,
+                        torch.eye(hi - lo, device=q.device, dtype=q.dtype).expand_as(matrix),
+                        upper=False,
+                        unitriangular=True,
+                    )
                 )
                 u = mm("wy_value", inverse, bc * vc)
                 w = mm("wy_key", inverse, bc * kc * gate)
@@ -251,6 +256,7 @@ def chunk_kda_reference(
     state_qdq_block_v=64,
     w_quantizer=None,
     matmul=None,
+    inverse_fn=None,
 ):
     """KDA chunk oracle with causal per-channel decays and optional operand QDQ.
 
@@ -292,8 +298,12 @@ def chunk_kda_reference(
             lower = torch.cat(lower_rows, dim=-2).tril(-1)
             scores = torch.cat(score_rows, dim=-2)
             identity = torch.eye(hi - lo, device=q.device, dtype=q.dtype).expand_as(lower)
-            inverse = torch.linalg.solve_triangular(
-                identity + lower, identity, upper=False, unitriangular=True
+            inverse = (
+                inverse_fn(lower)
+                if inverse_fn is not None
+                else torch.linalg.solve_triangular(
+                    identity + lower, identity, upper=False, unitriangular=True
+                )
             )
             u = mm("wy_value", inverse, bc * vc)
             w = mm("wy_key", inverse, bc * kc * gate)

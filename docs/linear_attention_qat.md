@@ -148,3 +148,5 @@ Both direct-forward and older split-forward Megatron layouts are handled by the 
 the runtime qualification above uses the direct-forward layout in 0.19.1.
 
 No model-quality, QAT recovery, or throughput result is claimed.
+
+Approximate solve is described in [the Neumann policy guide](linear_attention_solve.md).

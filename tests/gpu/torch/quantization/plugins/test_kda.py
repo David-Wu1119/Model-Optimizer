@@ -39,7 +39,9 @@ def _forward(model, hidden):
         return model(hidden)[0]
 
 
-@pytest.mark.parametrize("mode", ["state", "w", "prefill_fp8", "prefill_nvfp4", "arithmetic"])
+@pytest.mark.parametrize(
+    "mode", ["state", "w", "prefill_fp8", "prefill_nvfp4", "arithmetic", "solve"]
+)
 @pytest.mark.timeout(180)
 def test_fla_layer_qat_restore_and_optimizer(tmp_path, mode):
     torch.manual_seed(73)
@@ -69,6 +71,12 @@ def test_fla_layer_qat_restore_and_optimizer(tmp_path, mode):
         )
     if mode == "arithmetic":
         cfg["linear_attention"][0]["cfg"]["elementwise"] = {"value_residual": "bfloat16"}
+    if mode == "solve":
+        cfg["linear_attention"][0]["cfg"]["solve"] = {
+            "method": "neumann",
+            "degree": 3,
+            "implementation": "triton",
+        }
     mtq.quantize(model, cfg)
     output = _forward(model, hidden)
     assert torch.isfinite(output).all()

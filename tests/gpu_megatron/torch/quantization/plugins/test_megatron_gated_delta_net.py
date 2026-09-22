@@ -94,7 +94,9 @@ def _config_for_mode(mode):
     if mode.startswith("prefill"):
         policy = cfg["linear_attention"][0]["cfg"]
         policy["backend"] = "matmul"
-        if mode == "prefill_arithmetic":
+        if mode == "prefill_solve":
+            policy["solve"] = {"method": "neumann", "degree": 1, "implementation": "triton"}
+        elif mode == "prefill_arithmetic":
             policy["matmul"] = {
                 "output_value": {"accumulator_dtype": "float16", "reduction_block": 16}
             }
@@ -197,7 +199,8 @@ def _test_gdn_qat_helper(rank, size, mode, checkpoint_path):
 @pytest.mark.timeout(300)
 @pytest.mark.parametrize("tp_size", [1, 2])
 @pytest.mark.parametrize(
-    "mode", ["state", "w", "both", "prefill_fp8", "prefill_nvfp4", "prefill_arithmetic"]
+    "mode",
+    ["state", "w", "both", "prefill_fp8", "prefill_nvfp4", "prefill_arithmetic", "prefill_solve"],
 )
 def test_gdn_qat_and_sharded_restore(request, tmp_path, tp_size, mode):
     """Train through state/W QDQ after a Megatron distributed-checkpoint round trip."""
@@ -214,7 +217,9 @@ def _test_gdn_context_parallel_helper(rank, size, mode):
         mtq.quantize(model, _config_for_mode(mode)[0])
 
 
-@pytest.mark.parametrize("mode", ["state", "w", "prefill_fp8", "prefill_arithmetic"])
+@pytest.mark.parametrize(
+    "mode", ["state", "w", "prefill_fp8", "prefill_arithmetic", "prefill_solve"]
+)
 def test_gdn_context_parallel_rejected(dist_workers_size_2, mode):
     """Reject unqualified Megatron CP even when it does not pass an FLA CP context."""
     dist_workers_size_2.run(_test_gdn_context_parallel_helper, mode)

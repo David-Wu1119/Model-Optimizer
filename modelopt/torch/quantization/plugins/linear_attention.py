@@ -49,6 +49,7 @@ class _LinearAttentionQuantMixin(QuantModule):
             or self._linear_attn_w.is_enabled
             or self.linear_attn_sites.is_enabled
             or bool(self.linear_attention_config.matmul or self.linear_attention_config.elementwise)
+            or self.linear_attention_config.solve.method != "exact"
         )
 
     def validate_linear_attention(self):

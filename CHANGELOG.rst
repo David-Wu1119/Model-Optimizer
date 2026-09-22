@@ -13,6 +13,8 @@ Changelog
 
 *Quantization*
 
+- Added opt-in differentiable Neumann solve approximation for GDN/KDA QAT, with an explicit saved degree and a CUDA FP32 candidate. Exact solve remains the default.
+
 - Add experimental KDA prefill QAT for FLA 0.5.1 layers with stable per-channel decay and independent operand/state fake quantization. Enable the explicit ``matmul`` backend; numerical policies and quantizers persist through ModelOpt save/restore.
 
 - Add experimental per-operand FP8/NVFP4 GDN prefill QAT with independently configurable accumulator and elementwise rounding. Select the materialized ``matmul`` backend to enable these sites; the existing fused FLA state/W path remains the default.
