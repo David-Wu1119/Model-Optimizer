@@ -9,7 +9,8 @@ this feature does not provide compressed inference state or native FP8 matmul ac
 The implementation adapts [PR #2455](https://github.com/NVIDIA/Model-Optimizer/pull/2455)
 at `13c7e2456f2e9d079c9ef822742eeaa634353802` onto ModelOpt
 `051d6adb204f10cd3e78d0f824f31a5a01d54831`. It is the M0/M1 portion of the linear-attention
-design. Additional prefill operand sites, KDA training integration, approximate inverse,
+design. [Additional prefill operand sites](linear_attention_prefill.md) have an explicit matmul backend.
+KDA training integration, approximate inverse,
 token-state quantization, decay approximation, and SSM replay remain later milestones.
 
 ## Requirements and scope

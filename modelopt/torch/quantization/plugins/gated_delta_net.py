@@ -33,6 +33,8 @@ import torch
 
 from ..config import QuantizerAttributeConfig
 from ..linear_attention.config import LinearAttentionConfig
+from ..linear_attention.matmul import LinearAttentionMatmulSites, _validate_operand_quantizer
+from ..linear_attention.prefill import matmul_gdn
 from ..linear_attention.validation import validate_gdn_quantizer
 from ..nn import QuantModule, TensorQuantizer
 
@@ -70,7 +72,18 @@ class GatedDeltaNetStateQuantMixin(QuantModule):
     def _setup(self):
         self.gdn_state_quantizer = TensorQuantizer(QuantizerAttributeConfig(enable=False))
         self.gdn_w_quantizer = TensorQuantizer(QuantizerAttributeConfig(enable=False))
+        self.linear_attn_sites = LinearAttentionMatmulSites()
         self.linear_attention_config = LinearAttentionConfig()
+
+    @property
+    def linear_attention_is_enabled(self) -> bool:
+        """Whether any operand, state, or arithmetic policy changes the computation."""
+        return (
+            self.gdn_state_quantizer.is_enabled
+            or self.gdn_w_quantizer.is_enabled
+            or self.linear_attn_sites.is_enabled
+            or bool(self.linear_attention_config.matmul or self.linear_attention_config.elementwise)
+        )
 
     @property
     def gdn_state_qdq_block_v(self) -> int:
@@ -81,7 +94,13 @@ class GatedDeltaNetStateQuantMixin(QuantModule):
         """Reject numerical settings that the fused training path cannot implement."""
         for state, quantizer in ((True, self.gdn_state_quantizer), (False, self.gdn_w_quantizer)):
             if quantizer.is_enabled:
-                validate_gdn_quantizer(quantizer, state=state)
+                if not state and self.linear_attention_config.backend == "matmul":
+                    _validate_operand_quantizer(quantizer, "gdn_w_quantizer")
+                else:
+                    validate_gdn_quantizer(quantizer, state=state)
+        self.linear_attn_sites.validate()
+        if self.linear_attn_sites.is_enabled and self.linear_attention_config.backend != "matmul":
+            raise ValueError("Additional GDN operand sites require backend='matmul'")
 
     def modelopt_post_restore(self, prefix: str = ""):
         """Validate restored quantizers before using the saved execution policy."""
@@ -95,7 +114,7 @@ class GatedDeltaNetStateQuantMixin(QuantModule):
         self.validate_linear_attention()
         quantize_state = self.gdn_state_quantizer.is_enabled and self.gdn_state_quantizer._if_quant
         quantize_w = self.gdn_w_quantizer.is_enabled
-        if not (quantize_state or quantize_w):
+        if not self.linear_attention_is_enabled:
             return gated_delta_rule(*args, **kwargs)
         if getattr(gated_delta_rule, "__name__", None) != "chunk_gated_delta_rule":
             raise NotImplementedError(
@@ -105,6 +124,16 @@ class GatedDeltaNetStateQuantMixin(QuantModule):
         chunk_size = kwargs.pop("chunk_size", self.linear_attention_config.chunk_size)
         if chunk_size != self.linear_attention_config.chunk_size:
             raise ValueError("GDN fake quantization supports only chunk_size=64")
+        if self.linear_attention_config.backend == "matmul":
+            return matmul_gdn(
+                *args,
+                sites=self.linear_attn_sites,
+                policy=self.linear_attention_config,
+                w_quantizer=self.gdn_w_quantizer,
+                state_qdq=quantize_state,
+                chunk_size=chunk_size,
+                **kwargs,
+            )
         return _state_qdq_chunk_gated_delta_rule()(
             *args,
             chunk_size=chunk_size,
