@@ -27,11 +27,13 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-import yaml
-
 import modelopt.torch.utils.distributed as dist
-from modelopt.recipe import load_recipe
-from modelopt.torch.utils.mlflow import MlflowRunLogger, drop_experiment_json, mask_tracking_uri
+from modelopt.torch.utils.mlflow import (
+    MlflowRunLogger,
+    checkpoint_run_tags,
+    resolved_recipe_texts,
+    track_run,
+)
 from modelopt.torch.utils.mlflow import add_mlflow_args as _add_mlflow_args
 from modelopt.torch.utils.mlflow import resolve_mlflow_args as _resolve_mlflow_args
 
@@ -78,45 +80,18 @@ def resolve_mlflow_args(args: argparse.Namespace, parser: argparse.ArgumentParse
     )
 
 
-def masked_for_print(args: argparse.Namespace) -> argparse.Namespace:
-    """A copy of *args* whose tracking URI cannot leak credentials into the console log.
-
-    ``print_args`` dumps the namespace verbatim, and a ``user:token@`` in ``--mlflow`` is a
-    supported form that the rest of this module masks wherever it prints or uploads the URI.
-    The uploaded artifacts are unaffected -- ``command_text`` redacts, and ``mlflow`` is not
-    logged as a param -- but a torchrun job log is routinely archived and shared.
-    """
-    return argparse.Namespace(**{**vars(args), "mlflow": mask_tracking_uri(args.mlflow)})
-
-
 def _run_inputs(args: argparse.Namespace) -> tuple[dict, dict]:
     """Params and start-time artifacts describing this PTQ run."""
     params = {k: v for k, v in vars(args).items() if k not in _NON_PARAM_ARGS}
     # The parallelism flags say how the run was laid out but not how many GPUs it took:
     # data parallelism is implicit in the launcher's world size.
     params["world_size"] = dist.size()
-    texts = {}
-    if args.recipe:
-        # The resolved recipe, not the source file: a recipe may be a directory or use
-        # $imports, and only the resolved form is self-contained.
-        resolved = load_recipe(args.recipe).model_dump(mode="json")
-        texts["recipe/resolved_recipe.yaml"] = yaml.safe_dump(resolved, sort_keys=False)
-    return params, texts
+    return params, resolved_recipe_texts(args.recipe)
 
 
 def _run_tags(args: argparse.Namespace) -> dict[str, str]:
-    """Tags shared with ``hf_ptq`` and the evaluation side, so a PTQ run and whatever is
-    later done with the checkpoint it produced can be found together on one server.
-
-    ``checkpoint_path`` is the checkpoint this run *writes*, because that is what
-    ``export_quantized_megatron_to_hf.py`` (and any QAD run) is later pointed at; the input is
-    kept separately. It is resolved because a relative path is useless as a join key.
-    """
-    return {
-        "model": Path(args.hf_model_name_or_path).name,
-        "checkpoint_path": str(Path(args.export_megatron_path).resolve()),
-        "source_checkpoint_path": args.hf_model_name_or_path,
-    }
+    """This run's shared join keys, from the arguments that name its input and output."""
+    return checkpoint_run_tags(args.hf_model_name_or_path, args.export_megatron_path)
 
 
 def _run_outputs(args: argparse.Namespace) -> dict[str, Path]:
@@ -129,10 +104,22 @@ def _run_outputs(args: argparse.Namespace) -> dict[str, Path]:
     return {"summary/quant_summary.txt": Path(args.export_megatron_path) / ".quant_summary.txt"}
 
 
+def _describe(args: argparse.Namespace) -> dict:
+    """Everything the run uploads, gathered once -- reading the recipe twice would print a
+    second "[load_recipe] loading:" line on every tracked run."""
+    params, texts = _run_inputs(args)
+    return {
+        "params": params,
+        "tags": _run_tags(args),
+        "texts": texts,
+        "files": _run_outputs(args),
+    }
+
+
 @contextmanager
 def mlflow_run(args: argparse.Namespace) -> Iterator[None]:
-    """Track this invocation for the duration of the block, and keep the checkpoint's
-    provenance pointer honest whether or not the run is tracked."""
+    """Track this invocation for the duration of the block; see
+    :func:`~modelopt.torch.utils.mlflow.track_run`."""
     logger = MlflowRunLogger(
         args.mlflow or "",
         args.mlflow_experiment,
@@ -140,26 +127,11 @@ def mlflow_run(args: argparse.Namespace) -> Iterator[None]:
         enabled=bool(args.mlflow) and dist.is_master(),
         required=args.mlflow_required,
     )
-    export_path = Path(args.export_megatron_path)
-    if not logger.enabled:
-        # Gathering the inputs re-reads the recipe, so keep it off the untracked path.
-        try:
-            yield
-        finally:
-            if args.checkpoint_exported and dist.is_master():
-                drop_experiment_json(export_path)
-        return
-    params, texts = _run_inputs(args)
-    with logger.track(
-        params=params,
-        tags=_run_tags(args),
-        texts=texts,
-        files=_run_outputs(args),
+    with track_run(
+        logger,
+        args.export_megatron_path,
+        is_main=dist.is_master(),
+        exported=lambda: args.checkpoint_exported,
+        describe=lambda: _describe(args),
     ):
-        try:
-            yield
-        finally:
-            # Only a completed save may claim the checkpoint the pointer sits next to:
-            # --export_megatron_path exists from print_quant_summary onwards, and may hold a
-            # checkpoint from an earlier attempt whose weights this run never wrote.
-            logger.log_experiment_json(export_path if args.checkpoint_exported else None)
+        yield

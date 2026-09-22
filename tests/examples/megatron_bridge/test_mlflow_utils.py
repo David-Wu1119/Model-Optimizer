@@ -32,6 +32,8 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
+from modelopt.torch.utils.mlflow import masked_args
+
 _EXAMPLE_DIR = Path(__file__).resolve().parents[3] / "examples" / "megatron_bridge"
 _SCRIPT = _EXAMPLE_DIR / "quantize.py"
 _SPEC = importlib.util.spec_from_file_location(
@@ -194,7 +196,7 @@ def test_the_printed_arguments_mask_tracking_credentials(monkeypatch):
     creds = "https://svc:s3cret@mlflow.example.com"  # trufflehog:ignore
     args = _parse(monkeypatch, "--mlflow", creds, "--quant_cfg", "nvfp4")
 
-    printed = mlflow_utils.masked_for_print(args)
+    printed = masked_args(args)
 
     assert args.mlflow == creds  # the live namespace still reaches the client
     assert printed.mlflow == "https://***@mlflow.example.com"
@@ -386,13 +388,14 @@ def test_quantize_script_wires_the_tracking():
     source = _SCRIPT.read_text()
 
     imported = next(line for line in source.splitlines() if line.startswith("from mlflow_utils "))
-    for name in ("add_mlflow_args", "masked_for_print", "mlflow_run", "resolve_mlflow_args"):
+    for name in ("add_mlflow_args", "mlflow_run", "resolve_mlflow_args"):
         assert name in imported
+    assert "from modelopt.torch.utils.mlflow import masked_args" in source
     assert "add_mlflow_args(parser)" in source
     assert "resolve_mlflow_args(args, parser)" in source
     assert "with mlflow_run(args):" in source
     # The namespace reaches print_args masked, so a user:token@ URI stays out of the job log.
-    assert "print_args(masked_for_print(args))" in source
+    assert "print_args(masked_args(args))" in source
     # The provenance pointer is gated on the save having happened.
     assert "args.checkpoint_exported = False" in source
     assert "args.checkpoint_exported = True" in source

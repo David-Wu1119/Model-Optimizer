@@ -35,14 +35,17 @@ import tempfile
 import time
 import traceback
 import warnings
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import urlparse
 
+import yaml
+
 import modelopt
+from modelopt.recipe import load_recipe
 from modelopt.torch.utils.logging import TeeStream
 
 __all__ = [
@@ -50,13 +53,17 @@ __all__ = [
     "TRACKING_URI_ENV",
     "MlflowRunLogger",
     "add_mlflow_args",
+    "checkpoint_run_tags",
     "command_text",
     "current_user",
     "default_experiment_name",
     "drop_experiment_json",
     "mask_tracking_uri",
+    "masked_args",
     "resolve_mlflow_args",
     "resolve_tracking_uri",
+    "resolved_recipe_texts",
+    "track_run",
     "validate_tracking_uri",
 ]
 
@@ -751,3 +758,80 @@ def drop_experiment_json(checkpoint_dir: Path | str) -> None:
         stale.unlink(missing_ok=True)
     except OSError as e:
         print(f"[mlflow] WARNING: could not remove stale {stale}: {e}")
+
+
+def masked_args(args: argparse.Namespace, attr: str = "mlflow") -> argparse.Namespace:
+    """A copy of *args* whose tracking URI cannot leak credentials into a printed namespace.
+
+    For a script that echoes its parsed arguments: a ``user:token@`` in the URI is a supported
+    form that this module masks wherever it prints or uploads one, and a job log is routinely
+    archived. Uploaded artifacts are unaffected -- :func:`command_text` redacts, and the URI
+    is not worth logging as a param.
+    """
+    return argparse.Namespace(**{**vars(args), attr: mask_tracking_uri(getattr(args, attr, None))})
+
+
+def checkpoint_run_tags(source_model: str, checkpoint_dir: Path | str) -> dict[str, str]:
+    """Tags a quantization run and whatever is later done with the checkpoint it wrote.
+
+    Shared so the two can be found together on one tracking server. ``checkpoint_path`` is
+    the checkpoint the run *writes*, because that is what an export or an evaluation is later
+    pointed at (NEL takes ``deployment.checkpoint_path``); the input is kept separately. It is
+    resolved because a relative path is useless as a join key.
+    """
+    return {
+        "model": Path(source_model).name,
+        "checkpoint_path": str(Path(checkpoint_dir).resolve()),
+        "source_checkpoint_path": source_model,
+    }
+
+
+def resolved_recipe_texts(recipe: str | None) -> dict[str, str]:
+    r"""``{artifact path: content}`` for *recipe*, or ``{}`` when the run used none.
+
+    The resolved recipe, not the source file: a recipe may be a directory or use ``$import``\ s,
+    and only the resolved form stands alone.
+    """
+    if not recipe:
+        return {}
+    resolved = load_recipe(recipe).model_dump(mode="json")
+    return {"recipe/resolved_recipe.yaml": yaml.safe_dump(resolved, sort_keys=False)}
+
+
+@contextmanager
+def track_run(
+    logger: MlflowRunLogger,
+    checkpoint_dir: Path | str,
+    is_main: bool,
+    exported: Callable[[], bool],
+    describe: Callable[[], Mapping[str, Any]] | None = None,
+) -> Iterator[MlflowRunLogger]:
+    """Track a checkpoint-producing run, keeping its provenance pointer honest either way.
+
+    *logger* is inert unless tracking was configured *and* this is the rank that records it,
+    so the caller needs no branching. *checkpoint_dir* is where the run writes its checkpoint
+    and *is_main* gates writes every rank would otherwise race on. *exported* is read on the
+    way out, not on the way in: only a completed export may claim the checkpoint the pointer
+    sits next to, since the directory usually exists before the weights do.
+
+    *describe* returns the keyword arguments for :meth:`MlflowRunLogger.track` (``params``,
+    ``tags``, ``texts``, ``files``) and is called only when the run is tracked, so an
+    untracked run does not pay for gathering them -- re-reading a recipe, say.
+
+    Example:
+        >>> with track_run(logger, args.export_path, is_main, lambda: args.exported, describe):
+        ...     quantize_and_export(args)
+    """
+    path = Path(checkpoint_dir)
+    if not logger.enabled:
+        try:
+            yield logger
+        finally:
+            if exported() and is_main:
+                drop_experiment_json(path)
+        return
+    with logger.track(**(describe() if describe is not None else {})):
+        try:
+            yield logger
+        finally:
+            logger.log_experiment_json(path if exported() else None)

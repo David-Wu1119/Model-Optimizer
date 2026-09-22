@@ -31,7 +31,6 @@ from typing import Any
 
 import torch
 import transformers
-import yaml
 from accelerate import infer_auto_device_map, init_empty_weights
 from accelerate.utils import get_max_memory
 from safetensors import safe_open
@@ -45,7 +44,6 @@ from transformers import (
     ProcessorMixin,
 )
 
-from modelopt.recipe import load_recipe
 from modelopt.torch.export.model_utils import is_multimodal_model
 from modelopt.torch.export.plugins.hf_checkpoint_utils import copy_non_safetensor_files_from_ckpt
 
@@ -55,7 +53,13 @@ except ImportError:
     snapshot_download = None
 
 from modelopt.torch.utils import distributed as dist_utils
-from modelopt.torch.utils.mlflow import EXPERIMENT_JSON, MlflowRunLogger, drop_experiment_json
+from modelopt.torch.utils.mlflow import (
+    EXPERIMENT_JSON,
+    MlflowRunLogger,
+    checkpoint_run_tags,
+    resolved_recipe_texts,
+    track_run,
+)
 from modelopt.torch.utils.mlflow import add_mlflow_args as _add_mlflow_args
 from modelopt.torch.utils.mlflow import resolve_mlflow_args as _resolve_mlflow_args
 
@@ -1343,13 +1347,7 @@ def _mlflow_run_inputs(args: argparse.Namespace) -> tuple[dict, dict]:
     params = {k: v for k, v in vars(args).items() if k not in _MLFLOW_NON_PARAM_ARGS}
     # dist_state is an object, so record the one field worth searching on.
     params["world_size"] = args.dist_state.world_size
-    texts = {}
-    if args.recipe:
-        # The resolved recipe, not the source file: a recipe may be a directory or use
-        # $imports, and only the resolved form is self-contained.
-        resolved = load_recipe(args.recipe).model_dump(mode="json")
-        texts["recipe/resolved_recipe.yaml"] = yaml.safe_dump(resolved, sort_keys=False)
-    return params, texts
+    return params, resolved_recipe_texts(args.recipe)
 
 
 def _mlflow_logger(args: argparse.Namespace) -> MlflowRunLogger:
@@ -1363,57 +1361,35 @@ def _mlflow_logger(args: argparse.Namespace) -> MlflowRunLogger:
     )
 
 
+def _mlflow_describe(args: argparse.Namespace) -> dict:
+    """Everything the run uploads, gathered once -- reading the recipe twice would print a
+    second "[load_recipe] loading:" line on every tracked run."""
+    params, texts = _mlflow_run_inputs(args)
+    return {
+        "params": params,
+        "tags": _mlflow_run_tags(args),
+        "texts": texts,
+        "files": _mlflow_run_outputs(args),
+    }
+
+
 @contextmanager
 def mlflow_run(args: argparse.Namespace) -> Iterator[None]:
-    """Track this invocation for the duration of the block, and keep the checkpoint's
-    provenance pointer honest whether or not the run is tracked."""
-    logger = _mlflow_logger(args)
-    export_path = Path(args.export_path)
-    if not logger.enabled:
-        # Gathering the inputs re-reads the recipe, so keep it off the untracked path.
-        try:
-            yield
-        finally:
-            _drop_inherited_experiment_json(args, export_path)
-        return
-    params, texts = _mlflow_run_inputs(args)
-    with logger.track(
-        params=params,
-        tags=_mlflow_run_tags(args),
-        texts=texts,
-        files=_mlflow_run_outputs(args),
+    """Track this invocation for the duration of the block; see
+    :func:`~modelopt.torch.utils.mlflow.track_run`."""
+    with track_run(
+        _mlflow_logger(args),
+        args.export_path,
+        is_main=args.dist_state.is_main,
+        exported=lambda: args.checkpoint_exported,
+        describe=lambda: _mlflow_describe(args),
     ):
-        try:
-            yield
-        finally:
-            # Only a completed export may claim the checkpoint next to the pointer:
-            # --export_path existing proves nothing, since print_quant_summary creates it
-            # before quantization and it may hold a checkpoint from an earlier attempt.
-            logger.log_experiment_json(export_path if args.checkpoint_exported else None)
-
-
-def _drop_inherited_experiment_json(args: argparse.Namespace, export_path: Path) -> None:
-    """Drop a pointer an untracked export would otherwise inherit; see
-    :func:`~modelopt.torch.utils.mlflow.drop_experiment_json`."""
-    if not args.checkpoint_exported or not args.dist_state.is_main:
-        return
-    drop_experiment_json(export_path)
+        yield
 
 
 def _mlflow_run_tags(args: argparse.Namespace) -> dict[str, str]:
-    """Tags shared with the evaluation side, so a PTQ run and the evaluations of the
-    checkpoint it produced can be found together on one tracking server.
-
-    ``checkpoint_path`` is the checkpoint this run *writes*, because that is what an
-    evaluation is later pointed at (NEL takes ``deployment.checkpoint_path``); the input is
-    kept separately. It is resolved because ``--export_path`` defaults to a relative path,
-    which is useless as a join key.
-    """
-    return {
-        "model": Path(args.pyt_ckpt_path).name,
-        "checkpoint_path": str(Path(args.export_path).resolve()),
-        "source_checkpoint_path": args.pyt_ckpt_path,
-    }
+    """This run's shared join keys, from the arguments that name its input and output."""
+    return checkpoint_run_tags(args.pyt_ckpt_path, args.export_path)
 
 
 def _mlflow_run_outputs(args: argparse.Namespace) -> dict[str, Path]:

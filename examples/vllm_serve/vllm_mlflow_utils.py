@@ -43,13 +43,13 @@ from urllib.parse import urlparse
 import yaml
 
 import modelopt.torch.quantization as mtq
-from modelopt.recipe import load_recipe
 from modelopt.torch.utils.mlflow import (
     TRACKING_URI_ENV,
     MlflowRunLogger,
     command_text,
     default_experiment_name,
     resolve_tracking_uri,
+    resolved_recipe_texts,
 )
 from modelopt.torch.utils.mlflow import add_mlflow_args as _add_mlflow_args
 
@@ -283,12 +283,7 @@ class FakeQuantMlflowTracker:
         texts = {}
         if command := os.environ.get(COMMAND_ENV):
             texts["command.txt"] = command
-        if recipe_path := self._quant_config.get("recipe_path"):
-            # The resolved recipe, not the source file: a recipe may be a directory or use
-            # $imports, and only the resolved form stands alone.
-            texts["recipe/resolved_recipe.yaml"] = _dump_yaml(
-                load_recipe(recipe_path).model_dump(mode="json")
-            )
+        texts.update(resolved_recipe_texts(self._quant_config.get("recipe_path")))
         return texts
 
 

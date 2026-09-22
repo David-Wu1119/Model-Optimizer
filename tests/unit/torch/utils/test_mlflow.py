@@ -23,6 +23,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import yaml
 
 import modelopt
 from modelopt.torch.utils.logging import TeeStream
@@ -32,11 +33,15 @@ from modelopt.torch.utils.mlflow import (
     _git_sha,
     _redact_argv,
     add_mlflow_args,
+    checkpoint_run_tags,
     command_text,
     default_experiment_name,
     drop_experiment_json,
     mask_tracking_uri,
+    masked_args,
     resolve_mlflow_args,
+    resolved_recipe_texts,
+    track_run,
     validate_tracking_uri,
 )
 
@@ -964,3 +969,124 @@ def test_dropping_the_pointer_is_idempotent(tmp_path):
     drop_experiment_json(tmp_path)  # nothing left to remove, and no error
 
     assert not (tmp_path / EXPERIMENT_JSON).exists()
+
+
+# --- the pieces every checkpoint-producing run shares -----------------------------------
+
+
+def test_checkpoint_run_tags_name_what_the_run_writes(tmp_path):
+    """An export or an evaluation is pointed at the checkpoint the run produced, so tagging
+    the input instead would never join the two."""
+    tags = checkpoint_run_tags("/models/Qwen3-0.6B", tmp_path / "out")
+
+    assert tags == {
+        "model": "Qwen3-0.6B",
+        "checkpoint_path": str(tmp_path / "out"),
+        "source_checkpoint_path": "/models/Qwen3-0.6B",
+    }
+
+
+def test_checkpoint_run_tags_resolve_a_relative_path(monkeypatch, tmp_path):
+    """Export paths commonly default to a relative one, which is useless as a join key."""
+    monkeypatch.chdir(tmp_path)
+
+    assert Path(checkpoint_run_tags("m", "exported_model")["checkpoint_path"]).is_absolute()
+
+
+def test_resolved_recipe_texts_carry_a_self_contained_recipe():
+    texts = resolved_recipe_texts("general/ptq/nvfp4_default-kv_fp8_cast")
+
+    recipe = yaml.safe_load(texts["recipe/resolved_recipe.yaml"])
+    assert recipe["metadata"]["recipe_type"] == "ptq"
+    assert recipe["quantize"]["quant_cfg"]  # $imports expanded, so it stands alone
+
+
+@pytest.mark.parametrize("recipe", [None, ""], ids=["unset", "empty"])
+def test_resolved_recipe_texts_are_empty_without_a_recipe(recipe):
+    assert resolved_recipe_texts(recipe) == {}
+
+
+def test_masked_args_masks_the_uri_and_nothing_else():
+    args = argparse.Namespace(mlflow=CREDS_URI, export_path="/out", calib_size=512)
+
+    printed = masked_args(args)
+
+    assert printed.mlflow == "https://***@mlflow.example.com"
+    assert (printed.export_path, printed.calib_size) == ("/out", 512)
+    assert args.mlflow == CREDS_URI  # the caller's namespace is untouched
+
+
+def _tracked_logger(**kwargs):
+    return _logger(**kwargs)
+
+
+@pytest.mark.parametrize(
+    ("exported", "is_main", "survives"),
+    [(True, True, False), (True, False, True), (False, True, True)],
+    ids=["exported-main-drops", "exported-other-rank-leaves", "not-exported-leaves"],
+)
+def test_untracked_run_clears_only_what_it_replaced(tmp_path, exported, is_main, survives):
+    """The pointer is dropped exactly when this rank wrote a fresh checkpoint over it."""
+    stale = tmp_path / EXPERIMENT_JSON
+    stale.write_text('{"run_id": "an-earlier-run"}')
+    logger = MlflowRunLogger(URI, "e", enabled=False)
+
+    with track_run(logger, tmp_path, is_main=is_main, exported=lambda: exported):
+        pass
+
+    assert stale.exists() is survives
+
+
+def test_untracked_run_does_not_gather_what_it_will_not_upload(tmp_path):
+    """Gathering can re-read a recipe, which an untracked run must not pay for."""
+    calls = []
+    logger = MlflowRunLogger(URI, "e", enabled=False)
+
+    with track_run(
+        logger,
+        tmp_path,
+        is_main=True,
+        exported=lambda: False,
+        describe=lambda: calls.append(1) or {},
+    ):
+        pass
+
+    assert calls == []
+
+
+def test_tracked_run_records_the_pointer_and_closes(fake_mlflow, tmp_path):
+    with track_run(
+        _logger(),
+        tmp_path,
+        is_main=True,
+        exported=lambda: True,
+        describe=lambda: {"params": {"model": "m"}},
+    ):
+        pass
+
+    assert json.loads((tmp_path / EXPERIMENT_JSON).read_text())["run_id"] == "deadbeef"
+    assert fake_mlflow.params["model"] == "m"
+    assert fake_mlflow.status == "FINISHED"
+
+
+def test_exported_is_read_on_the_way_out(fake_mlflow, tmp_path):
+    """The flag is flipped by the work inside the block, so reading it up front would
+    record the state before the checkpoint existed."""
+    state = {"exported": False}
+
+    with track_run(_logger(), tmp_path, is_main=True, exported=lambda: state["exported"]):
+        state["exported"] = True
+
+    assert (tmp_path / EXPERIMENT_JSON).exists()
+
+
+def test_a_failed_tracked_run_leaves_no_pointer_but_is_still_recorded(fake_mlflow, tmp_path):
+    with (
+        pytest.raises(RuntimeError),
+        track_run(_logger(), tmp_path, is_main=True, exported=lambda: False),
+    ):
+        raise RuntimeError("calibration blew up")
+
+    assert not (tmp_path / EXPERIMENT_JSON).exists()
+    assert json.loads(fake_mlflow.texts["experiment.json"])["run_id"] == "deadbeef"
+    assert fake_mlflow.status == "FAILED"
