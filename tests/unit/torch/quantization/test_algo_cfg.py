@@ -205,6 +205,19 @@ def test_fallback_algorithm_excludes_scopes_claimed_by_entries(quantized):
     assert not (fallback_quantizers & mlp_quantizers)
 
 
+def test_per_stage_settings_are_rejected_at_plan_level():
+    from modelopt.torch.quantization.config import CalibrationPlanConfig
+
+    entry = [{"module_name": "*", "cfg": ["max"]}]
+    CalibrationPlanConfig(algo_cfg=entry)  # plain plan is fine
+
+    # `layerwise` and `moe_calib_experts_ratio` are inherited from QuantizeAlgorithmConfig but
+    # only ever read per stage, so accepting them on the plan would silently drop them.
+    for ignored in ({"layerwise": {"enable": True}}, {"moe_calib_experts_ratio": 0.5}):
+        with pytest.raises(ValidationError, match="never read"):
+            CalibrationPlanConfig(algo_cfg=entry, **ignored)
+
+
 # ---------------------------------------------------------------------------- validation
 
 REJECTIONS = [

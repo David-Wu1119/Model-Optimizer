@@ -1660,6 +1660,24 @@ class CalibrationPlanConfig(QuantizeAlgorithmConfig):
         title="Model-wide fallback algorithm for targets no ``algo_cfg`` entry matches.",
     )
 
+    @model_validator(mode="after")
+    def _reject_per_stage_settings_at_plan_level(self):
+        """Inherited per-algorithm settings mean nothing on the plan; they are per stage."""
+        ignored = [
+            name
+            for name, value in (
+                ("layerwise", self.layerwise != LayerwiseConfig()),
+                ("moe_calib_experts_ratio", self.moe_calib_experts_ratio is not None),
+            )
+            if value
+        ]
+        if ignored:
+            raise ValueError(
+                f"{sorted(ignored)} is inherited by the calibration plan but never read: each "
+                "stage carries its own. Set it inside the stage instead, e.g. "
+                "cfg: [{'method': 'local_hessian', 'layerwise': {'enable': True}}]."
+            )
+        return self
 
 
 class QuantizeConfig(ModeloptBaseConfig):
@@ -1686,7 +1704,6 @@ class QuantizeConfig(ModeloptBaseConfig):
         "Targets not matched by any entry fall back to the model-wide ``algorithm``. When "
         "omitted, ``algorithm`` alone is used and behaviour is unchanged.",
     )
-
 
     effective_bits: float | None = ModeloptField(
         default=None,
