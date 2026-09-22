@@ -126,7 +126,7 @@ For a vision-language model (e.g. Qwen3.5-VL, Gemma3-VL), `quantize.py` automati
 
 ### Tracking runs with MLflow
 
-Set MLflow's own `MLFLOW_TRACKING_URI`, or pass `--mlflow <tracking-uri>`, to record a `quantize.py` run on an MLflow server:
+Set MLflow's own `MLFLOW_TRACKING_URI`, or pass `--mlflow <tracking-uri>`, to record a run on an MLflow server. All three scripts that write a checkpoint take the flag — `quantize.py`, [`distill.py`](#quantization-aware-distillation-qad) and `export_quantized_megatron_to_hf.py` — and share one experiment-name convention, so a PTQ run, the QAD run that refines its checkpoint and the export that deploys it can be found together:
 
 ```bash
 torchrun --nproc_per_node 2 quantize.py \
@@ -139,7 +139,12 @@ torchrun --nproc_per_node 2 quantize.py \
 
 The run opens *before* the model loads, so a bad URI fails in seconds rather than after a full calibration. Only the master rank uploads: the invocation, every argument as a searchable param, the resolved recipe, that rank's log and the quantizer summary — plus `.experiment.json` written into `--export_megatron_path` once the checkpoint is saved, so a checkpoint on disk names the run that produced it. A failed run is still recorded, with its traceback.
 
-`--mlflow_experiment` defaults to `$USER/megatron_bridge_quantize/<model basename>-<recipe name, or --quant_cfg>`, and `--mlflow_run_name` to the UTC start time. Authentication uses MLflow's own environment variables. See the [`hf_ptq` README](../hf_ptq/README.md#tracking-runs-with-mlflow) for the full artifact list and the `$MLFLOW_TRACKING_URI` semantics.
+`--mlflow_experiment` defaults to `$USER/<script>/<model basename>-<variant>` — the variant being the recipe name for `quantize.py`, the student checkpoint for `distill.py`, and the Megatron checkpoint for the export — and `--mlflow_run_name` to the UTC start time. Authentication uses MLflow's own environment variables. See the [`hf_ptq` README](../hf_ptq/README.md#tracking-runs-with-mlflow) for the full artifact list and the `$MLFLOW_TRACKING_URI` semantics.
+
+QAD works differently under the hood: `distill.py` is a training loop, and Megatron-Bridge already logs to MLflow from inside it, so the flag configures Megatron-Bridge's own `LoggerConfig` rather than opening a second run. That gets you per-iteration training metrics and the full resolved config as params — things a wrapper cannot see — alongside the existing `--wandb_project` and TensorBoard logging. Two differences worth knowing:
+
+- Uploading checkpoints as MLflow artifacts is **off** by default here, where Megatron-Bridge turns it on: a QAD checkpoint is tens to hundreds of GB and would be pushed over HTTP on every save. Pass `--mlflow_log_checkpoints` to opt in.
+- Megatron-Bridge owns the run on the last rank, so the run is created there rather than on rank 0.
 
 ## Distillation
 

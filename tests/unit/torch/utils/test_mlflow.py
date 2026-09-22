@@ -37,6 +37,7 @@ from modelopt.torch.utils.mlflow import (
     command_text,
     default_experiment_name,
     drop_experiment_json,
+    log_active_run_experiment_json,
     mask_tracking_uri,
     masked_args,
     resolve_mlflow_args,
@@ -1090,3 +1091,67 @@ def test_a_failed_tracked_run_leaves_no_pointer_but_is_still_recorded(fake_mlflo
     assert not (tmp_path / EXPERIMENT_JSON).exists()
     assert json.loads(fake_mlflow.texts["experiment.json"])["run_id"] == "deadbeef"
     assert fake_mlflow.status == "FAILED"
+
+
+# --- pointing a checkpoint at a run this process did not open ---------------------------
+
+
+class ForeignMlflow:
+    """A run opened by another library -- Megatron-Bridge's LoggerConfig, in practice."""
+
+    def __init__(self, run=True):
+        self.texts = {}
+        self._run = (
+            SimpleNamespace(
+                info=SimpleNamespace(experiment_id="9", run_id="cafe", run_name="qad-1")
+            )
+            if run
+            else None
+        )
+
+    def active_run(self):
+        return self._run
+
+    def get_tracking_uri(self):
+        return f"{URI}/"
+
+    def get_experiment(self, experiment_id):
+        return SimpleNamespace(name="tester/megatron_bridge_distill/Qwen3-0.6B-nvfp4")
+
+    def log_text(self, text, artifact_file):
+        self.texts[artifact_file] = text
+
+
+def test_the_active_run_can_claim_a_checkpoint(monkeypatch, tmp_path):
+    """A training job's run is opened by Megatron-Bridge, but its checkpoint still has to
+    name it, in the same format a run we opened ourselves would write."""
+    fake = ForeignMlflow()
+    monkeypatch.setitem(sys.modules, "mlflow", fake)
+
+    log_active_run_experiment_json(tmp_path)
+
+    written = json.loads((tmp_path / EXPERIMENT_JSON).read_text())
+    assert written["run_id"] == "cafe"
+    assert written["run_name"] == "qad-1"
+    assert written["experiment_name"] == "tester/megatron_bridge_distill/Qwen3-0.6B-nvfp4"
+    assert written["run_url"] == f"{URI}/#/experiments/9/runs/cafe"
+    assert json.loads(fake.texts["experiment.json"]) == written
+
+
+def test_no_active_run_writes_nothing(monkeypatch, tmp_path):
+    """An untracked training job reaches the same call and must not leave a file."""
+    monkeypatch.setitem(sys.modules, "mlflow", ForeignMlflow(run=False))
+
+    log_active_run_experiment_json(tmp_path)
+
+    assert not (tmp_path / EXPERIMENT_JSON).exists()
+
+
+def test_recording_the_active_run_never_fails_the_job(monkeypatch, tmp_path, capsys):
+    """The training already finished; losing the pointer must not take it down."""
+    monkeypatch.setitem(sys.modules, "mlflow", None)  # import mlflow -> ImportError
+
+    log_active_run_experiment_json(tmp_path)
+
+    assert "WARNING" in capsys.readouterr().out
+    assert not (tmp_path / EXPERIMENT_JSON).exists()

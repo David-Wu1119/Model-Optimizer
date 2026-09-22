@@ -63,7 +63,7 @@ import gc
 
 import torch
 from megatron.bridge.models.hf_pretrained.utils import is_safe_repo
-from mlflow_utils import add_mlflow_args, mlflow_run, resolve_mlflow_args
+from mlflow_utils import QUANTIZE, add_mlflow_args, mlflow_run, resolve_mlflow_args
 from transformers import AutoProcessor
 
 import modelopt.torch.quantization as mtq
@@ -224,10 +224,10 @@ def get_args() -> argparse.Namespace:
         help="Skip the post-quantization generation sanity check.",
     )
 
-    add_mlflow_args(parser)
+    add_mlflow_args(parser, QUANTIZE)
 
     args = parser.parse_args()
-    resolve_mlflow_args(args, parser)
+    resolve_mlflow_args(args, parser, QUANTIZE)
 
     print_args(masked_args(args))
 
@@ -475,7 +475,7 @@ if __name__ == "__main__":
     try:
         # Entered inside the try: opening the run is fatal by design, and the peers of a rank
         # that exits without dist.abort() stay blocked on the first collective.
-        with mlflow_run(args):
+        with mlflow_run(args, QUANTIZE):
             main(args)
     except BaseException:
         dist.abort()  # peers may be stuck in a collective this rank will never reach

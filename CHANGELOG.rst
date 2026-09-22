@@ -21,7 +21,7 @@ Changelog
 *Megatron Framework (M-LM / M-Bridge)*
 
 - Add an end-to-end W4A4 NVFP4 PTQ and QAD tutorial for Qwen3.6-35B-A3B also covering evaluation and vLLM throughput benchmarking. See `examples/megatron_bridge/tutorials/Qwen3.6-35B-A3B/README.md <https://github.com/NVIDIA/Model-Optimizer/tree/main/examples/megatron_bridge/tutorials/Qwen3.6-35B-A3B/>`_ for details.
-- Add ``--mlflow <tracking-uri>`` to ``examples/megatron_bridge/quantize.py`` (MLflow's own ``MLFLOW_TRACKING_URI`` is honoured too), so a Megatron-Bridge PTQ run records the invocation, every argument as a searchable param, the resolved recipe, the master rank's log and the quantizer summary, and writes ``.experiment.json`` into ``--export_megatron_path``. The experiment defaults to ``$USER/megatron_bridge_quantize/<model basename>-<recipe name or --quant_cfg>`` and can be overridden with ``--mlflow_experiment`` / ``--mlflow_run_name``.
+- Add ``--mlflow <tracking-uri>`` to the ``examples/megatron_bridge`` scripts that write a checkpoint -- ``quantize.py``, ``distill.py`` and ``export_quantized_megatron_to_hf.py`` (MLflow's own ``MLFLOW_TRACKING_URI`` is honoured too). Each run records the invocation, its arguments as searchable params and its log, and writes ``.experiment.json`` into the checkpoint it produced, so a PTQ run, the QAD run that refines it and the export that deploys it can be traced to one another. ``distill.py`` configures Megatron-Bridge's own MLflow logging instead of opening a second run, so training metrics are recorded too; checkpoint artifact upload stays off unless ``--mlflow_log_checkpoints`` is passed.
 
 *Misc*
 

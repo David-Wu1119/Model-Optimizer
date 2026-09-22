@@ -57,6 +57,7 @@ __all__ = [
     "current_user",
     "default_experiment_name",
     "drop_experiment_json",
+    "log_active_run_experiment_json",
     "mask_tracking_uri",
     "masked_args",
     "resolve_mlflow_args",
@@ -741,6 +742,42 @@ def resolve_mlflow_args(
         args.mlflow_experiment = args.mlflow_experiment or default_experiment_name(
             tool, model, variant
         )
+
+
+def log_active_run_experiment_json(checkpoint_dir: Path | str) -> None:
+    """Record MLflow's *currently active* run as the producer of a checkpoint.
+
+    For a caller whose run is opened and owned by something else -- Megatron-Bridge's
+    ``LoggerConfig`` opens the run for a training job, on its last rank -- so the checkpoint
+    still names the run that produced it, in the format
+    :meth:`MlflowRunLogger.log_experiment_json` writes. Call it from the rank that owns the
+    run, once the checkpoint is on disk.
+
+    A no-op when ``mlflow`` is absent or no run is active, so an untracked job needs no
+    branching. Failures are warnings: losing the pointer must not fail a finished job.
+    """
+    try:
+        import mlflow
+
+        run = mlflow.active_run()
+        if run is None:
+            return
+        uri = _redact(mlflow.get_tracking_uri()).rstrip("/")
+        experiment_id = str(run.info.experiment_id)
+        run_id = str(run.info.run_id)
+        info = {
+            "tracking_uri": uri,
+            "experiment_name": mlflow.get_experiment(experiment_id).name,
+            "experiment_id": experiment_id,
+            "run_id": run_id,
+            "run_name": getattr(run.info, "run_name", None) or "",
+            "run_url": f"{uri}/#/experiments/{experiment_id}/runs/{run_id}",
+        }
+        text = json.dumps(info, indent=2) + "\n"
+        mlflow.log_text(text, EXPERIMENT_JSON.removeprefix("."))
+        (Path(checkpoint_dir) / EXPERIMENT_JSON).write_text(text)
+    except Exception as e:
+        print(f"[mlflow] WARNING: could not record the active run in {checkpoint_dir}: {e}")
 
 
 def drop_experiment_json(checkpoint_dir: Path | str) -> None:

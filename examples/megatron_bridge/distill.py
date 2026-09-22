@@ -50,12 +50,20 @@ from megatron.bridge.utils.vocab_utils import calculate_padded_vocab_size
 from megatron.core.datasets.utils import get_blend_from_list
 from megatron.core.distributed import DistributedDataParallelConfig
 from megatron.core.utils import unwrap_model
+from mlflow_utils import (
+    DISTILL,
+    add_mlflow_args,
+    logger_kwargs,
+    record_checkpoint_provenance,
+    resolve_mlflow_args,
+)
 from transformers import AutoTokenizer
 
 import modelopt.torch.distill as mtd
 import modelopt.torch.utils.distributed as dist
 from modelopt.torch.opt.conversion import ModeloptStateManager
 from modelopt.torch.utils import print_args, print_rank_0, warn_rank_0
+from modelopt.torch.utils.mlflow import masked_args
 from modelopt.torch.utils.plugins.mbridge import (
     is_vlm_config,
     load_modelopt_megatron_checkpoint,
@@ -287,7 +295,10 @@ def get_args():
         "heterogeneous (Puzzletron/NAS) student's weights. Defaults to --student_hf_path, which is "
         "correct for homogeneous students; unused for VLMs.",
     )
+    add_mlflow_args(parser, DISTILL)
+
     args = parser.parse_args()
+    resolve_mlflow_args(args, parser, DISTILL)
 
     # Sanity checks
     if not args.sft and not args.use_mock_data and not args.data_paths:
@@ -323,7 +334,7 @@ def get_args():
 
     _check_shared_vocabulary(args)
 
-    print_args(args)
+    print_args(masked_args(args))
 
     return args
 
@@ -571,6 +582,9 @@ def main(args: argparse.Namespace):
             wandb_project=args.wandb_project,
             wandb_entity=args.wandb_entity,  # optional
             wandb_exp_name=args.wandb_exp_name,
+            # MLflow logging, which Megatron-Bridge drives from inside the training loop so
+            # the metrics and the resolved config are recorded too.
+            **logger_kwargs(args),
         ),
         tokenizer=(
             # SFT reads raw text, so it needs the model's real tokenizer; the pretraining path
@@ -612,6 +626,7 @@ def main(args: argparse.Namespace):
         print_rank_0("\nValidation-only run done! Skipped training and checkpoint export.\n")
         return
 
+    record_checkpoint_provenance(args)
     print_rank_0(
         f"\nDistillation done! Saved checkpoint to {checkpoint_dir}"
         " in megatron distributed checkpoint format.\n"

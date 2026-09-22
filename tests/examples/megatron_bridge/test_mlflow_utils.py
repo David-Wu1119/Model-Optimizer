@@ -36,6 +36,8 @@ from modelopt.torch.utils.mlflow import masked_args
 
 _EXAMPLE_DIR = Path(__file__).resolve().parents[3] / "examples" / "megatron_bridge"
 _SCRIPT = _EXAMPLE_DIR / "quantize.py"
+_DISTILL_SCRIPT = _EXAMPLE_DIR / "distill.py"
+_EXPORT_SCRIPT = _EXAMPLE_DIR / "export_quantized_megatron_to_hf.py"
 _SPEC = importlib.util.spec_from_file_location(
     "megatron_bridge_mlflow_utils", _EXAMPLE_DIR / "mlflow_utils.py"
 )
@@ -111,10 +113,10 @@ def _parse(monkeypatch, *argv):
     parser.add_argument("--recipe", default=None)
     parser.add_argument("--quant_cfg", default=None)
     parser.add_argument("--tp_size", type=int, default=1)
-    mlflow_utils.add_mlflow_args(parser)
+    mlflow_utils.add_mlflow_args(parser, mlflow_utils.QUANTIZE)
 
     args = parser.parse_args(list(argv))
-    mlflow_utils.resolve_mlflow_args(args, parser)
+    mlflow_utils.resolve_mlflow_args(args, parser, mlflow_utils.QUANTIZE)
     args.checkpoint_exported = False
     return args
 
@@ -211,7 +213,7 @@ def test_params_track_every_cli_argument(monkeypatch):
     monkeypatch.setattr(mlflow_utils.dist, "size", lambda: 8)
     args = _parse(monkeypatch, "--quant_cfg", "nvfp4", "--mlflow", URI, "--tp_size", "2")
 
-    params, _ = mlflow_utils._run_inputs(args)
+    params, _ = mlflow_utils._run_inputs(args, mlflow_utils.QUANTIZE)
 
     assert params["hf_model_name_or_path"] == "/models/Qwen3-0.6B"
     assert params["tp_size"] == 2
@@ -222,13 +224,13 @@ def test_params_track_every_cli_argument(monkeypatch):
         params
     )
     args.some_future_flag = "future"
-    assert mlflow_utils._run_inputs(args)[0]["some_future_flag"] == "future"
+    assert mlflow_utils._run_inputs(args, mlflow_utils.QUANTIZE)[0]["some_future_flag"] == "future"
 
 
 def test_run_inputs_carry_the_resolved_recipe(monkeypatch):
     args = _parse(monkeypatch, "--recipe", RECIPE, "--mlflow", URI)
 
-    _, texts = mlflow_utils._run_inputs(args)
+    _, texts = mlflow_utils._run_inputs(args, mlflow_utils.QUANTIZE)
 
     # $imports are expanded, so the artifact stands alone.
     recipe = yaml.safe_load(texts["recipe/resolved_recipe.yaml"])
@@ -239,7 +241,7 @@ def test_run_inputs_carry_the_resolved_recipe(monkeypatch):
 def test_run_inputs_omit_the_recipe_when_unused(monkeypatch):
     args = _parse(monkeypatch, "--quant_cfg", "nvfp4", "--mlflow", URI)
 
-    assert mlflow_utils._run_inputs(args)[1] == {}
+    assert mlflow_utils._run_inputs(args, mlflow_utils.QUANTIZE)[1] == {}
 
 
 def test_run_tags_identify_the_produced_checkpoint(monkeypatch, tmp_path):
@@ -248,7 +250,7 @@ def test_run_tags_identify_the_produced_checkpoint(monkeypatch, tmp_path):
     export = tmp_path / "Qwen3-0.6B-nvfp4-megatron"
     args = _tracked(monkeypatch, export)
 
-    assert mlflow_utils._run_tags(args) == {
+    assert mlflow_utils._describe(args, mlflow_utils.QUANTIZE)["tags"] == {
         "model": "Qwen3-0.6B",
         "checkpoint_path": str(export),
         "source_checkpoint_path": "/models/Qwen3-0.6B",
@@ -259,13 +261,15 @@ def test_the_checkpoint_tag_is_absolute(monkeypatch):
     """A relative --export_megatron_path is useless as a join key."""
     args = _tracked(monkeypatch, "megatron_ckpt")
 
-    assert Path(mlflow_utils._run_tags(args)["checkpoint_path"]).is_absolute()
+    assert Path(
+        mlflow_utils._describe(args, mlflow_utils.QUANTIZE)["tags"]["checkpoint_path"]
+    ).is_absolute()
 
 
 def test_run_outputs_name_the_summary(monkeypatch):
     args = _tracked(monkeypatch, "/tmp/megatron_ckpt")
 
-    files = mlflow_utils._run_outputs(args)
+    files = mlflow_utils.QUANTIZE.outputs(args)
 
     assert files["summary/quant_summary.txt"] == Path("/tmp/megatron_ckpt/.quant_summary.txt")
 
@@ -280,7 +284,7 @@ def test_non_master_ranks_do_not_open_a_run(monkeypatch, tmp_path):
     calls = []
     monkeypatch.setattr(mlflow_utils, "_run_inputs", lambda a: calls.append(a) or ({}, {}))
 
-    with mlflow_utils.mlflow_run(args):
+    with mlflow_utils.mlflow_run(args, mlflow_utils.QUANTIZE):
         args.checkpoint_exported = True
 
     assert calls == []
@@ -294,7 +298,7 @@ def test_untracked_runs_do_not_gather_inputs(monkeypatch, tmp_path):
     calls = []
     monkeypatch.setattr(mlflow_utils, "_run_inputs", lambda a: calls.append(a) or ({}, {}))
 
-    with mlflow_utils.mlflow_run(args):
+    with mlflow_utils.mlflow_run(args, mlflow_utils.QUANTIZE):
         pass
 
     assert calls == []
@@ -306,7 +310,7 @@ def test_experiment_json_lands_in_the_checkpoint_and_on_the_server(
     """The tags point run -> checkpoint; this file points checkpoint -> run."""
     args = _tracked(monkeypatch, tmp_path, "--quant_cfg", "nvfp4")
 
-    with mlflow_utils.mlflow_run(args):
+    with mlflow_utils.mlflow_run(args, mlflow_utils.QUANTIZE):
         args.checkpoint_exported = True  # stand in for bridge.save_megatron_model
 
     written = json.loads((tmp_path / ".experiment.json").read_text())
@@ -323,7 +327,7 @@ def test_a_failed_save_writes_no_pointer_but_still_records_the_run(
     """The checkpoint was never written, so nothing on disk may claim this run produced it."""
     args = _tracked(monkeypatch, tmp_path, "--quant_cfg", "nvfp4")
 
-    with pytest.raises(RuntimeError), mlflow_utils.mlflow_run(args):
+    with pytest.raises(RuntimeError), mlflow_utils.mlflow_run(args, mlflow_utils.QUANTIZE):
         raise RuntimeError("calibration blew up")
 
     assert not (tmp_path / ".experiment.json").exists()
@@ -338,7 +342,7 @@ def test_an_untracked_export_drops_an_inherited_pointer(monkeypatch, tmp_path):
     inherited.write_text('{"run_id": "stale"}')
     args = _parse(monkeypatch, "--export_megatron_path", str(tmp_path))
 
-    with mlflow_utils.mlflow_run(args):
+    with mlflow_utils.mlflow_run(args, mlflow_utils.QUANTIZE):
         args.checkpoint_exported = True
 
     assert not inherited.exists()
@@ -360,7 +364,7 @@ def test_a_completed_export_clears_the_pointer_when_optional_tracking_fails(
     inherited.write_text('{"run_id": "from-an-earlier-run"}')
     args = _parse(monkeypatch, "--export_megatron_path", str(tmp_path), "--quant_cfg", "nvfp4")
 
-    with mlflow_utils.mlflow_run(args):
+    with mlflow_utils.mlflow_run(args, mlflow_utils.QUANTIZE):
         args.checkpoint_exported = True
 
     assert args.mlflow_required is False
@@ -373,7 +377,7 @@ def test_a_failed_untracked_run_leaves_the_directory_alone(monkeypatch, tmp_path
     inherited.write_text('{"run_id": "stale"}')
     args = _parse(monkeypatch, "--export_megatron_path", str(tmp_path))
 
-    with pytest.raises(RuntimeError), mlflow_utils.mlflow_run(args):
+    with pytest.raises(RuntimeError), mlflow_utils.mlflow_run(args, mlflow_utils.QUANTIZE):
         raise RuntimeError("calibration blew up")
 
     assert inherited.exists()
@@ -388,12 +392,12 @@ def test_quantize_script_wires_the_tracking():
     source = _SCRIPT.read_text()
 
     imported = next(line for line in source.splitlines() if line.startswith("from mlflow_utils "))
-    for name in ("add_mlflow_args", "mlflow_run", "resolve_mlflow_args"):
+    for name in ("QUANTIZE", "add_mlflow_args", "mlflow_run", "resolve_mlflow_args"):
         assert name in imported
     assert "from modelopt.torch.utils.mlflow import masked_args" in source
-    assert "add_mlflow_args(parser)" in source
-    assert "resolve_mlflow_args(args, parser)" in source
-    assert "with mlflow_run(args):" in source
+    assert "add_mlflow_args(parser, QUANTIZE)" in source
+    assert "resolve_mlflow_args(args, parser, QUANTIZE)" in source
+    assert "with mlflow_run(args, QUANTIZE):" in source
     # The namespace reaches print_args masked, so a user:token@ URI stays out of the job log.
     assert "print_args(masked_args(args))" in source
     # The provenance pointer is gated on the save having happened.
@@ -401,4 +405,151 @@ def test_quantize_script_wires_the_tracking():
     assert "args.checkpoint_exported = True" in source
     # Every args attribute the tracking reads is a flag quantize.py registers.
     for flag in ("--hf_model_name_or_path", "--export_megatron_path", "--recipe", "--quant_cfg"):
+        assert f'"{flag}"' in source
+
+
+# --- the export tool: same shape as quantize, different arguments -----------------------
+
+
+def _parse_export(*argv):
+    """The parser side of ``export_quantized_megatron_to_hf.py``."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--hf_model_name_or_path", default="/models/Qwen3-0.6B")
+    parser.add_argument("--megatron_path", default="/ckpts/Qwen3-0.6B-nvfp4-megatron/")
+    parser.add_argument("--export_unified_hf_path", default="/tmp/hf_out")
+    mlflow_utils.add_mlflow_args(parser, mlflow_utils.EXPORT)
+    args = parser.parse_args(list(argv))
+    mlflow_utils.resolve_mlflow_args(args, parser, mlflow_utils.EXPORT)
+    args.checkpoint_exported = False
+    return args
+
+
+def test_the_export_experiment_is_named_for_the_checkpoint_being_exported():
+    """A trailing slash must not make the variant empty."""
+    args = _parse_export("--mlflow", URI)
+
+    assert args.mlflow_experiment == (
+        "tester/megatron_bridge_export/Qwen3-0.6B-Qwen3-0.6B-nvfp4-megatron"
+    )
+
+
+def test_the_export_tags_point_at_the_deployable_checkpoint(tmp_path):
+    """The HF checkpoint is what a deployment is pointed at, so it is the join key."""
+    export = tmp_path / "hf_out"
+    args = _parse_export("--mlflow", URI, "--export_unified_hf_path", str(export))
+
+    tags = mlflow_utils._describe(args, mlflow_utils.EXPORT)["tags"]
+
+    assert tags["checkpoint_path"] == str(export)
+    assert tags["model"] == "Qwen3-0.6B"
+
+
+def test_an_export_run_points_the_hf_checkpoint_at_itself(fake_mlflow, tmp_path):
+    args = _parse_export("--mlflow", URI, "--export_unified_hf_path", str(tmp_path))
+
+    with mlflow_utils.mlflow_run(args, mlflow_utils.EXPORT):
+        args.checkpoint_exported = True
+
+    assert json.loads((tmp_path / ".experiment.json").read_text())["run_id"] == "deadbeef"
+    assert fake_mlflow.status == "FINISHED"
+
+
+# --- the distill tool: Megatron-Bridge owns the run -------------------------------------
+
+
+def _parse_distill(*argv):
+    """The parser side of ``distill.py``."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--student_hf_path", default="/models/Qwen3-0.6B")
+    parser.add_argument("--student_megatron_path", default="/ckpts/Qwen3-0.6B-nvfp4-megatron")
+    parser.add_argument("--teacher_hf_path", default="/models/Qwen3-0.6B")
+    parser.add_argument("--output_dir", default="/runs/qad")
+    mlflow_utils.add_mlflow_args(parser, mlflow_utils.DISTILL)
+    args = parser.parse_args(list(argv))
+    mlflow_utils.resolve_mlflow_args(args, parser, mlflow_utils.DISTILL)
+    return args
+
+
+def test_distill_hands_its_settings_to_megatron_bridge():
+    """The training loop logs the metrics, so the run is configured rather than opened."""
+    args = _parse_distill("--mlflow", URI, "--mlflow_run_name", "qad-1")
+
+    kwargs = mlflow_utils.logger_kwargs(args)
+
+    assert kwargs["mlflow_tracking_uri"] == URI
+    assert kwargs["mlflow_experiment"] == (
+        "tester/megatron_bridge_distill/Qwen3-0.6B-Qwen3-0.6B-nvfp4-megatron"
+    )
+    assert kwargs["mlflow_run_name"] == "qad-1"
+    # The same join keys the PTQ run wrote, pointing at what this run produces.
+    assert kwargs["mlflow_tags"]["checkpoint_path"] == "/runs/qad/checkpoints"
+    assert kwargs["mlflow_tags"]["source_checkpoint_path"] == "/models/Qwen3-0.6B"
+
+
+def test_an_untracked_distill_hands_megatron_bridge_nothing():
+    """The mlflow_* LoggerConfig fields only exist in Megatron-Bridge 0.6+, so an untracked
+    run must not pass them at all -- it would break on an older one for no reason."""
+    assert mlflow_utils.logger_kwargs(_parse_distill()) == {}
+
+
+@pytest.mark.parametrize(("argv", "expected"), [([], False), (["--mlflow_log_checkpoints"], True)])
+def test_checkpoint_artifacts_are_off_unless_asked_for(argv, expected):
+    """Megatron-Bridge defaults this on, which pushes every saved checkpoint over HTTP."""
+    args = _parse_distill("--mlflow", URI, *argv)
+
+    assert mlflow_utils.logger_kwargs(args)["mlflow_log_artifacts"] is expected
+
+
+def test_the_distill_pointer_is_written_by_the_rank_that_owns_the_run(monkeypatch):
+    """Megatron-Bridge opens its run on the last rank, not the first."""
+    calls = []
+    monkeypatch.setattr(mlflow_utils, "log_active_run_experiment_json", calls.append)
+    args = _parse_distill("--mlflow", URI)
+
+    monkeypatch.setattr(mlflow_utils.dist, "is_last_process", lambda: False)
+    mlflow_utils.record_checkpoint_provenance(args)
+    assert calls == []
+
+    monkeypatch.setattr(mlflow_utils.dist, "is_last_process", lambda: True)
+    mlflow_utils.record_checkpoint_provenance(args)
+    assert calls == ["/runs/qad/checkpoints"]
+
+
+def test_an_untracked_distill_writes_no_pointer(monkeypatch):
+    calls = []
+    monkeypatch.setattr(mlflow_utils, "log_active_run_experiment_json", calls.append)
+    monkeypatch.setattr(mlflow_utils.dist, "is_last_process", lambda: True)
+
+    mlflow_utils.record_checkpoint_provenance(_parse_distill())
+
+    assert calls == []
+
+
+# --- the seams with the two other scripts -----------------------------------------------
+
+
+def test_distill_script_wires_the_tracking():
+    source = _DISTILL_SCRIPT.read_text()
+
+    assert "add_mlflow_args(parser, DISTILL)" in source
+    assert "resolve_mlflow_args(args, parser, DISTILL)" in source
+    # Handed to Megatron-Bridge's logger rather than opening a competing run.
+    assert "**logger_kwargs(args)," in source
+    assert "mlflow_run" not in source
+    assert "record_checkpoint_provenance(args)" in source
+    assert "print_args(masked_args(args))" in source
+    for flag in ("--student_hf_path", "--student_megatron_path", "--output_dir"):
+        assert f'"{flag}"' in source
+
+
+def test_export_script_wires_the_tracking():
+    source = _EXPORT_SCRIPT.read_text()
+
+    assert "add_mlflow_args(parser, EXPORT)" in source
+    assert "resolve_mlflow_args(args, parser, EXPORT)" in source
+    assert "with mlflow_run(args, EXPORT):" in source
+    assert "args.checkpoint_exported = False" in source
+    assert "args.checkpoint_exported = True" in source
+    assert "print_args(masked_args(args))" in source
+    for flag in ("--hf_model_name_or_path", "--megatron_path", "--export_unified_hf_path"):
         assert f'"{flag}"' in source
