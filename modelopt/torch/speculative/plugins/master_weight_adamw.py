@@ -72,6 +72,7 @@ class MasterWeightAdamW(torch.optim.AdamW):
                     "compatible with fp32 master weights. Use foreach instead."
                 )
             amsgrad = group.get("amsgrad", False)
+            capturable = group.get("capturable", False)
             downcast, targets, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, steps = (
                 [],
                 [],
@@ -102,7 +103,14 @@ class MasterWeightAdamW(torch.optim.AdamW):
                         # is not a mixture the functional `adamw()` accepts.
                         state[key] = state[key].float()
                 if "step" not in state:
-                    state["step"] = torch.zeros((), dtype=torch.float32)
+                    # torch keeps this on the parameter's device under `capturable`, and the
+                    # multi-tensor update asserts on it; everywhere else a CPU scalar is the
+                    # documented fast path.
+                    state["step"] = torch.zeros(
+                        (), dtype=torch.float32, device=p.device if capturable else "cpu"
+                    )
+                elif capturable and state["step"].device != p.device:
+                    state["step"] = state["step"].to(p.device)
                 target = state["master"] if needs_master else p
                 if needs_master:
                     downcast.append((p, target))
@@ -133,7 +141,7 @@ class MasterWeightAdamW(torch.optim.AdamW):
                 eps=group["eps"],
                 maximize=group.get("maximize", False),
                 foreach=group.get("foreach"),
-                capturable=group.get("capturable", False),
+                capturable=capturable,
                 differentiable=group.get("differentiable", False),
             )
             for param, master in downcast:

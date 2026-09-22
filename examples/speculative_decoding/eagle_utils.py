@@ -189,14 +189,20 @@ class EagleTrainerWithAccLog(Trainer):
         super().__init__(*args, **kwargs)
         self.lora_lr_multiplier = lora_lr_multiplier
 
-    def create_optimizer(self):
-        """Override to give LoRA parameters a higher learning rate."""
-        if self.optimizer is None and getattr(self.model, "dflash_fp32_master_weights", False):
+    def create_optimizer(self, model=None):
+        """Override to give LoRA parameters a higher learning rate.
+
+        ``model`` mirrors the base signature. The delayed-creation branch -- FSDP1, FSDP-XLA
+        and SageMaker MP -- calls this with the prepared model rather than ``self.model``,
+        and an override without the parameter is a ``TypeError`` there.
+        """
+        model = self.model if model is None else model
+        if self.optimizer is None and getattr(model, "dflash_fp32_master_weights", False):
             # Built here rather than left to HF: the flag asks for an fp32 master copy of the
             # draft, and that lives in the optimizer. `create_optimizer` below wraps its own
             # work in `if self.optimizer is None`, so setting it here skips that entirely --
             # including the decay/no-decay grouping, which is why this reproduces it.
-            cls, kwargs = self.get_optimizer_cls_and_kwargs(self.args, self.model)
+            cls, kwargs = self.get_optimizer_cls_and_kwargs(self.args, model)
             if not issubclass(cls, torch.optim.AdamW):
                 raise ValueError(
                     f"dflash_fp32_master_weights needs an AdamW-family optimizer to hold the "
@@ -216,8 +222,8 @@ class EagleTrainerWithAccLog(Trainer):
                     "dflash_fp32_master_weights: using the foreach AdamW path instead of "
                     "the fused one, which cannot hold master weights."
                 )
-            decay = self.get_decay_parameter_names(self.model)
-            named = [(n, p) for n, p in self.model.named_parameters() if p.requires_grad]
+            decay = self.get_decay_parameter_names(model)
+            named = [(n, p) for n, p in model.named_parameters() if p.requires_grad]
             self.optimizer = MasterWeightAdamW(
                 [
                     {
@@ -228,10 +234,15 @@ class EagleTrainerWithAccLog(Trainer):
                 ],
                 **{k: v for k, v in kwargs.items() if k != "weight_decay"},
             )
-        super().create_optimizer()
+        # Forwarded only when it was given: the parameter is not in every supported
+        # transformers version, and the caller that passes one is that same version.
+        if model is self.model:
+            super().create_optimizer()
+        else:
+            super().create_optimizer(model)
         if self.lora_lr_multiplier != 1.0:
             lora_ids = {
-                id(p) for n, p in self.model.named_parameters() if "lora_" in n and p.requires_grad
+                id(p) for n, p in model.named_parameters() if "lora_" in n and p.requires_grad
             }
             if lora_ids:
                 new_groups = []
