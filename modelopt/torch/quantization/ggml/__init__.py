@@ -21,5 +21,7 @@ from .iq1_s import *
 from .iq1_s import __all__ as _iq1_s_all
 from .iq2_xs import *
 from .iq2_xs import __all__ as _iq2_xs_all
+from .q8_0 import *
+from .q8_0 import __all__ as _q8_0_all
 
-__all__ = [*_iq1_s_all, *_iq2_xs_all]  # noqa: PLE0604
+__all__ = [*_iq1_s_all, *_iq2_xs_all, *_q8_0_all]  # noqa: PLE0604

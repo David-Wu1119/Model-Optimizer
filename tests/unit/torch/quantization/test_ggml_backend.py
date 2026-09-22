@@ -22,13 +22,20 @@ import modelopt.torch.quantization as mtq
 import modelopt.torch.quantization.ggml.backend as backend_module
 import modelopt.torch.quantization.ggml.iq1_s as iq1_s_module
 import modelopt.torch.quantization.ggml.iq2_xs as iq2_xs_module
+import modelopt.torch.quantization.ggml.q8_0 as q8_0_module
 from modelopt.torch.quantization.config import QuantizerAttributeConfig
 from modelopt.torch.quantization.ggml.backend import ggml_fake_quant
 from modelopt.torch.quantization.ggml.common import narrow_to_float32
 from modelopt.torch.quantization.nn import TensorQuantizer
 
+_GGML_CASES = [
+    ("iq1_s", iq1_s_module, 256),
+    ("iq2_xs", iq2_xs_module, 256),
+    ("q8_0", q8_0_module, 32),
+]
 
-@pytest.mark.parametrize("num_bits", ["iq1_s", "iq2_xs"])
+
+@pytest.mark.parametrize("num_bits", [case[0] for case in _GGML_CASES])
 def test_ggml_backend_via_quantize(num_bits):
     torch.manual_seed(1234)
     model = torch.nn.Linear(256, 2, bias=False)
@@ -64,6 +71,7 @@ def test_ggml_backend_rejects_unknown_format():
 def test_ggml_codecs_are_exported_from_quantization_package():
     assert mtq.quantize_iq1_s is iq1_s_module.quantize_iq1_s
     assert mtq.quantize_iq2_xs is iq2_xs_module.quantize_iq2_xs
+    assert mtq.quantize_q8_0 is q8_0_module.quantize_q8_0
 
 
 @pytest.mark.parametrize(
@@ -98,18 +106,17 @@ def test_ggml_backend_rejects_unknown_extra_arg():
 
 
 @pytest.mark.parametrize(
-    ("num_bits", "module", "fake_quant_name", "quantize_name"),
+    ("num_bits", "module", "block_size"),
     [
-        ("iq1_s", iq1_s_module, "iq1_s_fake_quant", "quantize_iq1_s"),
-        ("iq2_xs", iq2_xs_module, "iq2_xs_fake_quant", "quantize_iq2_xs"),
+        *[pytest.param(*case, id=case[0]) for case in _GGML_CASES],
     ],
 )
 def test_ggml_backend_caches_packed_weight_and_invalidates_on_change(
-    monkeypatch, num_bits, module, fake_quant_name, quantize_name
+    monkeypatch, num_bits, module, block_size
 ):
-    weight = torch.randn(1, 256)
+    weight = torch.randn(1, block_size)
     quantizer = SimpleNamespace(num_bits=num_bits, _quantizer_cache=None)
-    original_quantize = getattr(module, quantize_name)
+    original_quantize = getattr(module, f"quantize_{num_bits}")
     call_count = 0
 
     def counted_quantize(*args, **kwargs):
@@ -117,8 +124,8 @@ def test_ggml_backend_caches_packed_weight_and_invalidates_on_change(
         call_count += 1
         return original_quantize(*args, **kwargs)
 
-    monkeypatch.setattr(module, quantize_name, counted_quantize)
-    fake_quant = getattr(module, fake_quant_name)
+    monkeypatch.setattr(module, f"quantize_{num_bits}", counted_quantize)
+    fake_quant = getattr(module, f"{num_bits}_fake_quant")
 
     fake_quant(weight, quantizer, block_chunk_size=1)
     fake_quant(weight, quantizer, block_chunk_size=1)
@@ -149,9 +156,10 @@ def test_narrow_to_float32_matches_the_cuda_load_float_policy():
 
 
 @pytest.mark.parametrize(
-    ("num_bits", "module"), [("iq1_s", iq1_s_module), ("iq2_xs", iq2_xs_module)]
+    ("num_bits", "module", "block_size"),
+    [pytest.param(*case, id=case[0]) for case in _GGML_CASES],
 )
-def test_ggml_weight_is_packed_once_across_forwards(monkeypatch, num_bits, module):
+def test_ggml_weight_is_packed_once_across_forwards(monkeypatch, num_bits, module, block_size):
     """The packed weight is reused across forwards rather than re-encoded each time.
 
     TensorQuantizer hands the backend a fresh view of the weight on every forward, so a cache
@@ -168,7 +176,7 @@ def test_ggml_weight_is_packed_once_across_forwards(monkeypatch, num_bits, modul
 
     monkeypatch.setattr(module, packer, counting)
     quantizer = TensorQuantizer(
-        QuantizerAttributeConfig(num_bits=num_bits, block_sizes={-1: 256}, backend="ggml")
+        QuantizerAttributeConfig(num_bits=num_bits, block_sizes={-1: block_size}, backend="ggml")
     )
     weight = torch.randn(4, 256)
 
@@ -176,14 +184,17 @@ def test_ggml_weight_is_packed_once_across_forwards(monkeypatch, num_bits, modul
         for _ in range(5):
             quantizer(weight)
 
-    assert calls == [(4, 256)], f"expected one pack, got {len(calls)}"
+    assert calls == [(weight.numel() // block_size, block_size)], (
+        f"expected one pack, got {len(calls)}"
+    )
 
 
 @pytest.mark.parametrize(
-    ("num_bits", "module"), [("iq1_s", iq1_s_module), ("iq2_xs", iq2_xs_module)]
+    ("num_bits", "module", "block_size"),
+    [pytest.param(*case, id=case[0]) for case in _GGML_CASES],
 )
 def test_ggml_decode_chunk_is_sized_independently_of_the_encode_chunk(
-    monkeypatch, num_bits, module
+    monkeypatch, num_bits, module, block_size
 ):
     """The decode runs every forward; the encode runs once and holds the big temporaries.
 
@@ -199,7 +210,7 @@ def test_ggml_decode_chunk_is_sized_independently_of_the_encode_chunk(
 
     monkeypatch.setattr(module, f"dequantize_{num_bits}", recording)
     quantizer = TensorQuantizer(
-        QuantizerAttributeConfig(num_bits=num_bits, block_sizes={-1: 256}, backend="ggml")
+        QuantizerAttributeConfig(num_bits=num_bits, block_sizes={-1: block_size}, backend="ggml")
     )
     quantizer(torch.randn(4, 256))
 
@@ -208,9 +219,10 @@ def test_ggml_decode_chunk_is_sized_independently_of_the_encode_chunk(
 
 
 @pytest.mark.parametrize(
-    ("num_bits", "module"), [("iq1_s", iq1_s_module), ("iq2_xs", iq2_xs_module)]
+    ("num_bits", "module", "_block_size"),
+    [pytest.param(*case, id=case[0]) for case in _GGML_CASES],
 )
-def test_ggml_decode_is_invariant_to_chunk_size(num_bits, module):
+def test_ggml_decode_is_invariant_to_chunk_size(num_bits, module, _block_size):
     """Chunking the decode is a memory bound, not a numerical choice."""
     torch.manual_seed(0)
     weight = torch.randn(3, 1024, dtype=torch.bfloat16)
