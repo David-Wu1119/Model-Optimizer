@@ -45,13 +45,17 @@ mlflow
       :nosignatures:
    
       add_mlflow_args
+      checkpoint_run_tags
       command_text
       current_user
       default_experiment_name
       drop_experiment_json
       mask_tracking_uri
+      masked_args
       resolve_mlflow_args
       resolve_tracking_uri
+      resolved_recipe_texts
+      track_run
       validate_tracking_uri
    
    
